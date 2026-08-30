@@ -44,12 +44,13 @@ jobs:
         run: npm install -g @commitlint/cli @commitlint/config-conventional
 
       - name: Write commitlint config
-        run: echo "module.exports = { extends: ['@commitlint/config-conventional'] };" > commitlint.config.cjs
+        run: |
+          echo "module.exports = { extends: ['@commitlint/config-conventional'] };" > commitlint.config.cjs
 
       - name: Commitlint pull request
         if: github.event_name == 'pull_request'
         run: commitlint --from "origin/${{ github.base_ref }}" --to HEAD --verbose
 
       - name: Commitlint push
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000'
         run: commitlint --from "${{ github.event.before }}" --to "${{ github.sha }}" --verbose
