@@ -1,0 +1,118 @@
+{
+  "skill_name": "driving-agent-sessions",
+  "_note": "Decision/application evals — each is a scenario where the agent must produce the correct approach for driving (or NOT driving) a real interactive agent session over tmux OR cmux. No live tmux/cmux is run in the harness; responses are analysis/decisions graded from the transcript against expectations. Evals 1-6 cover the tmux/universal discipline (re-capture-before-acting, the dispatch-vs-interactive-drive boundary, codex's update/model interstitials + pinned model, agy's --print unreliability + folder-trust, bracketed-paste + screen-stability polling). Evals 7-10 cover cmux: 7 surface-choice (pick cmux for a watch/co-drive scenario), 8 the in-instance 'broken pipe' trust gotcha, 9 the confirm-landed vanished-paste timing bug, 10 the cmux command mapping. The cmux discriminators are facts only the skill carries (cmux command names, in-instance trust, confirm-landed). No fixtures: scenarios are self-contained.",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I just wrote a CLAUDE.md and a memory namespace for the repo at ~/Projects/foo and I want to be sure a brand-new Claude session there actually loads them before I trust a fresh session instead of babysitting this one. How do I verify this for real — not by assuming, and not just by having a subagent read the files?",
+      "expected_output": "Drive a REAL cold session (not a file read, not a subagent) over tmux, started in ~/Projects/foo so its context auto-loads; probe it to answer ONLY from already-loaded context (no tools, no file reads) so the test exercises the loading mechanism; re-capture before acting (TUI render lag); poll for completion by screen stability. A subagent reading files is only a cheap proxy.",
+      "expectations": [
+        "Says to drive a REAL, persistent cold session (a fresh `claude` started in the repo dir) rather than assuming, reading files, or only using a subagent — because only a real session exercises the auto-load mechanism",
+        "Frames the probe as 'answer only from already-loaded context — no tools, no file reads', explaining this tests whether the bootstrap auto-loaded (not whether the agent can read on demand)",
+        "Uses tmux to drive it (send-keys / capture-pane) and stresses re-capturing the screen before acting because the TUI redraws on a lag",
+        "Mentions polling for the reply by screen stability rather than reading the first frame / using a fixed wait",
+        "References this being the live-test engine for a bootstrap validation, not a generic chat"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "I'm scripting tmux to send a question to an already-running Claude Code TUI and read its answer back. It's flaky: sometimes I capture the pane right after sending and my text isn't there, and sometimes I grab what looks like the answer but it's the previous one. How should I structure the send-and-read so it's reliable?",
+      "expected_output": "The TUI redraws on a lag, so never act on the first capture: re-capture until the screen reflects your action. Send the text with send-keys -l as a literal, confirm it landed, THEN a separate send-keys Enter to submit, and re-capture to confirm submission. Detect the answer is complete by polling screen stability (spinner animates while thinking, screen stabilizes when done) rather than reading immediately.",
+      "expectations": [
+        "Identifies the root cause as TUI render lag — the screen does not reflect a keystroke immediately, so the first capture is stale",
+        "Says to re-capture before acting (capture again until your text / the new state actually appears)",
+        "Separates typing from submitting: send the literal text first, confirm it landed, then a SEPARATE Enter to submit",
+        "Detects completion by polling screen stability (successive captures stop changing) instead of reading the first frame or a fixed sleep",
+        "Does not propose reading the answer as if the TUI were a request/response API"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "I need codex to implement a ~200-line refactor spread across three files in one of my repos. My plan is to open codex in a tmux pane and drive it interactively, watching it type. Is that the right way to hand this off?",
+      "expected_output": "No — that's a fire-and-forget CODING dispatch, not a case for interactive tmux driving. Use coding-preflight.sh + coding-dispatch.sh: deterministic full-auto with a git snapshot -> validate -> hard-revert net, a completion marker file as the done-signal, under an external timeout. Reserve interactive tmux driving for observing/validating/steering a live session, not batch code you'll review from a diff.",
+      "expectations": [
+        "Says interactive tmux driving is the WRONG tool here — this is fire-and-forget coding dispatch",
+        "Routes it to the deterministic dispatch scripts (coding-preflight.sh / coding-dispatch.sh) instead of hand-driving a TUI",
+        "Mentions the safety net around dispatch: git snapshot/hard-revert on failure and/or a completion-marker file as the done-signal, run under an external timeout",
+        "Articulates the boundary: interactive driving is for observing/validating/steering a live session; code you'll review from a diff goes through dispatch"
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "I'm starting a fresh codex session over tmux in a repo under a directory my codex config already trusts, so I can watch it work a task. Before I can type anything it's sitting on some screen — first an 'Update available' prompt, then something offering a newer model. How do I get it to a ready prompt on my normal model without messing up my setup?",
+      "expected_output": "These are codex boot interstitials. On the update prompt, arrow to Skip — do NOT take option 1 (it runs npm install -g and updates). On the model offer, pick 'Use existing model' to keep the model pinned in ~/.codex/config.toml; don't pin -m/-c. If your config blanket-trusts a parent directory, a repo under it gets no per-project trust prompt (one outside it would prompt).",
+      "expectations": [
+        "Recognizes these as codex first-run boot interstitials (update offer, then model offer) standing between launch and a ready prompt",
+        "Says to Skip the update — explicitly NOT taking the option that runs the npm global install/update",
+        "Says to choose 'Use existing model' to keep the pinned codex model, and to not override the model via -m/-c flags",
+        "Notes that a parent directory blanket-trusted in ~/.codex/config.toml suppresses the per-project trust prompt, unlike a repo outside it"
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "I tried `agy --print \"<my question>\"` in a script to get a one-shot answer out of Antigravity and it just hangs — once it sat there way past my timeout. When I open agy interactively instead it asks me something about trusting the folder first. What's the reliable way to get answers out of agy programmatically vs interactively?",
+      "expected_output": "agy --print is unreliable — it hangs, and a stale shared agy session can swallow new --print calls (kill leftover [a]gy procs). Don't rely on its own timeout. For interactive use, drive the real TUI over tmux: first answer the folder-trust prompt (Enter = Yes), then the > input, with the same re-capture render-lag discipline. If you must use --print at all, wrap it in an EXTERNAL `timeout -k` (separate process/own clock) and treat a non-zero/timeout exit as failure.",
+      "expectations": [
+        "States that `agy --print` is unreliable — it hangs, and its own --print-timeout is not a real bound (a stale shared session can swallow calls)",
+        "Recommends driving the interactive agy TUI over tmux for interactive work instead of --print",
+        "Notes the folder-trust prompt comes first (Enter confirms Yes) before the ready input, and the same re-capture/render-lag discipline applies",
+        "Says any --print/headless peer call must be bounded by an EXTERNAL `timeout -k` (separate process), not the tool's own flag; mentions killing leftover agy processes when calls stall"
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "My tmux automation pastes a multi-paragraph prompt into a Claude TUI but it submits when it's only halfway in — each newline seems to fire it early. And after it does run, I don't know when it's finished so I can scrape the answer. How do I send a multi-line prompt and know when the reply is done?",
+      "expected_output": "Each Enter submits in a TUI, so a multi-line prompt sent as raw send-keys fires on the first newline. Use bracketed paste (tmux set-buffer then paste-buffer -p) so the newlines land as text, then a SINGLE send-keys Enter to submit. Detect completion by polling screen stability — successive capture-pane hashes stop changing when the spinner stops — using a background/standalone poll because a foreground sleep is blocked in some agent harnesses.",
+      "expectations": [
+        "Identifies that each newline/Enter submits in a TUI, so the multi-line prompt is being submitted early",
+        "Recommends bracketed paste (tmux set-buffer + paste-buffer -p) to inject the multi-line text without premature submission, then ONE Enter to submit",
+        "Detects completion by polling screen stability (successive captures stop changing) rather than a fixed wait or reading immediately",
+        "Notes the poll should be background/standalone because a foreground sleep is blocked in some agent harnesses"
+      ]
+    },
+    {
+      "id": 7,
+      "prompt": "I'm about to drive a fresh claude session to work through a tricky migration, and my teammate wants to watch it happen live and jump in to steer if it goes sideways. I'd normally just use tmux for this. Is there a better way given they want to watch and be able to take over?",
+      "expected_output": "Use cmux instead of tmux: a cmux workspace is visible in the GUI so the teammate can watch and take over the session instantly, whereas a tmux session is detached (they'd have to tmux attach). Drive it with cmux send / cmux send-key / cmux read-screen, and surface progress to the watcher with cmux notify / set-status / set-progress / trigger-flash (watch-me-drive). Caveat: you must drive from a process inside the live cmux instance.",
+      "expectations": [
+        "Recommends cmux over tmux specifically because the human wants to WATCH and TAKE OVER — a cmux workspace is visible/attachable in the GUI, while tmux is detached and needs `tmux attach`",
+        "Names the cmux driving commands (cmux send / cmux send-key / cmux read-screen) rather than only tmux send-keys/capture-pane",
+        "Mentions surfacing progress to the watcher via cmux notify / set-status / set-progress / trigger-flash (the watch-me-drive UX)",
+        "Notes the driver must run inside the live cmux instance (in-instance trust), or that `cmux ping` -> PONG confirms reachability"
+      ]
+    },
+    {
+      "id": 8,
+      "prompt": "I'm scripting `cmux send` and `cmux read-screen` to drive an agent in a workspace, but every cmux command fails with 'Failed to write to socket (Broken pipe)'. The cmux app is definitely running and I can see my workspaces on screen. What's wrong, and how do I fix it?",
+      "expected_output": "The cmux control socket grants access only to processes running INSIDE the live cmux instance (peer-credential / in-instance trust under socketControlMode automation/cmuxOnly). A broken pipe on an existing socket means you're driving from outside it — a plain terminal, another app, or a session orphaned from a quit/restarted cmux instance (stale env). Fix: run (or resume) the driving session in a terminal inside the running cmux; `cmux ping` returning PONG confirms you're trusted. It is NOT a missing socket, wrong path, or password problem.",
+      "expectations": [
+        "Identifies the cause as driving from OUTSIDE the live cmux instance — the socket only trusts in-instance / peer-credential clients — NOT a missing socket, wrong socket path, or password",
+        "Calls out the common trigger: a session orphaned from a quit/restarted cmux instance (stale env), or a plain terminal / other app",
+        "Fix: run or resume the driving session in a terminal INSIDE the running cmux instance",
+        "Mentions `cmux ping` returning PONG as the check that the client is trusted/reachable"
+      ]
+    },
+    {
+      "id": 9,
+      "prompt": "My script launches claude in a cmux workspace, waits for the screen to stop changing, then does cmux set-buffer + cmux paste-buffer with my prompt and a cmux send-key Enter. But claude often just sits at an empty prompt and never answers, like the prompt never arrived. It's intermittent. What's happening and how do I make it reliable?",
+      "expected_output": "Screen-stability 'settled' when claude's welcome box went static, but the input becomes interactive a beat LATER — so the paste fires into a not-yet-ready input and vanishes (intermittent because it's a timing race). Fix: after paste-buffer, read-screen and confirm a fragment of the prompt is actually visible in the input before send-key Enter; re-paste if it's not there. This is the re-capture discipline applied to the paste itself — don't submit until you've verified it landed.",
+      "expectations": [
+        "Identifies that the screen-stability poll reported 'settled' before the TUI input was actually interactive — the welcome screen goes static a beat before the input accepts text, so the paste lands in a not-ready input and is lost",
+        "Explains the intermittency as that timing race (sometimes the input is ready by paste time, sometimes not)",
+        "Fix: after paste-buffer, read-screen and CONFIRM a fragment of the prompt is visible in the input BEFORE submitting; re-paste if it's not present",
+        "Frames it as the re-capture discipline applied to the paste (verify it landed before send-key Enter), not just a longer fixed sleep"
+      ]
+    },
+    {
+      "id": 10,
+      "prompt": "I know how to drive an agent over tmux — new-session, send-keys, capture-pane, set-buffer/paste-buffer. I want to do the same thing in cmux so the session shows up in the app window. What are the cmux equivalents, including spawning the agent and sending a multi-line prompt?",
+      "expected_output": "cmux workspace create --command <agent> --cwd <dir> --name <n> --focus true (it returns 'OK workspace:N' — parse that ref for subsequent --workspace calls); drive with cmux send '<text>' + cmux send-key Enter; read with cmux read-screen (--scrollback for full history); send a multi-line prompt with cmux set-buffer + cmux paste-buffer as one block, then a single send-key Enter; poll completion by read-screen stability (same as tmux); optionally cmux notify / set-status to keep the watcher informed.",
+      "expectations": [
+        "Maps tmux new-session to `cmux workspace create --command <agent> --cwd <dir>` and notes it returns a `workspace:N` ref used for subsequent `--workspace` calls",
+        "Maps send-keys/Enter to `cmux send` + `cmux send-key Enter`, and capture-pane to `cmux read-screen` (with --scrollback for full history)",
+        "Maps multi-line set-buffer/paste-buffer to `cmux set-buffer` + `cmux paste-buffer` (delivered as one block), then a single send-key Enter",
+        "Detects completion by polling read-screen stability (same technique as the tmux path), and/or mentions the watch-me-drive notify/set-status as a cmux-only bonus"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,756 @@
+#!/usr/bin/env bash
+# dispatch-worker — abstraction for dispatching a worker brief to a runtime.
+# Default runtime: codex (token-frugal).
+# Runtimes: codex | agy | workflow | a2a-endpoint.
+#
+# Usage:
+#   dispatch-worker --brief <path> [--runtime codex|agy|workflow|a2a-endpoint] [--shape mechanical|parallel-with-claude-reasoning] [--recall-project <slug>] [--no-recall]
+#   dispatch-worker --help
+#
+# Reads the brief from a file (the orchestrator writes it). Picks the runtime
+# implementation based on --runtime (or $RUNTIME env, or "codex" by default).
+# Each runtime impl is a bash function; adding a new runtime is one function.
+#
+# DEP-SUBSTITUTION HAZARD: the no-network sandbox also blocks `go get`/`npm
+# install` for NEW build deps. When a build step needs a dep it can't fetch,
+# codex may SILENTLY hand-build a degraded alternative that still builds/vets/
+# tests instead of reporting a blocker (an earlier incident: the plan called for
+# a SQLite store, codex could not fetch the driver, and it shipped a JSON-file
+# store with a green build). Before delegating a dependency-bearing build step:
+#   (1) pre-fetch the deps from the network-capable caller session so they land
+#       in go.mod/go.sum FIRST;
+#   (2) forbid substitution in the brief (require STATUS: blocked, not a
+#       swapped-in design);
+#   (3) after codex returns, verify the promised deps are actually present
+#       (e.g. grep go.mod) — a green build is necessary but NOT sufficient.
+# --require-dep automates step (3); see --help.
+set -euo pipefail
+
+# Resolve through symlinks so a ~/.local/bin symlink still finds sibling helpers
+# in the real checkout bin/ (BASH_SOURCE is the symlink path otherwise).
+_src="${BASH_SOURCE[0]}"
+while [ -L "$_src" ]; do
+  _dir="$(cd -P "$(dirname "$_src")" && pwd)"
+  _src="$(readlink "$_src")"
+  case "$_src" in /*) ;; *) _src="$_dir/$_src" ;; esac
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
+RUNTIME="${RUNTIME:-codex}"
+SHAPE="mechanical"
+BRIEF=""
+CEREMONY="${CEREMONY:-0}"
+REVIEW="${REVIEW:-0}"                  # --review: read-only peer review (no edit/marker preamble)
+MODEL="${MODEL:-}"                    # --model M: agy model override; empty = smart default
+REQUIRE_DEPS=()                       # --require-dep <module>, repeatable
+MODULE_DIR="${MODULE_DIR:-.}"         # where the go.mod to verify lives
+WORKDIR="${WORKDIR:-}"                # repo root the worker edits; used to pin agy's marker path
+TIMEOUT="${TIMEOUT:-15m}"             # external wall-clock bound on a peer-agent exec
+KILL_AFTER="${KILL_AFTER:-30s}"       # SIGKILL grace after the soft timeout (timeout -k)
+MIN_REVIEW_BYTES="${DISPATCH_MIN_REVIEW_BYTES:-1200}" # measured: below the 1931B real-review floor and far above its 392B no-findings sign-off; evidence, not bytes, is the real discriminator
+REVIEW_REQUIRE_EVIDENCE="${DISPATCH_REVIEW_REQUIRE_EVIDENCE:-1}" # exactly 0 disables the labelled-finding/file:line evidence gate
+REVIEW_WT_DIR="${DISPATCH_REVIEW_WT_DIR:-}" # optional parent for isolated review worktrees; defaults beside the source repo
+RECALL_PROJECT="${RECALL_PROJECT:-}"  # deprecated no-op compatibility flag/env
+RECALL_PROJECT_EXPLICIT=0
+NO_RECALL=0
+ALLOW_DIRTY="${DISPATCH_ALLOW_DIRTY:-0}"  # --allow-dirty / DISPATCH_ALLOW_DIRTY=1: keep the warn-and-proceed dirty-tree behavior
+ENRICHED_BRIEF_FILE=""
+REVIEW_WT=""
+REVIEW_WT_PARENT=""
+REVIEW_WT_PARENT_CREATED=0
+REVIEW_SRC_TOP=""
+REVIEW_PIN_DIR=""
+REVIEW_OUTFILE_TMP=""   # set only when WE mktemp'd the review file, so only that one is removed
+
+cleanup_dispatch_worker() {
+  rm -f "$ENRICHED_BRIEF_FILE"
+  # The review itself is on STDOUT — that is the deliverable, and the documented consumer
+  # contract is to capture stdout, never this path. The REVIEW_OUTFILE= line on stderr is a
+  # convenience for a human. A caller that wants the file kept supplies REVIEW_OUTFILE
+  # itself; then it owns the path and we never delete it. Only the mktemp'd one is removed.
+  if [ -n "${REVIEW_OUTFILE_TMP:-}" ]; then
+    rm -f "$REVIEW_OUTFILE_TMP"
+  fi
+  if [ -n "${REVIEW_PIN_DIR:-}" ]; then
+    "$SCRIPT_DIR/review-pin.sh" release "$REVIEW_PIN_DIR" 2>/dev/null || true
+  fi
+  if [ -n "${REVIEW_WT:-}" ]; then
+    if [ -n "${REVIEW_SRC_TOP:-}" ]; then
+      git -C "$REVIEW_SRC_TOP" worktree remove --force "$REVIEW_WT" 2>/dev/null || true
+    fi
+    rm -rf "$REVIEW_WT"
+  fi
+  # Only reclaim a parent this invocation created; operator-owned empty dirs survive.
+  [ "${REVIEW_WT_PARENT_CREATED:-0}" = "1" ] && [ -n "${REVIEW_WT_PARENT:-}" ] && rmdir "$REVIEW_WT_PARENT" 2>/dev/null || true
+}
+trap cleanup_dispatch_worker EXIT
+
+usage() {
+  cat <<USAGE
+dispatch-worker — dispatch a worker brief to a runtime.
+
+  --brief <path>     Path to the brief (markdown). Required for actual dispatch.
+  --runtime R        codex (default, token-frugal) | agy | claude | workflow | a2a-endpoint
+                     Env-var: RUNTIME=codex (or agy|claude|workflow|a2a-endpoint). Explicit flag wins.
+                     claude: native headless one-shot ('claude -p'); --model sets the model;
+                     --ceremony auto-approves tools (--dangerously-skip-permissions) for an
+                     unattended tool-using task; bounded by the same external --timeout.
+  --shape S          mechanical (default — codex sweet spot) | parallel-with-claude-reasoning (suggests workflow)
+  --review           Read-only PEER-REVIEW mode. The brief is a reviewer persona, not an
+                     edit task; the deliverable is the review on STDOUT (redirect to a file).
+                     For agy this swaps the autonomous-EDIT preamble (implement + write
+                     _coding-result.json marker, "narration ignored") for a read-only REVIEW
+                     preamble (do not edit, no marker, stdout IS the deliverable) — the edit
+                     preamble otherwise corrupts a review by telling it its output doesn't
+                     count. For codex it keeps the read-only sandbox and skips the dep gate.
+                     Env-var: REVIEW=1. Use with --runtime agy|codex.
+                     For the agy runtime, a dirty real tree whose brief names an
+                     uncommitted/untracked path REFUSES (exit 2, path listed) before any
+                     worktree is created or the worker is launched, instead of only
+                     warning — a stderr warning alone has twice failed to stop a long
+                     review running against a tree missing the file it was briefed to
+                     review. A dirty tree whose dirty files are NOT
+                     named in the brief still only warns. See --allow-dirty to opt out.
+  --allow-dirty      Keep the old warn-and-proceed behavior even when the brief names an
+                     uncommitted/untracked path in a dirty tree (--review, agy runtime).
+                     Env-var: DISPATCH_ALLOW_DIRTY=1.
+  Review gate env:   DISPATCH_MIN_REVIEW_BYTES sets the byte backstop (default 1200).
+                     DISPATCH_REVIEW_REQUIRE_EVIDENCE=0 disables the evidence gate;
+                     only the exact value 0 disables it. DISPATCH_REVIEW_WT_DIR sets
+                     the preferred parent for isolated review worktrees.
+  --model M          Model to pass to agy (--model M). Multi-word names with spaces/parens
+                     are kept intact as a single argument. Defaults (agy only, each its own
+                     sentence so a fragment grep can't cross-attribute them): in --review
+                     mode the default is "Gemini 3.1 Pro (High)" (review-grade). In
+                     edit/coding mode the default is "Gemini 3.5 Flash (Medium)" (cheaper).
+                     An explicit --model always overrides the default. For codex, threaded
+                     as 'codex exec -m M'; unset lets codex pick its config model.
+  --ceremony         Allow the worker network + out-of-cwd writes (codex: --sandbox
+                     danger-full-access). OFF by default (codex stays read-only/no-network).
+                     Use ONLY for briefs that legitimately need git/gh network ceremony.
+  --require-dep M    Assert module M is present in go.mod AFTER the worker returns.
+                     Repeatable. Catches codex's silent dep-substitution: a green
+                     build that swapped a promised driver for a hand-built
+                     alternative FAILS this gate (exit 4) instead of being narrated
+                     past. Substring match against go.mod require lines.
+
+Dedicated exit codes (so the orchestrator can tell an environment/account block
+from a real build failure and NOT retry it as a build):
+  4   --require-dep gate failed (a promised dep is missing from go.mod).
+  5   codex rejected every model at the auth/config layer (run 'codex login' /
+      fix ~/.codex/config.toml — do NOT retry as a build).
+  6   codex hit a usage/rate limit (it can EXIT 0 on a zero-edit no-op — wait for
+      the reset shown in the output, then re-dispatch; treat as BLOCKED).
+  7   agy not authenticated (run \`agy\` to sign in) — do NOT retry as a build.
+  8   agy --review is NOT a pass: rc=0 output is below DISPATCH_MIN_REVIEW_BYTES
+      or lacks labelled-severity/file:line review evidence, OR a timeout
+      (rc=124/137) also failed on retry —
+      regardless of how many bytes the timed-out attempt wrote (a long partial is
+      still truncated, not complete). Fall back to a LOCAL reviewer.
+  124 the external --timeout bound killed a hung peer agent (treat as BLOCKED). For
+      agy --review specifically, a single 124/137 is retried once internally and only
+      surfaces as rc 8 (not a bare 124) if the retry ALSO times out; other runtimes/
+      modes still surface a bare 124 on the first timeout.
+  --module-dir D     Directory containing the go.mod to verify with --require-dep
+                     (default: \$MODULE_DIR or the current dir).
+  --workdir D        Repo root the worker edits (absolute). For the agy runtime this
+                     pins the success-marker path in the injected autonomous preamble to
+                     \$D/_coding-result.json so agy doesn't write it to a sandbox cwd the
+                     orchestrator can't find. Env-var: WORKDIR. Default: the current dir.
+  --timeout T        External wall-clock bound on a peer-agent exec (codex/agy),
+                     passed to coreutils \`timeout\` (e.g. 15m, 600s). A peer agent's
+                     OWN --print-timeout is NOT a trustworthy bound (agy 2026-05-31:
+                     hung 6.5h past a 15m setting, retry hung past 8m), so the
+                     dispatch path imposes an EXTERNAL one. A timeout kill surfaces
+                     as a blocked phase (exit 124), not a silent success.
+                     Env-var: TIMEOUT=15m. Set to \`0\` or \`none\` to disable.
+                     Grace before SIGKILL: \$KILL_AFTER (default 30s).
+  --recall-project P Deprecated no-op. Accepted for compatibility; emits a
+                     deprecation notice because recall is retired.
+  --no-recall        Deprecated no-op. Accepted for compatibility.
+  --help             Show this.
+
+Dispatch priority (the calling agent's contract):
+
+  1. Direct execution by the calling session — bounded sequential ceremony work.
+  2. codex / agy — PREFERRED for delegation (separate runtime, doesn't load
+     main session, token-frugal). default: codex
+  3. Claude dynamic workflow — ONLY when each fan-out step requires Claude
+     reasoning AND user confirms the substantial token cost.
+USAGE
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --brief)    BRIEF="${2:-}"; shift 2 ;;
+    --runtime)  RUNTIME="${2:-codex}"; shift 2 ;;
+    --shape)    SHAPE="${2:-mechanical}"; shift 2 ;;
+    --ceremony|--network) CEREMONY=1; shift ;;
+    --review)   REVIEW=1; shift ;;
+    --allow-dirty) ALLOW_DIRTY=1; shift ;;
+    --model)    MODEL="${2:-}"; shift 2 ;;
+    --require-dep) REQUIRE_DEPS+=("${2:-}"); shift 2 ;;
+    --module-dir)  MODULE_DIR="${2:-.}"; shift 2 ;;
+    --workdir)  WORKDIR="${2:-}"; shift 2 ;;
+    --timeout)  TIMEOUT="${2:-15m}"; shift 2 ;;
+    --recall-project) RECALL_PROJECT="${2:-}"; RECALL_PROJECT_EXPLICIT=1; printf 'dispatch-worker: recall is retired; the flag is accepted and ignored.\n' >&2; shift 2 ;;
+    --no-recall) NO_RECALL=1; shift ;;
+    --help|-h)  usage; exit 0 ;;
+    *)          echo "dispatch-worker: unknown arg: $1" >&2; usage; exit 2 ;;
+  esac
+done
+
+: "$RECALL_PROJECT" "$RECALL_PROJECT_EXPLICIT" "$NO_RECALL"
+
+# --require-dep is meaningless in --review mode (a read-only review never builds), and the
+# post-dispatch dep gate is skipped under review. Don't drop the flag silently — say so.
+if [ "$REVIEW" = "1" ] && [ "${#REQUIRE_DEPS[@]}" -gt 0 ]; then
+  echo "dispatch-worker: --require-dep is ignored in --review mode (a read-only review builds nothing)." >&2
+fi
+
+if [ "$REVIEW" = "1" ]; then
+  _review_pin_workdir="${WORKDIR:-$PWD}"
+  if "$SCRIPT_DIR/review-pin.sh" pin "$_review_pin_workdir" --label "peer-review"; then
+    REVIEW_PIN_DIR="$_review_pin_workdir"
+  else
+    echo "dispatch-worker: could not pin review tree — continuing unpinned" >&2
+  fi
+fi
+
+# verify_required_deps — post-dispatch gate. For each --require-dep <module>,
+# assert the module appears in the target go.mod. A green build from codex is
+# necessary but NOT sufficient: codex's no-network sandbox can't `go get` a new
+# dep and has been observed to SILENTLY substitute a hand-built alternative that
+# still builds/vets/tests (an earlier incident: it promised a SQLite store and
+# shipped a JSON-file store). This gate makes that substitution a hard failure (exit 4) so
+# a future session can't narrate a green build past a missing promised driver.
+verify_required_deps() {
+  [ "${#REQUIRE_DEPS[@]}" -eq 0 ] && return 0
+  local gomod="$MODULE_DIR/go.mod"
+  if [ ! -f "$gomod" ]; then
+    echo "dispatch-worker: --require-dep set but no go.mod at $gomod" >&2
+    return 4
+  fi
+  local missing=0 dep
+  for dep in "${REQUIRE_DEPS[@]}"; do
+    [ -n "$dep" ] || continue
+    if grep -qF "$dep" "$gomod"; then
+      echo "dispatch-worker: dep present: $dep" >&2
+    else
+      echo "dispatch-worker: MISSING promised dep '$dep' in $gomod — likely a silent dep-substitution; FAIL the phase and treat as STATUS: blocked." >&2
+      missing=1
+    fi
+  done
+  [ "$missing" -eq 0 ] || return 4
+  return 0
+}
+
+# run_with_timeout — impose an EXTERNAL wall-clock bound on a peer-agent exec.
+# NEVER trust a peer agent's own --print-timeout: agy 2026-05-31 hung 6.5h past a
+# 15m setting (and a retry hung past 8m) with 0 bytes of output. The dispatch path
+# must own the bound. Uses coreutils `timeout -k $KILL_AFTER $TIMEOUT` when present;
+# `gtimeout` on macOS-with-coreutils; degrades to a raw call (with a warning) only
+# when no timeout binary is available. A timeout kill returns 124, which the caller
+# surfaces as a blocked phase and which the post-dispatch dep gate skips (rc != 0).
+run_with_timeout() {
+  local t="$TIMEOUT" tcmd=""
+  if [ "$t" = "0" ] || [ "$t" = "none" ] || [ -z "$t" ]; then
+    "$@"; return $?
+  fi
+  if command -v timeout >/dev/null 2>&1; then
+    tcmd="timeout"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    tcmd="gtimeout"
+  else
+    echo "dispatch-worker: no 'timeout'/'gtimeout' on PATH — running peer agent UNBOUNDED (a hang will not be auto-killed; install coreutils)" >&2
+    "$@"; return $?
+  fi
+  "$tcmd" -k "$KILL_AFTER" "$t" "$@"
+  local rc=$?
+  if [ "$rc" -eq 124 ]; then
+    echo "dispatch-worker: peer agent exceeded the external $t bound and was killed — treat as a BLOCKED phase, not a result (the agent's own --print-timeout is not a trustworthy bound)" >&2
+  fi
+  return "$rc"
+}
+
+dispatch_codex() {
+  command -v codex >/dev/null || { echo "dispatch-worker: codex not on PATH" >&2; return 3; }
+  [ -f "$BRIEF" ] || { echo "dispatch-worker: --brief required + readable" >&2; return 2; }
+  # Default codex sandbox is read-only/no-network — fine for in-cwd mechanical edits.
+  # Network / cross-repo git ceremony (gh, push, clone) needs --ceremony (danger-full-access).
+  #
+  # Auth/config-rejection surfacing (rc 5): `command -v codex` only proves the binary
+  # is on PATH, not that it is AUTHENTICATED. A misconfigured ~/.codex/config.toml (bad
+  # model_provider override, stray Authorization header) or an expired ChatGPT session
+  # makes codex reject EVERY model — e.g. "not supported when using Codex with a ChatGPT
+  # account" (seen in an earlier incident) — and that failure otherwise collapses into the
+  # same generic non-zero rc as a real build failure, so the orchestrator blindly retries
+  # an environment/auth problem as if the brief were at fault. We tee codex stderr to a
+  # temp file (the user still sees it live), and on failure pattern-match the distinctive
+  # rejection: a match returns the dedicated rc 5 (distinct from the dep-gate's rc 4 and
+  # the timeout's 124) with an actionable message; anything else degrades to codex's own
+  # rc unchanged (no behavior change for ordinary failures).
+  #
+  # Usage-limit surfacing (rc 6): a SECOND environment/account condition that makes
+  # codex refuse to do real work while still EXITING 0 — the ChatGPT usage limit
+  # (an earlier incident: codex hit the limit mid-batch, exited 0, made zero
+  # edits, and only echoed the prompt). An exit-0 no-op otherwise passes as a successful
+  # fix and a future session ships an un-implemented change. We detect the limit
+  # signature in codex output (stdout is teed alongside stderr for this check) and
+  # return the dedicated rc 6 (distinct from auth rc 5, dep-gate rc 4, timeout 124)
+  # with the reset hint, so the orchestrator surfaces it as a BLOCKED phase instead
+  # of a green result. Belt-and-suspenders: even when the message doesn't match, an
+  # edit brief that returns rc 0 with a ZERO worktree diff is itself a blocker — the
+  # orchestrator should assert `git -C <worktree> status --porcelain` is non-empty.
+  local sandbox="read-only"
+  [ "$CEREMONY" = "1" ] && sandbox="danger-full-access"
+  # A read-only REVIEW must not get a writable/networked sandbox even if --ceremony
+  # was also passed — the review's contract (and its --help) promises read-only. Force
+  # it back and say so, rather than silently honoring the contradictory --ceremony.
+  if [ "$REVIEW" = "1" ] && [ "$sandbox" != "read-only" ]; then
+    echo "dispatch-worker: --review forces a read-only sandbox; ignoring --ceremony for this review." >&2
+    sandbox="read-only"
+  fi
+  # Honor --model for codex too (codex exec -m M); unset -> codex picks its config model.
+  local -a codex_flags=()
+  [ -n "$MODEL" ] && codex_flags+=(-m "$MODEL")
+  # A --ceremony task may run OUTSIDE a trusted git repo (a general/skill task in an
+  # arbitrary dir, not an in-repo edit). Skip codex's git-repo-trust gate there — the
+  # caller already opted into danger-full-access. A read-only/in-repo run keeps the check.
+  [ "$CEREMONY" = "1" ] && [ "$REVIEW" != "1" ] && codex_flags+=(--skip-git-repo-check)
+  local errlog stdoutlog rc=0 produced=0
+  errlog="$(mktemp -t dispatch-codex-out.XXXXXX)" || { echo "dispatch-worker: mktemp failed" >&2; return 1; }
+  stdoutlog="$(mktemp -t dispatch-codex-stdout.XXXXXX)" || { rm -f "$errlog"; echo "dispatch-worker: mktemp failed" >&2; return 1; }
+  # Tee BOTH streams to the log: auth refusals land on stderr, but the usage-limit
+  # banner can land on stdout. The user still sees both live (tee … >&N).
+  # stdout goes through a PIPELINE (not process substitution) so bash WAITS for the tee
+  # before we measure the file below — a partially-flushed stdout would read as "codex
+  # produced nothing" and resurrect the false positive this check exists to avoid.
+  if [ "${#codex_flags[@]}" -gt 0 ]; then
+    run_with_timeout codex exec "${codex_flags[@]}" --sandbox "$sandbox" - < "$BRIEF" \
+      2> >(tee -a "$errlog" >&2) | tee -a "$stdoutlog"
+    rc=${PIPESTATUS[0]}
+  else
+    run_with_timeout codex exec --sandbox "$sandbox" - < "$BRIEF" \
+      2> >(tee -a "$errlog" >&2) | tee -a "$stdoutlog"
+    rc=${PIPESTATUS[0]}
+  fi
+  cat "$stdoutlog" >> "$errlog"
+  if [ "$rc" -ne 0 ] && grep -qiE 'not supported when using Codex|with a ChatGPT account|no (supported )?models? (are )?available|all models? (were |are )?rejected' "$errlog"; then
+    echo "dispatch-worker: codex rejected the request at the auth/config layer (not a build failure) — every model was refused." >&2
+    echo "dispatch-worker: fix codex auth/config, do NOT retry this as a build: run 'codex login' (ChatGPT) or set a valid OpenAI API key provider, and check ~/.codex/config.toml for a bad model_provider override or a stray Authorization header." >&2
+    rm -f "$errlog" "$stdoutlog"
+    return 5
+  fi
+  # Usage-limit check runs regardless of rc: codex has been observed to EXIT 0 on a
+  # limit (zero-edit no-op), so an rc-gated check would miss it.
+  #
+  # The signature ALONE is not sufficient evidence. codex's output carries the echoed
+  # brief AND the model's own answer (both are mirrored to stderr, so there is no clean
+  # control-signal stream to grep instead), so any brief or review DISCUSSING rate limits
+  # matches. Reproduced 2026-08-27: a three-sentence review about HTTP 429 handling
+  # returned rc 6 while carrying a complete, correct deliverable.
+  #
+  # Narrowing the patterns was tried and rejected: every phrasing is either generic enough
+  # to match ordinary prose ("usage limit", "quota exceeded", "you've reached your ...")
+  # or specific enough to miss a real banner ("Too many requests. Please try again
+  # later."). Regex specificity cannot separate the two.
+  #
+  # So we require the signature AND the structural evidence that codex did no work. The
+  # recorded incident is precisely that shape: exited 0, zero edits,
+  # "only echoed the prompt" -- i.e. NOTHING on stdout, which carries only the answer.
+  # A deliverable that merely discusses limits always has substantive stdout.
+  #
+  # KNOWN GAP: a limit that interrupts generation AFTER substantive stdout is not caught
+  # here. Backstops: the rc 8 review byte floor, and coding-dispatch's empty-diff gate for
+  # edit briefs. Closing it properly needs a captured real banner -- do not guess a pattern.
+  produced="$(wc -c < "$stdoutlog" 2>/dev/null | tr -d ' ')"
+  [ -n "$produced" ] || produced=0
+  if [ "$produced" -lt "${DISPATCH_LIMIT_NOOP_BYTES:-200}" ] \
+     && grep -qiE 'usage limit|rate limit(ed)?|too many requests|you.?ve (hit|reached) your|reached (the|your) (usage|rate) limit|quota (exceeded|reached)|resets? (at|in)|try again (after|in|later)|limit will reset' "$errlog"; then
+    echo "dispatch-worker: codex appears to have hit a usage/rate limit (not a build result) — a limit signature appeared and codex produced no substantive output (${produced}B)." >&2
+    echo "dispatch-worker: do NOT accept this as a completed fix (codex can exit 0 with a zero-edit no-op on a limit). Wait for the reset time shown above, then re-dispatch. Treat as a BLOCKED phase." >&2
+    rm -f "$errlog" "$stdoutlog"
+    return 6
+  fi
+  rm -f "$errlog" "$stdoutlog"
+  return "$rc"
+}
+
+# _review_brief_named_dirty_paths — the mechanical guard behind a repeated failure:
+# a stderr WARNING that the real tree has uncommitted changes has now demonstrably
+# failed TWICE to stop a review running against a tree that's missing the very file
+# it was briefed to review (the warning is invisible when --review is launched as a
+# background task). Extract path-shaped tokens from the brief (split on whitespace/
+# backtick/quote/paren delimiters, trailing punctuation stripped), keep the ones that
+# resolve to an EXISTING path relative to $repo_top (or absolute under $repo_top) —
+# this also naturally discards prose false-positives like "e.g." matching the
+# extension heuristic, since "$repo_top/e.g" doesn't exist — then intersect with the
+# dirty set from `git status --porcelain --untracked-files=all`. A directory token
+# matches any dirty file beneath it. Prints the matched dirty paths, one per line,
+# deduped and sorted; prints nothing if none match.
+_review_brief_named_dirty_paths() {
+  local brief="$1" repo_top="$2" dirty_status="$3"
+  [ -n "$dirty_status" ] || return 0
+  local bt sq dq delims
+  bt='`'; sq="'"; dq='"'
+  delims="[:space:]${bt}()${sq}${dq}"
+  local tok rel hit matched=""
+  while IFS= read -r tok; do
+    [ -n "$tok" ] || continue
+    case "$tok" in
+      /*)
+        case "$tok" in
+          "$repo_top"/*) rel="${tok#"$repo_top"/}" ;;
+          *) continue ;;  # absolute path outside the repo — not our concern
+        esac
+        ;;
+      *) rel="$tok" ;;
+    esac
+    rel="${rel#./}"
+    rel="${rel%/}"
+    [ -n "$rel" ] || continue
+    [ -e "$repo_top/$rel" ] || continue
+    if [ -d "$repo_top/$rel" ]; then
+      hit="$(printf '%s\n' "$dirty_status" | awk -v d="$rel/" '{ p=substr($0,4); sub(/ -> .*/,"",p); if (index(p, d) == 1) print p }')"
+    else
+      hit="$(printf '%s\n' "$dirty_status" | awk -v f="$rel" '{ p=substr($0,4); sub(/ -> .*/,"",p); if (p == f) { print p } else { n=$0; if (sub(/.* -> /,"",n) && n == f) print n } }')"
+    fi
+    [ -z "$hit" ] || matched="$matched
+$hit"
+  done < <(
+    tr "$delims" '\n' < "$brief" \
+      | sed -E 's/[.,;:!?]+$//' \
+      | grep -E '(/|\.[A-Za-z0-9]{1,10}$)' \
+      | awk 'NF'
+  )
+  printf '%s\n' "$matched" | awk 'NF' | sort -u
+}
+
+dispatch_agy() {
+  command -v agy >/dev/null || { echo "dispatch-worker: agy not on PATH (this runtime is a future case)" >&2; return 3; }
+  # shellcheck disable=SC1091  # dynamic source path ($SCRIPT_DIR); resolved at runtime
+  . "$SCRIPT_DIR/agy-auth-probe.sh"
+  local auth_rc=0
+  set +e
+  agy_auth_probe
+  auth_rc=$?
+  set -e
+  case "$auth_rc" in
+    0) : ;;
+    2) echo "dispatch-worker: agy auth probe inconclusive — proceeding" >&2 ;;
+    7)
+      echo "dispatch-worker: agy not authenticated — re-authenticate agy: run 'agy' and sign in." >&2
+      return 7
+      ;;
+    *)
+      echo "dispatch-worker: agy auth probe failed unexpectedly (rc=$auth_rc)" >&2
+      return "$auth_rc"
+      ;;
+  esac
+  [ -f "$BRIEF" ] || { echo "dispatch-worker: --brief required + readable" >&2; return 2; }
+  # VALIDATED HEADLESS FORM — the prompt comes from bare STDIN (agy 1.1.22).
+  # Do NOT use `agy exec - < brief` or `agy - < brief`: both tokens are now rejected
+  # as unexpected positional arguments. Do NOT use `agy -p "<prompt>"` /
+  # `agy --print "<prompt>"`: those forms have historically hung headless or consumed
+  # the following token as the prompt value. Bare stdin is the form that reliably
+  # prints the response.
+  # ZERO-DIFF GUARD: agy can also run off-script and exit 0 with no edits. The
+  # ORCHESTRATOR owns the worktree path, so it must assert the worktree actually
+  # changed after this returns rc 0 (`git -C <worktree> status --porcelain` non-empty)
+  # before accepting success — a zero-diff "success" on an edit brief is a BLOCKED phase.
+  #
+  # AUTONOMOUS-EXECUTION PREAMBLE (an earlier incident): `agy ... <brief`
+  # defaults to PLAN-AND-CONFIRM — it emits a correct plan, asks "does this look good?",
+  # and exits rc 0 WITHOUT writing files or the marker, so the run is a no-op. agy has
+  # also been observed to FALSE-REPORT success (narrate "wrote _coding-result.json with
+  # green tests") while writing the marker to a sandbox cwd != the repo root, so the
+  # orchestrator finds no marker and hard-reverts real edits (lost work). We prepend a
+  # standard preamble that (a) forbids plan-and-stop, (b) mandates implement-then-gate,
+  # (c) declares the marker at the ABSOLUTE $WORKDIR the ONLY success signal, and (d)
+  # tells agy chat output is ignored. codex `exec` implements directly and needs none of
+  # this (codex_dispatch above does not inject it). $WORKDIR is best-effort: the absolute
+  # path the orchestrator passed via --workdir, else the cwd.
+  #
+  # REVIEW MODE (--review): the brief is a READ-ONLY reviewer persona, not an edit task.
+  # The autonomous-EDIT preamble above is actively WRONG for a review — it tells the
+  # reviewer to implement changes and write a marker, and that its "narration output is
+  # IGNORED", but a review's narration IS the deliverable. So under --review we swap it for
+  # a read-only preamble (no edits, no marker, stdout is the deliverable). This still keeps
+  # the anti-plan-and-stop framing (agy's plan-and-confirm default would otherwise no-op a
+  # headless review too) and the external timeout. The agy review path has NO
+  # _coding-result.json requirement: the review on stdout is the whole deliverable.
+  local agy_workdir="${WORKDIR:-$PWD}"
+  local review_path="$agy_workdir"
+  local REVIEW_HERMETIC=0
+  local agy_brief
+  local review_outfile
+  # Use caller-supplied path if set; otherwise mktemp (unpredictable, avoids symlink attack).
+  # A path WE created is deleted on exit (see cleanup_dispatch_worker) — the review on stdout
+  # is the deliverable. A caller-supplied REVIEW_OUTFILE is the caller's file and is retained.
+  if [ -n "${REVIEW_OUTFILE:-}" ]; then
+    review_outfile="$REVIEW_OUTFILE"
+  else
+    review_outfile="$(mktemp -t dispatch-review.XXXXXX)" || { echo "dispatch-worker: mktemp failed for review_outfile" >&2; return 1; }
+    mv "$review_outfile" "${review_outfile}.md" 2>/dev/null && review_outfile="${review_outfile}.md" || true
+    REVIEW_OUTFILE_TMP="$review_outfile"
+  fi
+  agy_brief="$(mktemp -t dispatch-agy-brief.XXXXXX)" || { echo "dispatch-worker: mktemp failed" >&2; return 1; }
+  if [ "$REVIEW" = "1" ]; then
+    if git -C "$agy_workdir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      REVIEW_SRC_TOP="$(git -C "$agy_workdir" rev-parse --show-toplevel)"
+      _review_dirty_status="$(git -C "$REVIEW_SRC_TOP" status --porcelain --untracked-files=all)"
+      if [ -n "$_review_dirty_status" ]; then
+        echo "dispatch-worker: review runs against committed HEAD in an isolated worktree; the real tree has uncommitted changes that are NOT included — commit them first or include the diff in the brief." >&2
+        if [ "$ALLOW_DIRTY" != "1" ]; then
+          _review_named_dirty="$(_review_brief_named_dirty_paths "$BRIEF" "$REVIEW_SRC_TOP" "$_review_dirty_status")"
+          if [ -n "$_review_named_dirty" ]; then
+            echo "dispatch-worker: brief names uncommitted files: $(printf '%s' "$_review_named_dirty" | tr '\n' ' ' | sed -E 's/ +$//') — commit them or pass --allow-dirty" >&2
+            return 2
+          fi
+        fi
+      fi
+      REVIEW_WT_PARENT="${REVIEW_WT_DIR:-$(dirname "$REVIEW_SRC_TOP")/.worktrees}"
+      REVIEW_WT_PARENT_CREATED=0
+      _review_tmp_real="$(cd -P "${TMPDIR:-/tmp}" 2>/dev/null && pwd)" || _review_tmp_real=""
+      _review_parent_existed=0
+      [ -d "$REVIEW_WT_PARENT" ] && _review_parent_existed=1
+      if mkdir -p "$REVIEW_WT_PARENT" 2>/dev/null; then
+        [ "$_review_parent_existed" = "0" ] && REVIEW_WT_PARENT_CREATED=1 && chmod 700 "$REVIEW_WT_PARENT" 2>/dev/null || true
+        _review_parent_real="$(cd -P "$REVIEW_WT_PARENT" 2>/dev/null && pwd)" || _review_parent_real=""
+        case "$_review_parent_real/" in "$_review_tmp_real/"*) _review_parent_usable=0;; *) _review_parent_usable=1;; esac
+        if [ "$_review_parent_usable" = "1" ] && [ -w "$REVIEW_WT_PARENT" ]; then
+          # Reap only stale dispatch-owned worktrees; live siblings and other names are untouched.
+          find "$REVIEW_WT_PARENT" -mindepth 1 -maxdepth 1 -type d -name 'dispatch-review-wt.*' -mmin +360 -exec git -C "$REVIEW_SRC_TOP" worktree remove --force {} \; 2>/dev/null || true
+          git -C "$REVIEW_SRC_TOP" worktree prune 2>/dev/null || true
+          REVIEW_WT="$(mktemp -d "$REVIEW_WT_PARENT/dispatch-review-wt.XXXXXX")" || REVIEW_WT=""
+        else
+          REVIEW_WT=""
+        fi
+      else REVIEW_WT=""
+      fi
+      if [ -z "$REVIEW_WT" ]; then
+        [ "$REVIEW_WT_PARENT_CREATED" = "1" ] && rmdir "$REVIEW_WT_PARENT" 2>/dev/null || true
+        echo "dispatch-worker: warning: preferred review worktree parent is unusable or under \$TMPDIR; trying the per-user cache fallback." >&2
+        REVIEW_WT_PARENT=""
+        REVIEW_WT_PARENT_CREATED=0
+        _review_cache_parent="${XDG_CACHE_HOME:-$HOME/.cache}/dispatch-review-worktrees"
+        _review_cache_existed=0
+        [ -d "$_review_cache_parent" ] && _review_cache_existed=1
+        if mkdir -p "$_review_cache_parent" 2>/dev/null && [ -w "$_review_cache_parent" ]; then
+          [ "$_review_cache_existed" = "0" ] && chmod 700 "$_review_cache_parent" 2>/dev/null || true
+          _review_cache_real="$(cd -P "$_review_cache_parent" 2>/dev/null && pwd)" || _review_cache_real=""
+          case "$_review_cache_real/" in "$_review_tmp_real/"*) REVIEW_WT="";; *)
+            REVIEW_WT_PARENT="$_review_cache_parent"
+            [ "$_review_cache_existed" = "0" ] && REVIEW_WT_PARENT_CREATED=1
+            find "$REVIEW_WT_PARENT" -mindepth 1 -maxdepth 1 -type d -name 'dispatch-review-wt.*' -mmin +360 -exec git -C "$REVIEW_SRC_TOP" worktree remove --force {} \; 2>/dev/null || true
+            git -C "$REVIEW_SRC_TOP" worktree prune 2>/dev/null || true
+            REVIEW_WT="$(mktemp -d "$REVIEW_WT_PARENT/dispatch-review-wt.XXXXXX")" || REVIEW_WT=""
+          esac
+        fi
+      fi
+      if [ -z "$REVIEW_WT" ]; then
+        REVIEW_WT_PARENT=""
+        REVIEW_WT_PARENT_CREATED=0
+        REVIEW_WT="$(mktemp -d -t dispatch-review-wt.XXXXXX 2>/dev/null)" || REVIEW_WT=""
+        echo "dispatch-worker: warning: could not create a writable review worktree directory outside \$TMPDIR; falling back to ${REVIEW_WT:-an unavailable path}, where agy may deny command-class tools and emit an empty review." >&2
+      fi
+      if [ -z "$REVIEW_WT" ]; then
+        echo "dispatch-worker: could not allocate an isolated review git worktree; refusing a non-hermetic review." >&2
+        return 3
+      fi
+      if git -C "$REVIEW_SRC_TOP" worktree add --quiet --detach "$REVIEW_WT" HEAD; then
+        review_path="$REVIEW_WT"
+        REVIEW_HERMETIC=1
+      else
+        echo "dispatch-worker: could not create isolated review git worktree — running non-hermetically (prompt-guard only)." >&2
+        REVIEW_WT=""
+        REVIEW_SRC_TOP=""
+        review_path="$agy_workdir"
+      fi
+    else
+      echo "dispatch-worker: review target is not a git work tree — running non-hermetically (prompt-guard only)." >&2
+      review_path="$agy_workdir"
+    fi
+  fi
+  if [ "$REVIEW" = "1" ]; then
+    {
+      if [ "$REVIEW_HERMETIC" = "1" ]; then
+        printf '%s\n' "READ-ONLY REVIEW MODE for the real repository (headless --print): this review runs hermetically, and there is NO human to approve."
+        printf '%s\n' "You are in a DISPOSABLE, DETACHED git worktree at ${review_path%/}. It is deleted when this run ends; the real repository is untouched by anything you do here."
+        printf '%s\n' "You MAY run read-only commands AND the project's build/test gate inside it."
+        printf '%s\n' "If your method requires MUTATING code to prove something — e.g. a mutation check that breaks the code under test to confirm a test FAILS — you MAY edit files INSIDE this worktree. You do not need to revert them; the worktree is discarded."
+        printf '%s\n' "You must NOT touch any path OUTSIDE ${review_path%/}. Do NOT commit, do NOT push, and do NOT write any success marker."
+      else
+        printf '%s\n' "READ-ONLY REVIEW MODE (headless --print): there is NO human to approve, and this is a REVIEW — you must NOT modify the repo."
+        printf '%s\n' "Do NOT edit, create, or delete any files. Do NOT run a build/test gate and do NOT write any success marker."
+        printf '%s\n' "This review is NOT running in an isolated worktree — it is the operator's live tree. You must not modify anything."
+      fi
+      printf '%s\n' "If a tool, command, or capability your method requires is unavailable or denied, do NOT emit nothing and do NOT silently skip it. Produce the review you CAN produce from static analysis, and state explicitly, as its own labelled finding, which step you could not perform and what that leaves unverified. A confident review whose central evidence was never gathered is a false green and is worse than an honest partial one."
+      printf '%s\n' "Do NOT produce a plan and stop, and do NOT ask for confirmation."
+      printf '%s\n' "Read the targets named below, then output your review to STDOUT following the EXACT structure the brief specifies."
+      printf '%s\n' "Your STDOUT output IS the deliverable — it is read and used in full."
+      # These two lines MUST track the hermetic split above. Leaving the blanket
+      # "do not change" / "DO NOT write any files" text in the hermetic branch would
+      # contradict the may-mutate permission it just granted, and a reviewer resolving
+      # the conflict toward the prohibition silently skips its mutation check again —
+      # the exact defect this change exists to remove.
+      if [ "$REVIEW_HERMETIC" = "1" ]; then
+        printf '%s\n' "Repo to read — and, where your method requires it, to mutate — is the disposable worktree: ${review_path%/}"
+        printf '%s\n' "Do NOT write a REVIEW ARTEFACT to disk: no review.md, no output.md, no report file. Your STDOUT is the complete deliverable. (Editing SOURCE files inside ${review_path%/} for a mutation check is not a review artefact and is allowed.)"
+      else
+        printf '%s\n' "Repo to read (do not change): ${review_path%/}"
+        printf '%s\n' "DO NOT write any files to disk. Your STDOUT is the complete deliverable. Do not create review.md, output.md, or any file in the working directory: ${review_path%/}."
+      fi
+      printf '%s\n' "OUTPUT CONTRACT: your FINAL message must literally BE the review document (the full structure the brief specifies — findings, verdict, everything). A sign-off or status update ('I have completed the review...', 'Review complete, see above', or any other meta-narration ABOUT the review) is NOT the review and is DISCARDED, not accepted — if your last message doesn't contain the actual review content, the dispatch treats it as a failed review, not a completed one."
+      printf '%s\n' "FINDING FORMAT: label EVERY finding with an explicit severity — Blocker, Major, Minor, or Nit — and cite the file:line it applies to wherever the target has line numbers. A review with no labelled findings is rejected by an automated gate, even if its prose is correct. If you genuinely find nothing, still state an explicit verdict and label the items you checked."
+      printf '%s\n' "---- REVIEW BRIEF BELOW ----"
+      cat "$BRIEF"
+    } > "$agy_brief"
+  else
+    {
+      printf '%s\n' "AUTONOMOUS-EXECUTION MODE (headless --print): there is NO human to approve."
+      printf '%s\n' "Do NOT produce a plan and stop, and do NOT ask for confirmation. Implement the change directly."
+      printf '%s\n' "Then run the build/vet/test gate (e.g. go build ./... && go vet ./... && go test ./...)."
+      printf '%s\n' "ONLY when the gate is green, write the success marker as a JSON file at the ABSOLUTE path:"
+      printf '%s\n' "  ${agy_workdir%/}/_coding-result.json"
+      printf '%s\n' "That marker file at that absolute path is the ONLY success signal. Your chat/narration output is IGNORED;"
+      printf '%s\n' "do not claim success in prose — the marker is the proof. Work in the repo at: ${agy_workdir%/}"
+      printf '%s\n' "---- TASK BRIEF BELOW ----"
+      cat "$BRIEF"
+    } > "$agy_brief"
+  fi
+  local agy_model="$MODEL"
+  if [ -z "$agy_model" ]; then
+    if [ "$REVIEW" = "1" ]; then agy_model="Gemini 3.1 Pro (High)"; else agy_model="Gemini 3.5 Flash (Medium)"; fi
+  fi
+  local -a model_args=()
+  [ -n "$agy_model" ] && model_args=(--model "$agy_model")
+  if [ "$REVIEW" = "1" ]; then
+    if [ "$REVIEW_HERMETIC" = "1" ]; then
+      # agy denies suite commands absent from its allowlist; bypassing that policy is safe
+      # only because this detached worktree is disposable and cannot dirty the live tree.
+      model_args+=(--dangerously-skip-permissions)
+    else
+      echo "dispatch-worker: warning: review is running non-hermetically and therefore read-only; the lens may be unable to complete an execution-dependent method." >&2
+    fi
+    ( cd "$review_path" && run_with_timeout agy "${model_args[@]}" < "$agy_brief" ) | tee "$review_outfile"
+    local agy_rc=${PIPESTATUS[0]}
+    # Emit path and rc so callers can locate the file AND detect truncation (non-zero rc = partial).
+    echo "REVIEW_OUTFILE=$review_outfile (rc=$agy_rc)" >&2
+    local review_bytes
+    review_bytes="$(wc -c < "$review_outfile" 2>/dev/null | tr -d ' ')"
+    review_bytes="${review_bytes:-0}"
+    # TIMEOUT RETRY (hardened after a peer review of the first fix): this
+    # used to also require `review_bytes <
+    # MIN_REVIEW_BYTES`, so a genuine TIMEOUT (rc=124 from the external
+    # run_with_timeout bound, or rc=137 on a SIGKILL) that happened to have
+    # written a LONG partial review before hanging fell straight through — no
+    # retry, no fallback. Byte count says nothing about whether a timed-out
+    # review is COMPLETE (a truncated mid-sentence review can still be long).
+    # ANY timeout/kill retries the SAME call ONCE before giving up, regardless
+    # of how many bytes were produced. Bounded to one retry (no loop): if the
+    # retry is ALSO a timeout, fall through to the rc check below, which fails
+    # closed exactly like the rc=0-short-output case.
+    if [ "$agy_rc" -eq 124 ] || [ "$agy_rc" -eq 137 ]; then
+      echo "dispatch-worker: agy review timed out (rc=$agy_rc, ${review_bytes}B written before the kill) — retrying ONCE before falling back." >&2
+      ( cd "$review_path" && run_with_timeout agy "${model_args[@]}" < "$agy_brief" ) | tee "$review_outfile"
+      agy_rc=${PIPESTATUS[0]}
+      echo "REVIEW_OUTFILE=$review_outfile (rc=$agy_rc) [retry]" >&2
+      review_bytes="$(wc -c < "$review_outfile" 2>/dev/null | tr -d ' ')"
+      review_bytes="${review_bytes:-0}"
+    fi
+    if [ "$agy_rc" -eq 0 ] && [ "$review_bytes" -lt "$MIN_REVIEW_BYTES" ]; then
+      echo "dispatch-worker: REVIEW FAILED — output too short (${review_bytes}B < ${MIN_REVIEW_BYTES}B min). A rc=0-but-empty/short agy review is NOT a pass; do NOT accept it. Fall back to a LOCAL reviewer (Claude Agent-tool peer-*-reviewer, or Opus verify-the-reviewer) — do NOT retry the wedged agy." >&2
+      agy_rc=8
+    elif [ "$agy_rc" -eq 0 ] && [ "$REVIEW_REQUIRE_EVIDENCE" != "0" ]; then
+      local _sev='(^|[^[:alnum:]_])(Blocker|Major|Minor|Nit|Critical)([^[:alnum:]_]|$)'
+      local _pathslash='(^|[^[:alnum:]_./-])[[:alnum:]_.-]+/[[:alnum:]_./-]*[[:alnum:]_-]:[0-9]+'
+      local _pathext='(^|[^[:alnum:]_./-])[[:alnum:]_-]+\.[[:alpha:]][[:alnum:]]*:[0-9]+'
+      if ! grep -Eq "$_sev|$_pathslash|$_pathext" "$review_outfile"; then
+        echo "dispatch-worker: REVIEW FAILED — review produced no labelled severity or file:line evidence and is not a pass. Fall back to a LOCAL reviewer (Claude Agent-tool peer-*-reviewer, or Opus verify-the-reviewer) — do NOT retry the wedged agy." >&2
+        agy_rc=8
+      fi
+    elif [ "$agy_rc" -eq 124 ] || [ "$agy_rc" -eq 137 ]; then
+      echo "dispatch-worker: REVIEW FAILED — agy timed out again (rc=$agy_rc, ${review_bytes}B written) after one retry. A timed-out review is TRUNCATED and NOT a pass regardless of byte count; do NOT accept it. Fall back to a LOCAL reviewer (Claude Agent-tool peer-*-reviewer, or Opus verify-the-reviewer) — do NOT retry the wedged agy again." >&2
+      agy_rc=8
+    fi
+  else
+    run_with_timeout agy "${model_args[@]}" < "$agy_brief"
+    local agy_rc=$?
+  fi
+  rm -f "$agy_brief"
+  return "$agy_rc"
+}
+
+dispatch_claude() {
+  command -v claude >/dev/null || { echo "dispatch-worker: claude not on PATH" >&2; return 3; }
+  [ -f "$BRIEF" ] || { echo "dispatch-worker: --brief required + readable" >&2; return 2; }
+  # claude's native headless one-shot. `claude -p "<prompt>"` takes the prompt as its value
+  # cleanly (NOT the agy --print following-token hang, so no stdin-form workaround is needed)
+  # and does not plan-and-stop, so the brief governs directly — no autonomous-EDIT preamble is
+  # injected (codex exec is the same way). The external run_with_timeout still owns the
+  # wall-clock bound: an unattended permission prompt could otherwise stall claude indefinitely.
+  local -a flags=(-p)
+  [ -n "$MODEL" ] && flags+=(--model "$MODEL")
+  if [ "$REVIEW" = "1" ]; then
+    # Read-only review: `plan` permission-mode lets claude read the targets without editing
+    # and without stalling on approval; the reviewer-persona brief's STDOUT is the deliverable.
+    flags+=(--permission-mode plan)
+    [ "$CEREMONY" = "1" ] && echo "dispatch-worker: --review forces read-only (plan mode) for claude; ignoring --ceremony." >&2
+  elif [ "$CEREMONY" = "1" ]; then
+    # EDIT/ceremony task: auto-approve tools so an unattended tool-using run does not stall
+    # on permission prompts (there is no human to approve in a headless dispatch).
+    flags+=(--dangerously-skip-permissions)
+  fi
+  # Prompt on STDIN, not argv: `claude -p` reads it from a pipe (verified), and a brief on the
+  # command line is visible to every other process on the machine via `ps`, and can exceed the
+  # OS argument-length limit for a large brief. codex and agy already take the brief on stdin.
+  run_with_timeout claude "${flags[@]}" < "$BRIEF"
+}
+
+dispatch_workflow() {
+  # Claude dynamic workflows are launched from inside a Claude Code session
+  # (not from a shell). This case returns a structured marker the orchestrator
+  # interprets to launch the workflow itself + surfaces the token-cost prompt
+  # to the user.
+  [ -f "$BRIEF" ] || { echo "dispatch-worker: --brief required + readable" >&2; return 2; }
+  # shellcheck disable=SC2016
+  # The heredoc below is intentional: $SHAPE and brief content expand at
+  # runtime. SC2016 does not apply here (this is not a single-quoted context),
+  # but the disable guards any future shellcheck version that misreads the pattern.
+  BRIEF_CONTENT="$(jq -Rs . < "$BRIEF" 2>/dev/null || cat "$BRIEF")"
+  cat <<JSON
+{
+  "runtime": "workflow",
+  "next_action": "request_claude_workflow",
+  "brief": ${BRIEF_CONTENT},
+  "shape": "${SHAPE}",
+  "warn": "Claude dynamic workflows consume substantially more tokens than a typical session. Confirm before dispatch."
+}
+JSON
+}
+
+dispatch_a2a_endpoint() {
+  echo "dispatch-worker: a2a-endpoint runtime not yet wired (deferred until a runtime exposes A2A)" >&2
+  return 3
+}
+
+rc=0
+case "$RUNTIME" in
+  codex)         dispatch_codex || rc=$? ;;
+  agy)           dispatch_agy || rc=$? ;;
+  claude)        dispatch_claude || rc=$? ;;
+  workflow)      dispatch_workflow || rc=$? ;;
+  a2a-endpoint)  dispatch_a2a_endpoint || rc=$? ;;
+  *)             echo "dispatch-worker: unknown runtime: $RUNTIME" >&2; exit 2 ;;
+esac
+
+# Post-dispatch dep gate — only for runtimes that actually built in-process
+# (codex/agy). The workflow runtime just emits a JSON marker; the real build
+# happens later in-session, so go.mod won't reflect it yet. Skip the gate if the
+# dispatch itself failed (rc!=0) — a failed build is already a stop.
+if [ "$rc" -eq 0 ] && [ "$REVIEW" != "1" ] && { [ "$RUNTIME" = "codex" ] || [ "$RUNTIME" = "agy" ]; }; then
+  verify_required_deps || rc=$?
+fi
+
+exit "$rc"

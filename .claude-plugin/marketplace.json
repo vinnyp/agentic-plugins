@@ -34,6 +34,21 @@
         "release-management",
         "software-engineering"
       ]
+    },
+    {
+      "name": "agent-dispatch",
+      "source": "./agent-dispatch",
+      "description": "Dispatch coding work and peer reviews to external agent CLIs.",
+      "category": "Productivity",
+      "keywords": [
+        "agents",
+        "dispatch",
+        "codex",
+        "gemini",
+        "claude-code",
+        "orchestration",
+        "worktrees"
+      ]
     }
   ]
 }

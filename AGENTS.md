@@ -14,6 +14,12 @@ credentials, personal data, or local machine paths.
 - `operator-agents` is an agents-only plugin. Its manifest is
   `operator-agents/.claude-plugin/plugin.json` and its agents live in
   `operator-agents/agents/`.
+- `agent-dispatch` is a `bin/` + `skills/` plugin. Its
+  manifest is `agent-dispatch/.claude-plugin/plugin.json`; its bare-PATH CLIs
+  live in `agent-dispatch/bin/` (with shared helpers under `agent-dispatch/bin/lib/`
+  and their tests as `agent-dispatch/bin/test-*.sh`), its one skill lives in
+  `agent-dispatch/skills/driving-agent-sessions/`, and its own test fixtures
+  live in `agent-dispatch/test/`.
 
 ## Contribution rules
 

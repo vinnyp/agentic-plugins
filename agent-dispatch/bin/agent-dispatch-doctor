@@ -1,0 +1,298 @@
+#!/usr/bin/env bash
+# agent-dispatch-doctor — install + verify the agent-dispatch plugin.
+#
+# Default mode: runs health checks — asserts entrypoints are on PATH, lib/ is
+# NOT on PATH, and optional runtime tools (codex, agy) are available.
+#
+# --install mode: symlinks all entrypoints into ~/.local/bin. Idempotent;
+# refuses to overwrite a real (non-symlink) file.
+#
+# Exits 0 on full PASS, 1 on any FAIL, 2 if any WARN (and no FAIL).
+set -uo pipefail
+
+# ---------------------------------------------------------------------------
+# Self-location — portable macOS BSD readlink (no -f flag available).
+# Follows symlink chains back to the real directory so this works whether
+# invoked directly from agent-dispatch/bin/ OR via a ~/.local/bin symlink.
+# ---------------------------------------------------------------------------
+resolve_self() {
+  local s="${BASH_SOURCE[0]:-$0}"
+  while [ -L "$s" ]; do
+    local t; t="$(readlink "$s")"
+    case "$t" in /*) s="$t" ;; *) s="$(dirname "$s")/$t" ;; esac
+  done
+  cd "$(dirname "$s")" && pwd
+}
+BIN_DIR="$(resolve_self)"
+LIB_DIR="$(cd "$BIN_DIR/../lib" 2>/dev/null && pwd || echo "$BIN_DIR/../lib")"
+
+# ---------------------------------------------------------------------------
+# Entrypoint allowlist — agent-facing commands; test-*.sh files excluded.
+# ---------------------------------------------------------------------------
+ENTRYPOINTS=(
+  dispatch-worker
+  coding-dispatch.sh
+  coding-preflight.sh
+  coding-build-phase.sh
+  drive-cold-session.sh
+  drive-cmux-session.sh
+  run-long-gate.sh
+  mutation-verify.sh
+  gate-run.sh
+  review-pin.sh
+  agent-dispatch-doctor
+)
+
+# is_agent_dispatch_target <abs-path> — true when <abs-path> lives in an agent-dispatch
+# plugin checkout, i.e. it sits in a bin/ whose sibling .claude-plugin/plugin.json names
+# this plugin. Used by --install to decide whether an existing same-named symlink is ours
+# (safe to re-point) or somebody else's (must not be clobbered).
+is_agent_dispatch_target() {
+  local target="$1" target_dir plugin_json
+  [ -n "$target" ] || return 1
+  target_dir="$(dirname "$target")"
+  plugin_json="$target_dir/../.claude-plugin/plugin.json"
+  [ -f "$plugin_json" ] || return 1
+  grep -q '"name"[[:space:]]*:[[:space:]]*"agent-dispatch"' "$plugin_json"
+}
+
+FAILS=0
+WARNS=0
+
+report() {
+  local status
+  status="$1"
+  shift
+  printf '%-7s %s\n' "$status" "$*"
+  case "$status" in
+    FAIL) FAILS=$((FAILS + 1)) ;;
+    WARN) WARNS=$((WARNS + 1)) ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
+# Usage / --help
+# ---------------------------------------------------------------------------
+usage() {
+  cat <<USAGE
+agent-dispatch-doctor — install + verify the agent-dispatch plugin.
+
+Usage:
+  agent-dispatch-doctor            run health checks (verify mode)
+  agent-dispatch-doctor --install  symlink entrypoints into ~/.local/bin
+  agent-dispatch-doctor -h|--help  show this help
+
+Verify mode checks:
+  1. Each entrypoint is on PATH and executable
+  2. lib/ is NOT on PATH (guard for future lib extraction)
+  3. codex is on PATH (WARN if missing — codex-runtime dispatch unavailable)
+  4. agy is on PATH (WARN if missing — agy-runtime dispatch/review unavailable)
+  5. If agy present: probe 'agy models' works
+
+Exit codes (both modes): 0 = all PASS, 1 = any FAIL, 2 = any WARN (and no FAIL).
+USAGE
+}
+
+if [ "${1:-}" = "--print-entrypoints" ]; then
+  printf '%s\n' "${ENTRYPOINTS[@]}"
+  exit 0
+fi
+
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+  usage
+  exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# --install mode
+# ---------------------------------------------------------------------------
+if [ "${1:-}" = "--install" ]; then
+  LOCAL_BIN="$HOME/.local/bin"
+  mkdir -p "$LOCAL_BIN"
+
+  echo "agent-dispatch-doctor --install: symlinking entrypoints into $LOCAL_BIN"
+  echo
+
+  for name in "${ENTRYPOINTS[@]}"; do
+    src="$BIN_DIR/$name"
+    dst="$LOCAL_BIN/$name"
+
+    if [ ! -e "$src" ] && [ ! -L "$src" ]; then
+      report FAIL "$name: source not found at $src"
+      continue
+    fi
+
+    if [ -L "$dst" ]; then
+      # Symlink already exists — check where it points
+      existing_target="$(readlink "$dst")"
+      # Normalise: if the existing target is relative, resolve against LOCAL_BIN
+      case "$existing_target" in
+        /*) abs_target="$existing_target" ;;
+        *)  abs_target="$LOCAL_BIN/$existing_target" ;;
+      esac
+      if [ "$abs_target" = "$src" ]; then
+        report PASS "$name: already installed (symlink → $src)"
+      elif is_agent_dispatch_target "$abs_target"; then
+        ln -sfn "$src" "$dst"
+        report PASS "$name: updated symlink (was → $existing_target, now → $src)"
+      else
+        # A symlink of the same name pointing somewhere that is NOT an agent-dispatch
+        # checkout belongs to another tool (or to the user). Overwriting it would silently
+        # hijack that command, exactly as overwriting a real file would — so warn and skip,
+        # matching the refusal below.
+        report WARN "$name: $dst is a symlink to $existing_target, which is not an agent-dispatch checkout — refusing to replace it; remove it yourself if you want agent-dispatch to own this name"
+      fi
+    elif [ -e "$dst" ]; then
+      # Exists as a real file — refuse to overwrite
+      report FAIL "$name: refusing to overwrite real file $dst"
+    else
+      # Fresh install
+      ln -s "$src" "$dst"
+      report PASS "$name: installed (symlink → $src)"
+    fi
+  done
+
+  echo
+  echo "Summary: $FAILS fail, $WARNS warn"
+
+  # Advise if ~/.local/bin is not already on PATH
+  case ":$PATH:" in
+    *":$LOCAL_BIN:"*) ;;
+    *)
+      echo
+      echo "NOTE: $LOCAL_BIN is not on your PATH."
+      echo "      Add the following to your shell profile (~/.bashrc, ~/.zshrc, etc.):"
+      echo "        export PATH=\"\$HOME/.local/bin:\$PATH\""
+      ;;
+  esac
+
+  # Same exit contract as verify mode: 0 all PASS, 1 any FAIL, 2 any WARN and no FAIL. A
+  # skipped entrypoint (a foreign symlink we refused to replace) is a WARN, and exiting 0 on
+  # it would tell an installer script the install was complete when a command is missing.
+  if [ "$FAILS" -gt 0 ]; then
+    exit 1
+  elif [ "$WARNS" -gt 0 ]; then
+    exit 2
+  fi
+  exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# Verify mode (default)
+# ---------------------------------------------------------------------------
+echo "agent-dispatch-doctor: verify"
+echo
+
+# Check 1: each entrypoint is on PATH and executable
+missing=()
+for name in "${ENTRYPOINTS[@]}"; do
+  found="$(command -v "$name" 2>/dev/null || true)"
+  if [ -n "$found" ] && [ -x "$found" ]; then
+    : # will report rolled-up PASS below
+  else
+    missing+=("$name")
+  fi
+done
+
+if [ "${#missing[@]}" -eq 0 ]; then
+  report PASS "1. all ${#ENTRYPOINTS[@]} entrypoints on PATH + executable"
+else
+  for name in "${missing[@]}"; do
+    report FAIL "1. $name: not found on PATH or not executable — run agent-dispatch-doctor --install or add the plugin bin to PATH"
+  done
+  # Report PASS for the ones that ARE present (only if some are missing)
+  for name in "${ENTRYPOINTS[@]}"; do
+    found="$(command -v "$name" 2>/dev/null || true)"
+    if [ -n "$found" ] && [ -x "$found" ]; then
+      report PASS "1. $name: found at $found"
+    fi
+  done
+fi
+
+# Check 2: lib/ is NOT on PATH
+# Resolve LIB_DIR to an absolute path if it actually exists
+if [ -d "$LIB_DIR" ]; then
+  abs_lib="$(cd "$LIB_DIR" && pwd)"
+else
+  abs_lib="$LIB_DIR"
+fi
+
+case ":$PATH:" in
+  *":$abs_lib:"*)
+    report FAIL "2. lib/ IS on PATH ($abs_lib) — remove it to prevent unintended resolution of internal helpers"
+    ;;
+  *)
+    report PASS "2. lib/ is not on PATH ($abs_lib)"
+    ;;
+esac
+
+# Check 3: codex on PATH
+if command -v codex >/dev/null 2>&1; then
+  report PASS "3. codex on PATH ($(command -v codex))"
+else
+  report WARN "3. codex not on PATH — codex-runtime dispatch unavailable"
+fi
+
+# Check 4: agy on PATH
+if command -v agy >/dev/null 2>&1; then
+  report PASS "4. agy on PATH ($(command -v agy))"
+  AGY_PRESENT=1
+else
+  report WARN "4. agy not on PATH — agy-runtime dispatch/review unavailable"
+  AGY_PRESENT=0
+fi
+
+# Check 5: if agy present, probe 'agy models' and verify default model names exist
+if [ "$AGY_PRESENT" -eq 1 ]; then
+  # Use gtimeout (macOS Homebrew coreutils) or timeout (Linux) if available
+  TIMEOUT_CMD=""
+  if command -v gtimeout >/dev/null 2>&1; then
+    TIMEOUT_CMD="gtimeout 20"
+  elif command -v timeout >/dev/null 2>&1; then
+    TIMEOUT_CMD="timeout 20"
+  fi
+
+  agy_models_out="$($TIMEOUT_CMD agy models 2>&1)" && agy_models_ok=1 || agy_models_ok=0
+  if [ "$agy_models_ok" -eq 1 ]; then
+    report PASS "5. agy models: OK"
+    # Verify the two default model strings that dispatch-worker + coding-dispatch hard-code
+    # as defaults. If agy renames them, --model silently fails at dispatch time; catch it here.
+    DEFAULT_MODELS=(
+      "Gemini 3.1 Pro (High)"
+      "Gemini 3.5 Flash (Medium)"
+    )
+    for model_name in "${DEFAULT_MODELS[@]}"; do
+      if echo "$agy_models_out" | grep -qF "$model_name"; then
+        report PASS "5. default model present: $model_name"
+      else
+        report WARN "5. default model '$model_name' not found in 'agy models' output — run 'agy models' to see current names and update the defaults in dispatch-worker + coding-dispatch.sh if renamed"
+      fi
+    done
+  else
+    report WARN "5. agy present but 'agy models' failed — check agy auth/config"
+  fi
+fi
+
+# 6. shellcheck-clean — lint health of the plugin's own entrypoints
+if command -v shellcheck >/dev/null 2>&1; then
+  sc_targets=()
+  for e in "${ENTRYPOINTS[@]}"; do
+    [ -f "$BIN_DIR/$e" ] && sc_targets+=("$BIN_DIR/$e")
+  done
+  if [ "${#sc_targets[@]}" -gt 0 ] && shellcheck --severity=warning "${sc_targets[@]}" >/dev/null 2>&1; then
+    report PASS "6. shellcheck clean (entrypoints, severity>=warning)"
+  else
+    report WARN "6. shellcheck found issues in entrypoints — run: shellcheck $BIN_DIR/*"
+  fi
+else
+  report WARN "6. shellcheck not installed — cannot lint entrypoints (brew install shellcheck)"
+fi
+
+echo
+echo "Summary: $FAILS fail, $WARNS warn"
+if [ "$FAILS" -gt 0 ]; then
+  exit 1
+elif [ "$WARNS" -gt 0 ]; then
+  exit 2
+fi
+exit 0

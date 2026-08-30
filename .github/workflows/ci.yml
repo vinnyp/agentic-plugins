@@ -45,6 +45,12 @@ jobs:
       - name: Run gitleaks (dir scan, mirrors the publish gate)
         run: gitleaks dir --no-banner --redact --gitleaks-ignore-path .gitleaksignore .
 
+      - name: Shellcheck
+        run: |
+          set -euo pipefail
+          shellcheck --version
+          files=$(git ls-files '*.sh'; git grep -lE '^#!/usr/bin/env bash|^#!/bin/bash' -- . ':!*.sh' ':!*.md' 2>/dev/null || true)
+          echo "$files" | sort -u | sed '/^$/d' | xargs -r shellcheck --severity=warning
       - name: Install commitlint
         run: npm install -g @commitlint/cli @commitlint/config-conventional
 
