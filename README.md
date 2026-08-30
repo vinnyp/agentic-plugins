@@ -5,9 +5,11 @@ to Claude at the moment). [Contributions welcome](CONTRIBUTING.md).
 
 - `peer-reviewer-agents`: independent peer-review lenses for software development
 - `operator-agents`: hands-on engineering & product senior-role agents
+- `agent-dispatch`: dispatch coding work and peer reviews to external agent CLIs
 
 The plugins pair naturally: do the work with an operator, then review it with
-the matching peer-review lens.
+the matching peer-review lens — or hand either job to `agent-dispatch` to run
+against codex, agy/Gemini, or claude instead of the current session.
 
 ## Install
 
@@ -22,6 +24,7 @@ Then install either plugin, or both:
 ```bash
 claude plugin install peer-reviewer-agents@agentic-plugins
 claude plugin install operator-agents@agentic-plugins
+claude plugin install agent-dispatch@agentic-plugins
 ```
 
 ## What The Plugins Provide
@@ -42,6 +45,20 @@ full reviewer roster and review method.
 
 See [operator-agents/README.md](operator-agents/README.md) for the operator
 roster and guardrail pattern.
+
+`agent-dispatch` sends a coding task or a peer review to an external agent CLI
+(codex, agy/Gemini, or claude) instead of running it in the current session:
+
+- Coding work goes through a preflight → external timeout → completion-marker
+  → hard-revert safety net, so a failed dispatch either leaves reviewable
+  changes or resets cleanly — never a half-applied edit.
+- Peer reviews run the same way, judged for evidence before they count as a
+  real review.
+- It can also drive a live, watchable agent TUI session over tmux or cmux, and
+  ships a `doctor` command to check the runtimes it depends on are ready.
+
+See [agent-dispatch/README.md](agent-dispatch/README.md) for the full CLI
+reference and safety contract.
 
 ## Updates
 

@@ -1,0 +1,18 @@
+[
+  {"query": "I wrote a CLAUDE.md for this repo — verify a brand-new claude session here actually loads it, for real, by driving a live session", "should_trigger": true},
+  {"query": "drive a cold codex session over tmux and watch how it works through this task", "should_trigger": true},
+  {"query": "I want to type into a running agy / Antigravity TUI from a script and read its reply — what's the reliable way?", "should_trigger": true},
+  {"query": "spin up a fresh claude session and probe what context it auto-loads, answering only from loaded context with no tools", "should_trigger": true},
+  {"query": "my tmux send-keys to the claude TUI keeps reading stale or empty output — how should I structure driving it?", "should_trigger": true},
+  {"query": "open an interactive codex session and let me steer it through this debugging back-and-forth while I watch", "should_trigger": true},
+  {"query": "dispatch codex to implement this refactor across three files and revert it if the build fails", "should_trigger": false},
+  {"query": "use agy to write this function for me and commit it when it's done", "should_trigger": false},
+  {"query": "set up a new tmux session with a couple of split panes for my dev work", "should_trigger": false},
+  {"query": "check whether this repo's AGENTS.md gives codex and agy the governance they need", "should_trigger": false},
+  {"query": "run claude --print to get a quick one-shot answer inside my shell script", "should_trigger": false},
+  {"query": "how do I install the codex CLI and Antigravity (agy) on my mac?", "should_trigger": false},
+  {"query": "drive a fresh claude session in cmux so my teammate can watch it work and take over if it goes sideways", "should_trigger": true},
+  {"query": "my script's cmux send / cmux read-screen calls all fail with 'Failed to write to socket (Broken pipe)' but the cmux app is running", "should_trigger": true},
+  {"query": "set up a cmux workspace layout with split panes and custom keyboard shortcuts for my project", "should_trigger": false},
+  {"query": "use cmux claude-teams to spin up a whole team of agents on this repo", "should_trigger": false}
+]
