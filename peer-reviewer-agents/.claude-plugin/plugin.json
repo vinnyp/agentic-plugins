@@ -1,0 +1,19 @@
+{
+  "name": "peer-reviewer-agents",
+  "version": "1.0.0",
+  "description": "Independent peer-review lenses for software, product, release, retrieval, and operations work.",
+  "author": {
+    "name": "Vinny Pasceri"
+  },
+  "license": "MIT",
+  "repository": "https://github.com/vinnyp/agentic-plugins",
+  "keywords": [
+    "agents",
+    "claude-agents",
+    "code-review",
+    "code-review-agents",
+    "product-management",
+    "release-management",
+    "software-engineering"
+  ]
+}

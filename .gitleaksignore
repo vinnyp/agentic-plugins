@@ -1,0 +1,8 @@
+# Documented false positive. The publish gate reports every suppression in its
+# evidence block, so nothing here is invisible.
+#
+# The generic-api-key rule fires on a descriptive English phrase in the
+# peer-security-reviewer frontmatter. It is prose, not a credential. (The
+# matched text is deliberately NOT quoted here: quoting it re-triggers the rule
+# on this file.)
+peer-reviewer-agents/agents/peer-security-reviewer.md:generic-api-key:3

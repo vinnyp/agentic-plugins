@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Validate plugin marketplace
+        shell: bash
+        run: |
+          set +e
+          claude plugin validate . 2>&1 | tee claude-plugin-validate.out
+          status=${PIPESTATUS[0]}
+          set -e
+          if grep -Eiq 'warning|Validation passed with warnings' claude-plugin-validate.out; then
+            echo "claude plugin validate emitted warnings; treating as failure."
+            exit 1
+          fi
+          exit "$status"
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITLEAKS_ENABLE_COMMENTS: false
+        with:
+          args: dir --no-git --redact .
+
+      - name: Install commitlint
+        run: npm install -g @commitlint/cli @commitlint/config-conventional
+
+      - name: Write commitlint config
+        run: echo "module.exports = { extends: ['@commitlint/config-conventional'] };" > commitlint.config.cjs
+
+      - name: Commitlint pull request
+        if: github.event_name == 'pull_request'
+        run: commitlint --from "origin/${{ github.base_ref }}" --to HEAD --verbose
+
+      - name: Commitlint push
+        if: github.event_name == 'push'
+        run: commitlint --from "${{ github.event.before }}" --to "${{ github.sha }}" --verbose
