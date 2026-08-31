@@ -1,0 +1,5 @@
+{
+  "$schema": "https://antigravity.google/schemas/v1/plugin.json",
+  "name": "agent-dispatch",
+  "description": "Dispatch coding work and peer reviews to external agent CLIs (codex, agy/Gemini, claude) behind a preflight → timeout → completion-marker → hard-revert safety net, or drive a live agent TUI over tmux/cmux. Bare-PATH CLIs plus the driving-agent-sessions skill."
+}
