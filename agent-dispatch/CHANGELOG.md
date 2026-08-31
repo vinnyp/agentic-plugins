@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.1.0...agent-dispatch-v1.2.0) (2026-08-31)
+
+
+### Features
+
+* **agent-dispatch:** add three agent-dev-workflow skills ([#8](https://github.com/vinnyp/agentic-plugins/issues/8)) ([3c52790](https://github.com/vinnyp/agentic-plugins/commit/3c52790c56a02d7868ecdab9ebc5c506c997c13f))
+
 ## [1.1.0](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.0.0...agent-dispatch-v1.1.0) (2026-08-31)
 
 
