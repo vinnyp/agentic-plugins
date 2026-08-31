@@ -90,8 +90,14 @@ jobs:
           echo "::group::agy plugin validate agent-dispatch"
           timeout 60 agy plugin validate agent-dispatch 2>&1 | strip_ansi | tee agy-agent-dispatch.out
           echo "::endgroup::"
-          grep -Eq 'skills[[:space:]]*:[[:space:]]*1 processed' agy-agent-dispatch.out \
-            || { echo "agy: expected agent-dispatch skills count == 1, got:"; cat agy-agent-dispatch.out; exit 1; }
+          # The skills "N processed" count is NOT environment-stable: agy 1.1.22
+          # reported 1 locally (macOS) and 5 on the Linux runner for identical
+          # content — one counts skill dirs, the other counts non-evals .md files.
+          # So assert only that skills are processed at all (nonzero). The agent
+          # counts below ARE stable: agents/ dirs are flat (one .md per agent), so
+          # both counting modes agree.
+          grep -Eq 'skills[[:space:]]*:[[:space:]]*[1-9][0-9]* processed' agy-agent-dispatch.out \
+            || { echo "agy: expected agent-dispatch skills line with a nonzero processed count, got:"; cat agy-agent-dispatch.out; exit 1; }
 
           echo "::group::agy plugin validate operator-agents"
           timeout 60 agy plugin validate operator-agents 2>&1 | strip_ansi | tee agy-operator-agents.out
