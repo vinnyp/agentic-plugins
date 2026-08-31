@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.2.0...agent-dispatch-v1.3.0) (2026-08-31)
+
+
+### Features
+
+* dual-runtime agent frontmatter for Antigravity (agy) support ([#10](https://github.com/vinnyp/agentic-plugins/issues/10)) ([8226cd3](https://github.com/vinnyp/agentic-plugins/commit/8226cd36f8e9231751c19c2421527ee5c5c0b961))
+
 ## [1.2.0](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.1.0...agent-dispatch-v1.2.0) (2026-08-31)
 
 
