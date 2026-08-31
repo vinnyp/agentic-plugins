@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/vinnyp/agentic-plugins/compare/peer-reviewer-agents-v1.1.0...peer-reviewer-agents-v1.2.0) (2026-08-31)
+
+
+### Features
+
+* **peer-reviewer-agents:** add the peer-apps-script-reviewer lens ([#14](https://github.com/vinnyp/agentic-plugins/issues/14)) ([af05cfc](https://github.com/vinnyp/agentic-plugins/commit/af05cfcc64b58fea703f6bc8c510387a083d9217))
+
 ## [1.1.0](https://github.com/vinnyp/agentic-plugins/compare/peer-reviewer-agents-v1.0.0...peer-reviewer-agents-v1.1.0) (2026-08-31)
 
 
