@@ -8,7 +8,7 @@ set -uo pipefail
 
 BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="$(cd "$BIN/.." && pwd)"
-README="$PLUGIN_ROOT/README.md"
+DOC="$PLUGIN_ROOT/docs/worktree-isolation.md"
 
 pass=0; fail=0
 ok(){ echo "ok: $1"; pass=$((pass+1)); }
@@ -27,7 +27,7 @@ requires_phrase() {
   fi
 }
 
-requires_phrase "$README" "source checkout directly" "README worktree caveat"
-requires_phrase "$README" "never inside the worktree" "README worktree caveat"
+requires_phrase "$DOC" "source checkout directly" "worktree-isolation doc caveat"
+requires_phrase "$DOC" "never inside the worktree" "worktree-isolation doc caveat"
 
 echo "pass=$pass fail=$fail"; [ "$fail" -eq 0 ]
