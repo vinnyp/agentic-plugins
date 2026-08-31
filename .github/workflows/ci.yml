@@ -33,6 +33,84 @@ jobs:
           fi
           exit "$status"
 
+      # `claude plugin validate .` above only validates the marketplace manifest
+      # (.claude-plugin/marketplace.json) — it does NOT descend into each plugin's
+      # agents/skills frontmatter. Validate each plugin directory individually so a
+      # broken agent/skill file (bad YAML frontmatter, missing required fields,
+      # malformed plugin.json) fails CI. Verified locally: a corrupted agent
+      # frontmatter is invisible to the marketplace-root validate but is caught here.
+      - name: Validate each plugin (claude plugin validate)
+        shell: bash
+        run: |
+          set +e
+          status=0
+          for plugin in agent-dispatch operator-agents peer-reviewer-agents; do
+            echo "::group::claude plugin validate $plugin"
+            claude plugin validate "$plugin" 2>&1 | tee "claude-plugin-validate-${plugin}.out"
+            plugin_status=${PIPESTATUS[0]}
+            echo "::endgroup::"
+            if [ "$plugin_status" -ne 0 ]; then
+              echo "claude plugin validate failed for $plugin (exit $plugin_status)"
+              status=1
+            fi
+            if grep -Eiq 'warning|Validation passed with warnings' "claude-plugin-validate-${plugin}.out"; then
+              echo "claude plugin validate emitted warnings for $plugin; treating as failure."
+              status=1
+            fi
+          done
+          exit "$status"
+
+      # Antigravity CLI (agy) has no npm/brew package — its only public install path
+      # is this Google-hosted install script, which is non-interactive and needs no
+      # auth (verified: `agy plugin validate` runs clean against a scratch $HOME with
+      # no credentials configured). It also self-updates / has no version-pin flag,
+      # so this step always installs whatever is currently "latest" — see the open
+      # risk noted in the PR/commit for version-drift on runners.
+      - name: Install Antigravity CLI (agy)
+        run: |
+          curl -fsSL https://antigravity.google/cli/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: agy --version
+        run: agy --version
+
+      # `agy plugin validate` is advisory, not a hard gate: empirically (verified
+      # locally) it exits 0 even on invalid JSON in plugin.json, missing required
+      # frontmatter fields, and unparseable YAML frontmatter — it never fails on
+      # content defects. The one signal it DOES reliably reflect is the per-type
+      # "processed" count, which drops when an agent/skill file silently stops being
+      # picked up (e.g. moved out of agents/, excluded by a manifest change). So the
+      # real regression gate here is the count assertion below, not agy's exit code.
+      - name: Validate plugins (agy plugin validate)
+        shell: bash
+        run: |
+          set -e
+          strip_ansi() { sed -E 's/\x1b\[[0-9;]*m//g'; }
+
+          echo "::group::agy plugin validate agent-dispatch"
+          timeout 60 agy plugin validate agent-dispatch 2>&1 | strip_ansi | tee agy-agent-dispatch.out
+          echo "::endgroup::"
+          # The skills "N processed" count is NOT environment-stable: agy 1.1.22
+          # reported 1 locally (macOS) and 5 on the Linux runner for identical
+          # content — one counts skill dirs, the other counts non-evals .md files.
+          # So assert only that skills are processed at all (nonzero). The agent
+          # counts below ARE stable: agents/ dirs are flat (one .md per agent), so
+          # both counting modes agree.
+          grep -Eq 'skills[[:space:]]*:[[:space:]]*[1-9][0-9]* processed' agy-agent-dispatch.out \
+            || { echo "agy: expected agent-dispatch skills line with a nonzero processed count, got:"; cat agy-agent-dispatch.out; exit 1; }
+
+          echo "::group::agy plugin validate operator-agents"
+          timeout 60 agy plugin validate operator-agents 2>&1 | strip_ansi | tee agy-operator-agents.out
+          echo "::endgroup::"
+          grep -Eq 'agents[[:space:]]*:[[:space:]]*6 processed' agy-operator-agents.out \
+            || { echo "agy: expected operator-agents agents count == 6, got:"; cat agy-operator-agents.out; exit 1; }
+
+          echo "::group::agy plugin validate peer-reviewer-agents"
+          timeout 60 agy plugin validate peer-reviewer-agents 2>&1 | strip_ansi | tee agy-peer-reviewer-agents.out
+          echo "::endgroup::"
+          grep -Eq 'agents[[:space:]]*:[[:space:]]*16 processed' agy-peer-reviewer-agents.out \
+            || { echo "agy: expected peer-reviewer-agents agents count == 16, got:"; cat agy-peer-reviewer-agents.out; exit 1; }
+
       - name: Install gitleaks
         run: |
           set -euo pipefail
