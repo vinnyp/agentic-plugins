@@ -49,6 +49,27 @@ Mandatory when the trigger fires; skipped only when genuinely N/A.
   a registry publish (schema + full-text index + triggers + migrations by construction). The highest-severity bugs at that door
   have been database-shaped and were caught only by the DB lens; code and test review missed them.
   For non-release changes it stays a Tier-3 discretionary lens (below).
+- **`peer-apps-script-reviewer`** — REQUIRED when the diff touches any file in a directory tree
+  rooted at a `.clasp.json` or an `appsscript.json`, or any `.gs` file anywhere. A `.js`/`.ts` file
+  is in scope only under such a root. This trigger is a **file test** — decide it by that test and
+  do not apply the "if unsure, it fires" rule to it. In `build` mode it runs **alongside** the
+  Tier-1 `peer-code-reviewer`, never instead of it; in `design` mode (an Apps Script spec, with no
+  diff) it runs on the spec on its own. The code lens owns correctness; this lens owns the platform
+  contract the code runs inside: execution identity and deployment posture (an *execute as me* web
+  app opened to `ANYONE` or `ANYONE_ANONYMOUS` is an open proxy into the owner's account),
+  simple-vs-installable trigger semantics and whose authority a trigger wields, the execution walls
+  (6 minutes; 30 seconds for custom functions and Workspace add-ons) and the per-day quota budget,
+  unbatched per-cell service calls in a loop, OAuth-scope breadth in the manifest, and Workspace
+  sharing blast radius. On a co-dispatched review, **OAuth-scope breadth and manifest hygiene are
+  the Apps Script lens's call — dedupe toward it** rather than filing the same finding twice. An
+  Apps Script **web app**, or any change touching its authorization, also fires
+  `peer-security-reviewer` (external input + publish posture); this lens hands the exploit model to
+  it. Pass it the manifest path via `--source`, and the deployment shape (who executes it and under
+  whose authority), the trigger inventory, and the real data volumes in `--what` — they are not
+  paths, and the lens will report them as unverified rather than guess. Requires
+  `peer-reviewer-agents` >= 1.2.0; if the persona does not resolve in your installed plugin,
+  upgrade it or run the platform checklist yourself against the manifest and say so in the log —
+  do not record the trigger as N/A.
 - **`peer-plan-reviewer`** — REQUIRED when a plan will be executed **unattended or by a remote
   coding agent**. Runs on the plan doc BEFORE any build step begins — unlike the other Tier-2
   entries, this one fires PRE-BUILD. Pass it the plan path plus the spec path. It catches spec→plan

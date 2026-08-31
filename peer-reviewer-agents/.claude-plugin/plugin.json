@@ -1,7 +1,7 @@
 {
   "name": "peer-reviewer-agents",
   "version": "1.1.0",
-  "description": "Independent peer-review lenses for software, product, release, retrieval, and operations work.",
+  "description": "Independent peer-review lenses for software, product, release, retrieval, Google Workspace, and operations work.",
   "author": {
     "name": "Vinny Pasceri"
   },
@@ -9,9 +9,12 @@
   "repository": "https://github.com/vinnyp/agentic-plugins",
   "keywords": [
     "agents",
+    "apps-script",
     "claude-agents",
     "code-review",
     "code-review-agents",
+    "google-apps-script",
+    "google-workspace",
     "product-management",
     "release-management",
     "software-engineering"

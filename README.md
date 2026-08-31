@@ -1,10 +1,10 @@
 # agentic-plugins
 
-`agentic-plugins` is a public marketplace for reusable agentic plugins. All 22
-agents across the two agent plugins (`peer-reviewer-agents`, `operator-agents`)
-are defined once and run under both **Claude Code** and the **Antigravity CLI**
-(`agy`) from the same dual-runtime frontmatter. [Contributions
-welcome](CONTRIBUTING.md).
+`agentic-plugins` is a public marketplace for reusable agentic plugins.
+All 23 agents across the two agent plugins (`peer-reviewer-agents`,
+`operator-agents`) are defined once and run under both **Claude Code** and
+the **Antigravity CLI** (`agy`) from the same dual-runtime frontmatter.
+[Contributions welcome](CONTRIBUTING.md).
 
 - `peer-reviewer-agents`: independent peer-review lenses for software development
 - `operator-agents`: hands-on engineering & product senior-role agents
@@ -52,11 +52,11 @@ but not tool-enforced.
 
 ## What The Plugins Provide
 
-`peer-reviewer-agents` contains 16 reviewer lenses:
+`peer-reviewer-agents` contains 17 reviewer lenses:
 
-- Architecture, code, database, DevOps, interface, performance, planning,
-  privacy, product, product marketing, release, reliability, retrieval,
-  security, standards, and testing.
+- Apps Script (Google Workspace), architecture, code, database, DevOps,
+  interface, performance, planning, privacy, product, product marketing,
+  release, reliability, retrieval, security, standards, and testing.
 
 See [peer-reviewer-agents/README.md](peer-reviewer-agents/README.md) for the
 full reviewer roster and review method.

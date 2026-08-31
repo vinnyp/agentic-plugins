@@ -9,13 +9,16 @@
     {
       "name": "peer-reviewer-agents",
       "source": "./peer-reviewer-agents",
-      "description": "Independent peer-review lenses for software, product, release, retrieval, and operations work.",
+      "description": "Independent peer-review lenses for software, product, release, retrieval, Google Workspace, and operations work.",
       "category": "Productivity",
       "keywords": [
         "agents",
+        "apps-script",
         "claude-agents",
         "code-review",
         "code-review-agents",
+        "google-apps-script",
+        "google-workspace",
         "product-management",
         "release-management",
         "software-engineering"

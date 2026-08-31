@@ -60,6 +60,55 @@ jobs:
           done
           exit "$status"
 
+      # The agy count assertion below proves a FILE count, not that an agent
+      # LOADS. Verified by mutation: adding a `tools:` key to an agent's
+      # frontmatter keeps `claude plugin validate` green AND keeps agy's
+      # "N processed" count unchanged, while `agy agent` silently drops the
+      # agent — the exact trap the dual-runtime frontmatter exists to avoid.
+      # A duplicated `name:` is likewise invisible to both. These checks are
+      # deterministic, offline, and need neither agy nor credentials.
+      - name: Agent frontmatter contract (no tools key, name integrity)
+        shell: bash
+        run: |
+          set -euo pipefail
+          fail=0
+          names_file="$(mktemp)"
+          for f in peer-reviewer-agents/agents/*.md operator-agents/agents/*.md; do
+            base="$(basename "$f" .md)"
+            fm="$(awk '/^---$/{c++; next} c==1' "$f")"
+            if printf '%s\n' "$fm" | grep -Eq '^tools:'; then
+              echo "$f: forbidden 'tools:' key — silently excludes the agent under agy"
+              fail=1
+            fi
+            name="$(printf '%s\n' "$fm" | sed -n 's/^name:[[:space:]]*//p' | head -1 | tr -d '"'"'"'"'"'"'"'"'")"
+            if [ -z "$name" ]; then
+              echo "$f: missing 'name:' in frontmatter"
+              fail=1
+            elif [ "$name" != "$base" ]; then
+              echo "$f: name '$name' does not match filename '$base'"
+              fail=1
+            fi
+            printf '%s\n' "$name" >> "$names_file"
+          done
+          dupes="$(sort "$names_file" | uniq -d)"
+          if [ -n "$dupes" ]; then
+            echo "duplicate agent names (one silently shadows the other): $dupes"
+            fail=1
+          fi
+          # Every peer-*-reviewer named in the published dispatch docs must resolve
+          # to a real agent, so a roster/doc rename cannot strand a dispatcher.
+          for n in $(grep -ohE 'peer-[a-z-]+-reviewer' README.md peer-reviewer-agents/README.md \
+              agent-dispatch/skills/running-the-peer-review-gate/references/peer-review-tiers.md \
+              | sort -u); do
+            grep -qx "$n" "$names_file" || { echo "docs reference '$n', which no agent defines"; fail=1; }
+          done
+          # Per-plugin lens count published in the plugin README.
+          lenses="$(find peer-reviewer-agents/agents -name '*.md' | wc -l | tr -d ' ')"
+          tr '\n' ' ' < peer-reviewer-agents/README.md | tr -s ' ' | grep -Fq "All ${lenses} lenses" \
+            || { echo "peer-reviewer-agents/README.md lens count != ${lenses}"; fail=1; }
+          [ "$fail" -eq 0 ] && echo "agent frontmatter contract OK (${lenses} lenses)"
+          exit "$fail"
+
       # Antigravity CLI (agy) has no npm/brew package — its only public install path
       # is this Google-hosted install script, which is non-interactive and needs no
       # auth (verified: `agy plugin validate` runs clean against a scratch $HOME with
@@ -108,8 +157,16 @@ jobs:
           echo "::group::agy plugin validate peer-reviewer-agents"
           timeout 60 agy plugin validate peer-reviewer-agents 2>&1 | strip_ansi | tee agy-peer-reviewer-agents.out
           echo "::endgroup::"
-          grep -Eq 'agents[[:space:]]*:[[:space:]]*16 processed' agy-peer-reviewer-agents.out \
-            || { echo "agy: expected peer-reviewer-agents agents count == 16, got:"; cat agy-peer-reviewer-agents.out; exit 1; }
+          grep -Eq 'agents[[:space:]]*:[[:space:]]*17 processed' agy-peer-reviewer-agents.out \
+            || { echo "agy: expected peer-reviewer-agents agents count == 17, got:"; cat agy-peer-reviewer-agents.out; exit 1; }
+
+          # The per-plugin counts above are asserted against agy's own output; the
+          # AGGREGATE in README.md has no such gate and silently drifted once (it
+          # still said 22 after a lens was added). Derive it and assert the prose.
+          total=$(( $(ls peer-reviewer-agents/agents/*.md | wc -l) + $(ls operator-agents/agents/*.md | wc -l) ))
+          # tr collapses newlines first: the phrase may wrap across lines.
+          tr '\n' ' ' < README.md | tr -s ' ' | grep -Fq "All ${total} agents" \
+            || { echo "README.md aggregate agent count != ${total}"; grep -n 'agents across the two' README.md; exit 1; }
 
       - name: Install gitleaks
         run: |

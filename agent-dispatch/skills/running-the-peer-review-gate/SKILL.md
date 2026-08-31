@@ -55,7 +55,8 @@ Read [references/peer-review-tiers.md](references/peer-review-tiers.md) and sele
   These review a diff and its green suite, so they apply in `build` mode only. **In `design` mode
   the baseline is instead the spec-gate checks plus whatever Tier-3 lenses the spec warrants**
   (architecture at minimum for a structural design) — there is no diff for the Tier-1 pair to review.
-- **Tier 2 — by trigger:** security / privacy / database (at a release door) / plan (unattended) —
+- **Tier 2 — by trigger:** security / privacy / database (at a release door) / plan (unattended) /
+  Apps Script (alongside `peer-code-reviewer`) —
   and the **measurement-lens trigger**: a measurement-shaped change (a new or changed gate,
   threshold, metric, or verdict) pulls in a measurement-methodology lens. If you are unsure whether
   a trigger fires, **it fires.**
@@ -83,6 +84,20 @@ for the different-model route, include it:
 For `design` mode, pass `--spec <path>` instead of `--range`. The closing (the "return exactly this
 structure" instruction plus the file:line clause) comes from the shared template — do not hand-write
 it.
+
+**Context that is not a path goes in `--what`.** Some lenses need runtime facts no file in the repo
+carries — the clearest case is `peer-apps-script-reviewer`, whose highest-value check is the web-app
+deployment posture (`executeAs` x `access`), which for an editor-deployed web app is deployment-time
+state absent from `appsscript.json`. Pass the manifest as a `--source` and put the rest in `--what`:
+
+```bash
+"$RG" brief --persona peer-apps-script-reviewer --mode build --for claude \
+  --range "$RANGE" --source appsscript.json \
+  --what "<what the change should do>. Deployment: web app, executeAs=USER_DEPLOYING, access=ANYONE; 2 installable triggers installed by the sheet owner; ~40k rows/run"
+```
+
+This is a documented workaround, not a designed slot — `review-gate brief` has no `--context` flag
+yet. A lens not given these facts must report them unverified rather than infer them.
 
 **Never hand-roll a brief out of pasted excerpts.** `review-gate brief` emits PATHS (`--spec`,
 `--range`, `--source`) plus a `repo root:` line, and tells the reviewer to open them. That is the
