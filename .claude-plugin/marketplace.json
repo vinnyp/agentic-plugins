@@ -38,7 +38,7 @@
     {
       "name": "agent-dispatch",
       "source": "./agent-dispatch",
-      "description": "Dispatch coding work and peer reviews to external agent CLIs.",
+      "description": "Dispatch coding work and drive live agent CLIs (codex, agy/Gemini, claude), and run the tiered peer-review gate.",
       "category": "Productivity",
       "keywords": [
         "agents",
@@ -47,7 +47,9 @@
         "gemini",
         "claude-code",
         "orchestration",
-        "worktrees"
+        "worktrees",
+        "peer-review",
+        "review-gate"
       ]
     }
   ]

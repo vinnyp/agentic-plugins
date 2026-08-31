@@ -1,7 +1,7 @@
 {
   "name": "agent-dispatch",
   "version": "1.0.0",
-  "description": "Dispatch coding work and peer reviews to external agent CLIs (codex, agy/Gemini, claude) behind a preflight → timeout → completion-marker → hard-revert safety net, or drive a live agent TUI over tmux/cmux. Bare-PATH CLIs plus the driving-agent-sessions skill.",
+  "description": "Dispatch coding work to external agent CLIs (codex, agy/Gemini, claude) behind a preflight → timeout → completion-marker → hard-revert safety net, drive a live agent TUI over tmux/cmux, and run the tiered peer-review gate — pick the reviewer lenses, brief them identically, optionally run a different-model pass, and leave a durable review log. Bare-PATH CLIs plus the driving-agent-sessions and running-the-peer-review-gate skills.",
   "author": {
     "name": "Vinny Pasceri"
   },
@@ -14,6 +14,8 @@
     "gemini",
     "claude-code",
     "orchestration",
-    "worktrees"
+    "worktrees",
+    "peer-review",
+    "review-gate"
   ]
 }
