@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.3.0...agent-dispatch-v1.4.0) (2026-08-31)
+
+
+### Features
+
+* **peer-reviewer-agents:** add the peer-apps-script-reviewer lens ([#14](https://github.com/vinnyp/agentic-plugins/issues/14)) ([af05cfc](https://github.com/vinnyp/agentic-plugins/commit/af05cfcc64b58fea703f6bc8c510387a083d9217))
+
 ## [1.3.0](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.2.0...agent-dispatch-v1.3.0) (2026-08-31)
 
 
