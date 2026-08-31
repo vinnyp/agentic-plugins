@@ -16,6 +16,9 @@
     "orchestration",
     "worktrees",
     "peer-review",
-    "review-gate"
+    "review-gate",
+    "testing",
+    "hermetic-tests",
+    "agent-bootstrap"
   ]
 }
