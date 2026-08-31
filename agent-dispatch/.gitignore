@@ -1,0 +1,4 @@
+# Build output of bin/ensure-review-gate.sh — the review-gate CLI is built from
+# source on demand, never committed. (The source directory ignores its own
+# `go build ./...` output separately, in tools/review-gate/.gitignore.)
+/.bin/

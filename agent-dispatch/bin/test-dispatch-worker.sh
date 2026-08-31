@@ -108,6 +108,16 @@ grep -q -- "--sandbox read-only" "$CODEX_ARGS_FILE" \
   || fail "codex --review --ceremony did not force a read-only sandbox (got: $(cat "$CODEX_ARGS_FILE"))"
 echo "test 4 (codex --review forces read-only) PASS"
 
+# 4b. codex --review honors --workdir by threading it to `codex exec -C <dir>`.
+CODEX_WORKDIR="$TMP/codex-review-target"; mkdir -p "$CODEX_WORKDIR"
+TIMEOUT=0 "$DW" --runtime codex --review --brief "$BRIEF" --workdir "$CODEX_WORKDIR" >/dev/null 2>&1
+grep -qF -- "-C $CODEX_WORKDIR" "$CODEX_ARGS_FILE" \
+  || fail "codex --review did not thread --workdir as -C (got: $(cat "$CODEX_ARGS_FILE"))"
+TIMEOUT=0 "$DW" --runtime codex --review --model gpt-5.4-mini --brief "$BRIEF" --workdir "$CODEX_WORKDIR" >/dev/null 2>&1
+grep -qF -- "-C $CODEX_WORKDIR" "$CODEX_ARGS_FILE" \
+  || fail "codex --review with --model did not thread --workdir as -C (got: $(cat "$CODEX_ARGS_FILE"))"
+echo "test 4b (codex --review threads workdir via -C) PASS"
+
 # 5. --help advertises --review.
 "$DW" --help 2>&1 | grep -qi "review" || fail "--help doesn't mention --review"
 echo "test 5 (--help) PASS"
