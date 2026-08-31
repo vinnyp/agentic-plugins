@@ -6,6 +6,21 @@ product, release, retrieval, standards, and operations work.
 These are senior-role agents, not Kubernetes-style operators or automation
 controllers. The word is used in the sense of "the person who does the work."
 
+## Runtime Support
+
+All 6 operators are defined once and run under both **Claude Code** and the
+**Antigravity CLI** (`agy`) from the same frontmatter. Install for agy directly
+from the plugin directory (no marketplace/registry flow exists for Antigravity
+yet):
+
+```bash
+agy plugin install /path/to/operator-agents
+```
+
+Installed agents then show up in `agy agent`. The top-level `plugin.json` is
+the Antigravity manifest; `.claude-plugin/plugin.json` is the Claude one — both
+point at the same agent definitions.
+
 ## Guardrail Pattern
 
 Each operator acts like a senior practitioner: it investigates, drafts, edits,

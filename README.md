@@ -1,7 +1,10 @@
 # agentic-plugins
 
-`agentic-plugins` is a public marketplace for reusable agentic plugins (limited
-to Claude at the moment). [Contributions welcome](CONTRIBUTING.md).
+`agentic-plugins` is a public marketplace for reusable agentic plugins. All 22
+agents across the two agent plugins (`peer-reviewer-agents`, `operator-agents`)
+are defined once and run under both **Claude Code** and the **Antigravity CLI**
+(`agy`) from the same dual-runtime frontmatter. [Contributions
+welcome](CONTRIBUTING.md).
 
 - `peer-reviewer-agents`: independent peer-review lenses for software development
 - `operator-agents`: hands-on engineering & product senior-role agents
@@ -12,6 +15,8 @@ the matching peer-review lens — or hand either job to `agent-dispatch` to run
 against codex, agy/Gemini, or claude instead of the current session.
 
 ## Install
+
+### Claude Code
 
 Add the marketplace:
 
@@ -26,6 +31,24 @@ claude plugin install peer-reviewer-agents@agentic-plugins
 claude plugin install operator-agents@agentic-plugins
 claude plugin install agent-dispatch@agentic-plugins
 ```
+
+### Antigravity CLI (agy)
+
+Install a plugin directly from its directory (no marketplace/registry flow
+exists for Antigravity yet):
+
+```bash
+agy plugin install /path/to/agentic-plugins/peer-reviewer-agents
+agy plugin install /path/to/agentic-plugins/operator-agents
+```
+
+Each plugin ships a top-level `plugin.json` (the Antigravity manifest)
+alongside `.claude-plugin/plugin.json` (the Claude manifest), so the same
+agent definitions load under both runtimes. Installed agents show up in
+`agy agent` and are invocable as subagents. One difference to know about:
+the peer reviewers' read-only contract is enforced by Claude Code via
+`disallowedTools`; under Antigravity it's stated in each reviewer's prompt
+but not tool-enforced.
 
 ## What The Plugins Provide
 

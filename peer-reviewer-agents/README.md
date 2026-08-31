@@ -7,6 +7,33 @@ clear ownership of what it does and does not judge.
 This plugin pairs with `operator-agents`: do the work with the relevant senior-role
 operator, then review it with the matching `peer-*` lens.
 
+## Runtime Support
+
+All 16 lenses are defined once and run under both **Claude Code** and the
+**Antigravity CLI** (`agy`) from the same frontmatter. Install for agy directly
+from the plugin directory (no marketplace/registry flow exists for Antigravity
+yet):
+
+```bash
+agy plugin install /path/to/peer-reviewer-agents
+```
+
+Installed agents then show up in `agy agent`. The top-level `plugin.json` is
+the Antigravity manifest; `.claude-plugin/plugin.json` is the Claude one — both
+point at the same agent definitions.
+
+One difference to know about: the read-only contract is enforced differently
+per runtime. Every lens declares a `disallowedTools` frontmatter field — 12
+deny `Write`, `Edit`, `NotebookEdit`; the 4 local-evidence-only lenses
+(`peer-code-reviewer`, `peer-database-reviewer`, `peer-plan-reviewer`,
+`peer-test-reviewer`) also deny `WebSearch` and `WebFetch`. Claude Code
+enforces that denylist at the tool layer. Antigravity does not enforce it —
+under `agy` the read-only contract is stated in each reviewer's prompt but not
+tool-blocked. `peer-test-reviewer` additionally carves out one sanctioned,
+self-restoring exception to "read-only": its mutation check may temporarily
+break/revert code under test via shell edits, provided the tree is restored to
+its exact pre-check state before the review is returned.
+
 ## Lenses
 
 | Lens | What it is for |
