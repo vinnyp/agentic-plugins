@@ -113,6 +113,12 @@ driving a live tmux/cmux session — are documented per command in the
   rule, the dirty-tree rule, verifying commits after `DISPATCH=ok`, the review pin, and the failure
   playbook.
 
+### Skills
+
+- **`dispatching-into-a-worktree`** — isolate a coding dispatch's hard-revert from a shared checkout.
+- **`validating-agent-bootstrap`** — verify a repo's cold-start context is actually sufficient.
+- **`stubbing-external-agents-in-tests`** — stub `agy`/`codex`/`claude` so tests never spawn a real agent.
+
 ## Testing
 
 ```bash
