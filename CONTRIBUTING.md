@@ -12,9 +12,16 @@ names, unpublished agent names, or internal service URLs.
 4. Run local checks when available:
 
    ```bash
-   claude plugin validate .
+   claude plugin validate .                      # marketplace manifest only
+   claude plugin validate peer-reviewer-agents   # per plugin: agent frontmatter
+   claude plugin validate operator-agents
+   claude plugin validate agent-dispatch
    gitleaks dir --no-git .
    ```
+
+   `claude plugin validate .` on its own is blind to agent frontmatter — it
+   validates the marketplace manifest and nothing below it. Run the per-plugin
+   form too, or CI will fail on something your local run reported clean.
 
 5. Open a pull request with a clear summary and testing notes.
 
@@ -22,12 +29,42 @@ names, unpublished agent names, or internal service URLs.
 
 Pull requests from forks run without repository secrets. CI runs:
 
-- `claude plugin validate .`, with warnings treated as failures.
+- `claude plugin validate .` and `claude plugin validate <plugin>` for each
+  plugin, with warnings treated as failures.
+- The agent frontmatter contract: no `tools` key, `name` matches the filename,
+  names are unique, doc-referenced `peer-*-reviewer` names resolve, and the
+  published agent counts match the files on disk.
+- `agy plugin validate <plugin>`, asserted on its per-type "N processed" counts
+  rather than its exit code, which does not fail on content defects.
 - `gitleaks` in directory mode.
+- `shellcheck` on tracked shell scripts.
 - `commitlint` against pull request commits.
 
 Maintainers may run additional model-backed evaluation before merging behavior
 changes. That evaluation is not a fork-PR gate because it requires credentials.
+
+## Adding a reviewer lens
+
+A new `peer-*-reviewer` is an addition to a published roster, so it carries a
+checklist:
+
+1. It must own a boundary no existing lens owns, stated as an explicit
+   `DEFERS:` clause naming every neighbour it touches.
+2. Its frontmatter must match the existing shape exactly — `name` (matching the
+   filename), `description`, `disallowedTools`, `mainAgent`, `subagent`, and
+   **no `tools` key**, which silently excludes the agent under `agy`.
+3. It must be placed in a tier in `agent-dispatch`'s
+   `skills/running-the-peer-review-gate/references/peer-review-tiers.md`, so
+   that something actually dispatches it.
+4. Update every count and roster: the per-plugin assertion in
+   `.github/workflows/ci.yml`, the aggregate count in the root `README.md`, and
+   the roster table plus the `disallowedTools` split in the plugin's own
+   `README.md`. CI asserts the per-plugin and aggregate counts; the roster
+   table is on you.
+
+Vendor- or platform-specific lenses (Google Apps Script, for example) are
+welcome alongside the domain-general ones, provided the boundary in (1) is real
+and the lens is useful outside the contributor's own codebase.
 
 ## Versioning
 

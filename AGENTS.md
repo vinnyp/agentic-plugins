@@ -21,6 +21,16 @@ credentials, personal data, or local machine paths.
   `agent-dispatch/skills/driving-agent-sessions/`, and its own test fixtures
   live in `agent-dispatch/test/`.
 
+## Agent frontmatter contract
+
+Every agent in `peer-reviewer-agents/agents/` and `operator-agents/agents/`
+declares `name` (matching its filename), `description`, `disallowedTools`,
+`mainAgent`, and `subagent` — and **no `tools` key**. A `tools` key silently
+excludes the agent under `agy` while both validators still report success, so
+CI asserts its absence, that each `name` matches its filename, that names are
+unique, and that every `peer-*-reviewer` named in the published docs resolves
+to a real agent.
+
 ## Contribution rules
 
 - Do not add private paths, private tracker IDs, internal hostnames, secrets, or
