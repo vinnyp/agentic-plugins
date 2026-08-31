@@ -1,0 +1,3 @@
+# Built binary (rebuilt on demand by bin/ensure-review-gate.sh); never committed.
+# `go build ./...` run from this directory drops it here.
+/review-gate

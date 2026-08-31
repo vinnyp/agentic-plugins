@@ -313,6 +313,10 @@ dispatch_codex() {
   # Honor --model for codex too (codex exec -m M); unset -> codex picks its config model.
   local -a codex_flags=()
   [ -n "$MODEL" ] && codex_flags+=(-m "$MODEL")
+  local codex_cd_dir=""
+  if [ -n "$WORKDIR" ] && [ -d "$WORKDIR" ]; then
+    codex_cd_dir="$WORKDIR"
+  fi
   # A --ceremony task may run OUTSIDE a trusted git repo (a general/skill task in an
   # arbitrary dir, not an in-repo edit). Skip codex's git-repo-trust gate there — the
   # caller already opted into danger-full-access. A read-only/in-repo run keeps the check.
@@ -326,13 +330,25 @@ dispatch_codex() {
   # before we measure the file below — a partially-flushed stdout would read as "codex
   # produced nothing" and resurrect the false positive this check exists to avoid.
   if [ "${#codex_flags[@]}" -gt 0 ]; then
-    run_with_timeout codex exec "${codex_flags[@]}" --sandbox "$sandbox" - < "$BRIEF" \
-      2> >(tee -a "$errlog" >&2) | tee -a "$stdoutlog"
-    rc=${PIPESTATUS[0]}
+    if [ -n "$codex_cd_dir" ]; then
+      run_with_timeout codex exec "${codex_flags[@]}" -C "$codex_cd_dir" --sandbox "$sandbox" - < "$BRIEF" \
+        2> >(tee -a "$errlog" >&2) | tee -a "$stdoutlog"
+      rc=${PIPESTATUS[0]}
+    else
+      run_with_timeout codex exec "${codex_flags[@]}" --sandbox "$sandbox" - < "$BRIEF" \
+        2> >(tee -a "$errlog" >&2) | tee -a "$stdoutlog"
+      rc=${PIPESTATUS[0]}
+    fi
   else
-    run_with_timeout codex exec --sandbox "$sandbox" - < "$BRIEF" \
-      2> >(tee -a "$errlog" >&2) | tee -a "$stdoutlog"
-    rc=${PIPESTATUS[0]}
+    if [ -n "$codex_cd_dir" ]; then
+      run_with_timeout codex exec -C "$codex_cd_dir" --sandbox "$sandbox" - < "$BRIEF" \
+        2> >(tee -a "$errlog" >&2) | tee -a "$stdoutlog"
+      rc=${PIPESTATUS[0]}
+    else
+      run_with_timeout codex exec --sandbox "$sandbox" - < "$BRIEF" \
+        2> >(tee -a "$errlog" >&2) | tee -a "$stdoutlog"
+      rc=${PIPESTATUS[0]}
+    fi
   fi
   cat "$stdoutlog" >> "$errlog"
   if [ "$rc" -ne 0 ] && grep -qiE 'not supported when using Codex|with a ChatGPT account|no (supported )?models? (are )?available|all models? (were |are )?rejected' "$errlog"; then

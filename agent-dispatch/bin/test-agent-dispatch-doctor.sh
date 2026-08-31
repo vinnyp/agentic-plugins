@@ -64,7 +64,8 @@ assert_registry_complete() {
   # are executable but not installed. agy-* probes are sourced internal helpers
   # and are intentionally not executable, so they do not need opt-outs.
   local opt_out=(
-    run-tests.sh # repo-local aggregate gate invoked as bin/run-tests.sh, not an installed operator command
+    run-tests.sh           # repo-local aggregate gate invoked as bin/run-tests.sh, not an installed operator command
+    ensure-review-gate.sh  # build glue for the review-gate CLI, invoked by the skill via $CLAUDE_PLUGIN_ROOT, not by bare name
   )
 
   for candidate in "$BIN_DIR"/*; do

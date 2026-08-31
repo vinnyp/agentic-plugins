@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
 
@@ -63,5 +63,45 @@ jobs:
         run: commitlint --from "origin/${{ github.base_ref }}" --to HEAD --verbose
 
       - name: Commitlint push
-        if: github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000'
-        run: commitlint --from "${{ github.event.before }}" --to "${{ github.sha }}" --verbose
+        if: github.event_name == 'push'
+        run: |
+          set -euo pipefail
+          before='${{ github.event.before }}'
+          sha='${{ github.sha }}'
+          if [ "$before" = '0000000000000000000000000000000000000000' ] || ! git merge-base --is-ancestor "$before" "$sha" 2>/dev/null; then
+            git fetch -q origin main 2>/dev/null || true
+            base="$(git merge-base origin/main "$sha" 2>/dev/null || echo "$sha~1")"
+            echo "commitlint: before is zero or not an ancestor (force-push/new branch); linting $base..$sha"
+            commitlint --from "$base" --to "$sha" --verbose
+          else
+            commitlint --from "$before" --to "$sha" --verbose
+          fi
+
+  go-review-gate:
+    name: Go (review-gate)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent-dispatch/tools/review-gate
+    env:
+      # Fail loud on a version mismatch instead of silently fetching a toolchain.
+      GOTOOLCHAIN: local
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          # Pinned to the go.mod directive; bump both together.
+          go-version: '1.26'
+          # No third-party deps (stdlib-only, no go.sum), so module caching buys nothing.
+          cache: false
+
+      - name: Build, vet and test
+        run: |
+          set -euo pipefail
+          go version
+          go build ./...
+          go vet ./...
+          go test ./...
