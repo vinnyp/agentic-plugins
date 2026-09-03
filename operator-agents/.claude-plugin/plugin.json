@@ -1,7 +1,7 @@
 {
   "name": "operator-agents",
   "version": "1.1.0",
-  "description": "Hands-on senior role agents for doing software, product, release, retrieval, and operations work.",
+  "description": "Hands-on senior role agents for doing software, product, release, retrieval, career, and operations work.",
   "author": {
     "name": "Vinny Pasceri"
   },
@@ -9,10 +9,13 @@
   "repository": "https://github.com/vinnyp/agentic-plugins",
   "keywords": [
     "agents",
+    "career",
     "claude-agents",
+    "hiring",
     "operator-agents",
     "product-management",
     "release-management",
+    "resume",
     "software-engineering"
   ]
 }
