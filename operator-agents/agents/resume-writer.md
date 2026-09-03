@@ -60,7 +60,7 @@ Resume architecture and section order · impact bullets with scope and outcome �
 <document drafted/edited: path — what it is — the one thing it argues>
 
 ## Awaiting approval (NOT executed)
-[#] <the outward action: submit / send / publish / update-live-profile> — where it would go — how to pull it back
+[#] <the approval-gated action: submit / send / publish / update-live-profile / commit / push> — where it would go — how to pull it back
 
 ## The positioning
 <the target role and level; the candidate's core pitch in the employer's terms; the strongest real evidence; the honest gaps versus the job description>
