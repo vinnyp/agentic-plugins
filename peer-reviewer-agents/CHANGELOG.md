@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/vinnyp/agentic-plugins/compare/peer-reviewer-agents-v1.2.0...peer-reviewer-agents-v1.3.0) (2026-09-03)
+
+
+### Features
+
+* add the resume-writer / peer-resume-reviewer operator+reviewer pair ([#17](https://github.com/vinnyp/agentic-plugins/issues/17)) ([e00b120](https://github.com/vinnyp/agentic-plugins/commit/e00b120e514503a8e7166539b836a06cf0baf535))
+
 ## [1.2.0](https://github.com/vinnyp/agentic-plugins/compare/peer-reviewer-agents-v1.1.0...peer-reviewer-agents-v1.2.0) (2026-08-31)
 
 
