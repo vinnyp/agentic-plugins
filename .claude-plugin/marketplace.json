@@ -9,32 +9,38 @@
     {
       "name": "peer-reviewer-agents",
       "source": "./peer-reviewer-agents",
-      "description": "Independent peer-review lenses for software, product, release, retrieval, Google Workspace, and operations work.",
+      "description": "Independent peer-review lenses for software, product, release, retrieval, career, Google Workspace, and operations work.",
       "category": "Productivity",
       "keywords": [
         "agents",
         "apps-script",
+        "career",
         "claude-agents",
         "code-review",
         "code-review-agents",
         "google-apps-script",
         "google-workspace",
+        "hiring",
         "product-management",
         "release-management",
+        "resume",
         "software-engineering"
       ]
     },
     {
       "name": "operator-agents",
       "source": "./operator-agents",
-      "description": "Hands-on senior role agents for doing software, product, release, retrieval, and operations work.",
+      "description": "Hands-on senior role agents for doing software, product, release, retrieval, career, and operations work.",
       "category": "Productivity",
       "keywords": [
         "agents",
+        "career",
         "claude-agents",
+        "hiring",
         "operator-agents",
         "product-management",
         "release-management",
+        "resume",
         "software-engineering"
       ]
     },
