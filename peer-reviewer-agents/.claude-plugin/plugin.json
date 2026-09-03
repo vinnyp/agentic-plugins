@@ -1,7 +1,7 @@
 {
   "name": "peer-reviewer-agents",
   "version": "1.2.0",
-  "description": "Independent peer-review lenses for software, product, release, retrieval, Google Workspace, and operations work.",
+  "description": "Independent peer-review lenses for software, product, release, retrieval, career, Google Workspace, and operations work.",
   "author": {
     "name": "Vinny Pasceri"
   },
@@ -10,13 +10,16 @@
   "keywords": [
     "agents",
     "apps-script",
+    "career",
     "claude-agents",
     "code-review",
     "code-review-agents",
     "google-apps-script",
     "google-workspace",
+    "hiring",
     "product-management",
     "release-management",
+    "resume",
     "software-engineering"
   ]
 }

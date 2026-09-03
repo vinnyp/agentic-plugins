@@ -9,7 +9,7 @@ operator, then review it with the matching `peer-*` lens.
 
 ## Runtime Support
 
-All 17 lenses are defined once and run under both **Claude Code** and the
+All 18 lenses are defined once and run under both **Claude Code** and the
 **Antigravity CLI** (`agy`) from the same frontmatter. Install for agy directly
 from the plugin directory (no marketplace/registry flow exists for Antigravity
 yet):
@@ -23,7 +23,7 @@ the Antigravity manifest; `.claude-plugin/plugin.json` is the Claude one — bot
 point at the same agent definitions.
 
 One difference to know about: the read-only contract is enforced differently
-per runtime. Every lens declares a `disallowedTools` frontmatter field — 13
+per runtime. Every lens declares a `disallowedTools` frontmatter field — 14
 deny `Write`, `Edit`, `NotebookEdit`; the 4 local-evidence-only lenses
 (`peer-code-reviewer`, `peer-database-reviewer`, `peer-plan-reviewer`,
 `peer-test-reviewer`) also deny `WebSearch` and `WebFetch`. Claude Code
@@ -51,6 +51,7 @@ its exact pre-check state before the review is returned.
 | `peer-product-marketing-manager-reviewer` | Positioning, audience, claims, messaging, and launch story. |
 | `peer-release-reviewer` | Release-management quality, readiness, communications, and go/no-go reasoning. |
 | `peer-reliability-reviewer` | Failure modes, recovery, observability, and operational resilience. |
+| `peer-resume-reviewer` | Truthfulness of a candidate's claims, screener readability, evidence quality, tailoring, and applicant-tracking-system parseability. |
 | `peer-retrieval-reviewer` | Retrieval/RAG domain correctness, diagnosis, chunking, embedding, fusion, reranking, and gates. |
 | `peer-security-reviewer` | Security design, exploitability, secrets, auth, and abuse paths. |
 | `peer-standards-reviewer` | Consistency with stated standards and whether standards are clear and enforceable. |
@@ -66,6 +67,7 @@ Most role operators have a matching peer-review lens:
 | `operator-agents:product-manager` | `peer-reviewer-agents:peer-product-manager-reviewer` |
 | `operator-agents:product-marketing-manager` | `peer-reviewer-agents:peer-product-marketing-manager-reviewer` |
 | `operator-agents:release-manager` | `peer-reviewer-agents:peer-release-reviewer` |
+| `operator-agents:resume-writer` | `peer-reviewer-agents:peer-resume-reviewer` |
 | `operator-agents:retrieval-engineer` | `peer-reviewer-agents:peer-retrieval-reviewer` |
 | `operator-agents:standards-designer` | `peer-reviewer-agents:peer-standards-reviewer` |
 

@@ -1,14 +1,14 @@
 # operator-agents
 
 `operator-agents` is a reusable set of hands-on senior-role agents for software,
-product, release, retrieval, standards, and operations work.
+product, release, retrieval, standards, career, and operations work.
 
 These are senior-role agents, not Kubernetes-style operators or automation
 controllers. The word is used in the sense of "the person who does the work."
 
 ## Runtime Support
 
-All 6 operators are defined once and run under both **Claude Code** and the
+All 7 operators are defined once and run under both **Claude Code** and the
 **Antigravity CLI** (`agy`) from the same frontmatter. Install for agy directly
 from the plugin directory (no marketplace/registry flow exists for Antigravity
 yet):
@@ -41,6 +41,7 @@ standard.
 | `product-manager` | Product requirements, problem framing, user journeys, prioritization, success metrics, and product decisions. |
 | `product-marketing-manager` | Positioning, messaging, launch narrative, audience fit, naming, and user-facing product copy. |
 | `release-manager` | Release coordination, readiness, risk, notes, stakeholder communications, and go/no-go decisions. |
+| `resume-writer` | Resume, cover letter, and profile copy built from a candidate's real record, tailored to a target role. |
 | `retrieval-engineer` | Retrieval/RAG diagnosis, eval-driven tuning, chunking, embedding, reranking, gates, and reversible change sets. |
 | `standards-designer` | Normative specs, schemas, conformance fixtures, compatibility policy, extension models, and governance process. |
 
@@ -55,6 +56,7 @@ review it with the matching independent lens.
 | `operator-agents:product-manager` | `peer-reviewer-agents:peer-product-manager-reviewer` |
 | `operator-agents:product-marketing-manager` | `peer-reviewer-agents:peer-product-marketing-manager-reviewer` |
 | `operator-agents:release-manager` | `peer-reviewer-agents:peer-release-reviewer` |
+| `operator-agents:resume-writer` | `peer-reviewer-agents:peer-resume-reviewer` |
 | `operator-agents:retrieval-engineer` | `peer-reviewer-agents:peer-retrieval-reviewer` |
 | `operator-agents:standards-designer` | `peer-reviewer-agents:peer-standards-reviewer` |
 
