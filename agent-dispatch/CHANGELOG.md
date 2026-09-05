@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.5.0](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.4.0...agent-dispatch-v1.5.0) (2026-09-05)
+
+
+### Features
+
+* add the staff-software-engineer / peer-staff-software-engineer-reviewer operator+reviewer pair ([#21](https://github.com/vinnyp/agentic-plugins/issues/21)) ([54f3d83](https://github.com/vinnyp/agentic-plugins/commit/54f3d83c210346f4878921feebe598acc6cf5683))
+
+
+### Bug Fixes
+
+* **agent-dispatch:** reach installed agy personas safely; actually run the test suite ([#20](https://github.com/vinnyp/agentic-plugins/issues/20)) ([243c3ed](https://github.com/vinnyp/agentic-plugins/commit/243c3edb9506154b1b7d381ba27934e4e87ea97a))
+
 ## [1.4.0](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.3.0...agent-dispatch-v1.4.0) (2026-08-31)
 
 
