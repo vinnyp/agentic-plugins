@@ -9,7 +9,7 @@
     {
       "name": "peer-reviewer-agents",
       "source": "./peer-reviewer-agents",
-      "description": "Independent peer-review lenses for software, product, release, retrieval, career, Google Workspace, and operations work.",
+      "description": "Independent peer-review lenses for software engineering, product, release, retrieval, career, Google Workspace, and operations work.",
       "category": "Productivity",
       "keywords": [
         "agents",
@@ -24,13 +24,15 @@
         "product-management",
         "release-management",
         "resume",
-        "software-engineering"
+        "software-engineering",
+        "staff-engineer",
+        "technical-design"
       ]
     },
     {
       "name": "operator-agents",
       "source": "./operator-agents",
-      "description": "Hands-on senior role agents for doing software, product, release, retrieval, career, and operations work.",
+      "description": "Hands-on senior role agents for doing software engineering, product, release, retrieval, career, and operations work.",
       "category": "Productivity",
       "keywords": [
         "agents",
@@ -41,7 +43,9 @@
         "product-management",
         "release-management",
         "resume",
-        "software-engineering"
+        "software-engineering",
+        "staff-engineer",
+        "technical-design"
       ]
     },
     {

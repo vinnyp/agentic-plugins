@@ -1,7 +1,7 @@
 {
   "name": "peer-reviewer-agents",
   "version": "1.3.0",
-  "description": "Independent peer-review lenses for software, product, release, retrieval, career, Google Workspace, and operations work.",
+  "description": "Independent peer-review lenses for software engineering, product, release, retrieval, career, Google Workspace, and operations work.",
   "author": {
     "name": "Vinny Pasceri"
   },
@@ -20,6 +20,8 @@
     "product-management",
     "release-management",
     "resume",
-    "software-engineering"
+    "software-engineering",
+    "staff-engineer",
+    "technical-design"
   ]
 }
