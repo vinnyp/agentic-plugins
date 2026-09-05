@@ -205,18 +205,21 @@ echo
 echo "--- Test 6: run-tests.sh aggregate runner ---"
 
 RUNNER_PASS="$TMP/runner-pass/bin"
-mkdir -p "$RUNNER_PASS"
+mkdir -p "$RUNNER_PASS" "$TMP/runner-pass/test"
 cp "$RUN_TESTS_BIN" "$RUNNER_PASS/run-tests.sh"
 chmod +x "$RUNNER_PASS/run-tests.sh"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$RUNNER_PASS/test-b.sh"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$RUNNER_PASS/test-a.sh"
-chmod +x "$RUNNER_PASS/test-a.sh" "$RUNNER_PASS/test-b.sh"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$TMP/runner-pass/test/stray_commit.sh"
+chmod +x "$RUNNER_PASS/test-a.sh" "$RUNNER_PASS/test-b.sh" "$TMP/runner-pass/test/stray_commit.sh"
 pass_out="$("$RUNNER_PASS/run-tests.sh" 2>&1)"
 pass_rc=$?
 if [ "$pass_rc" -eq 0 ] &&
-   printf '%s\n' "$pass_out" | grep -qF "PASS test-a.sh" &&
-   printf '%s\n' "$pass_out" | grep -qF "PASS test-b.sh" &&
-   printf '%s\n' "$pass_out" | grep -qF "Summary: 2 passed, 0 failed, 2 total"; then
+   printf '%s\n' "$pass_out" | grep -qFx "PASS test-a.sh" &&
+   printf '%s\n' "$pass_out" | grep -qFx "PASS test-b.sh" &&
+   printf '%s\n' "$pass_out" | grep -qFx "RUN  stray_commit.sh" &&
+   printf '%s\n' "$pass_out" | grep -qFx "PASS stray_commit.sh" &&
+   printf '%s\n' "$pass_out" | grep -qFx "Summary: 3 passed, 0 failed, 3 total"; then
   pass "Test 6: run-tests.sh passes all suites and summarizes count"
 else
   printf '%s\n' "$pass_out"

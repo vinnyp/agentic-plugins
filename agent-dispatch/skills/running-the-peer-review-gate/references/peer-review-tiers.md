@@ -275,6 +275,17 @@ directly. An implementation that satisfies the letter of the criterion while def
 (splitting a string across two variables so a `grep` for the whole string no longer matches, while
 the forbidden behavior still occurs) is a **Blocker**, full stop. Never accept it as clever.
 
+**Closing a finding requires its reproducer.** When a review finding is closed with a code change,
+land the finding's own reproducer as a regression test in the same wave. Demonstrate that artifact
+failing against the pre-fix code and passing against the fix; a test that is merely present and green
+does not prove it guards the finding. If the correction is genuinely unreachable by executable tests
+(for example, a docs-only correction), record that exemption explicitly in the review log together
+with the non-executable check used instead. Never waive the requirement silently.
+
+**Allow-list/deny-list substitution is security-relevant.** Replacing an allow-list with a deny-list,
+or a deny-list with an allow-list, requires explicit security review. The forms can agree on every
+recognized fixture while diverging on the unknown inputs that define the security boundary.
+
 ---
 
 ## Where this fits

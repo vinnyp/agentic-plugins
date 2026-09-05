@@ -171,11 +171,9 @@ uncommitted4="$(git -C "$REPO4" status --porcelain)"
 [ -n "$uncommitted4" ] || fail "test 4: normal.txt should be an uncommitted change"
 echo "test 4 (normal run unaffected) PASS"
 
-# Test 5: stray commit that INCLUDES _coding-result.json in the commit body → still unwound.
-# This is the BLOCKER case: the agent commits stray2.txt + _coding-result.json together, so
-# after the commit git status is clean AND marker_status="complete" is readable from the
-# tracked file. The correct fix (always-unwind when clean+HEAD!=BASE) catches this; the
-# earlier marker-discriminator did not.
+# Test 5: a marker introduced by a commit in BASE..HEAD cannot self-attest that
+# commit's legitimacy. It must be unwound, while the gitignored working-tree
+# marker in test 3 remains valid evidence for a legitimate TDD commit.
 cat > "$TMP/bin/codex" <<'STUB'
 #!/usr/bin/env bash
 while [ $# -gt 0 ]; do

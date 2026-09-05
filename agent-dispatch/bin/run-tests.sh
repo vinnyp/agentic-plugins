@@ -9,13 +9,17 @@ while [ -L "$_src" ]; do
   case "$_src" in /*) ;; *) _src="$_dir/$_src" ;; esac
 done
 SCRIPT_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 shopt -s nullglob
 suites=("$SCRIPT_DIR"/test-*.sh)
+for legacy_suite in "$ROOT"/test/*.sh; do
+  suites+=("$legacy_suite")
+done
 shopt -u nullglob
 
 if [ "${#suites[@]}" -eq 0 ]; then
-  echo "run-tests.sh: ERROR: discovered 0 test suites matching $SCRIPT_DIR/test-*.sh"
+  echo "run-tests.sh: ERROR: discovered 0 test suites matching $SCRIPT_DIR/test-*.sh or $ROOT/test/*.sh"
   exit 1
 fi
 
@@ -50,6 +54,9 @@ done
 echo
 echo "Summary: $passed passed, $failed failed, ${#suites[@]} total"
 
+# The test/ suites join behavioral execution above. Like bin/test-*.sh,
+# test suites do not join this entrypoint-only shellcheck set; CI shellchecks every
+# *.sh repository-wide in its dedicated lint step.
 shellcheck_targets=()
 for candidate in "$SCRIPT_DIR"/*; do
   [ -f "$candidate" ] || continue

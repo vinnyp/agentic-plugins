@@ -41,7 +41,9 @@ RG=.bin/review-gate
 
 See [`review-gate` in the command reference](commands.md#review-gate) for the full command
 contract, and the skill's own `references/` for the tier rules, the different-model recipe, and the
-review-log convention.
+review-log convention. The actual rule bodies live in
+[`peer-review-tiers.md`](../skills/running-the-peer-review-gate/references/peer-review-tiers.md);
+this overview intentionally points there instead of duplicating them.
 
 **Two things leave your machine, and one thing lands in your repo:**
 

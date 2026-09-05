@@ -41,6 +41,7 @@ BRIEF=""
 CEREMONY="${CEREMONY:-0}"
 REVIEW="${REVIEW:-0}"                  # --review: read-only peer review (no edit/marker preamble)
 MODEL="${MODEL:-}"                    # --model M: agy model override; empty = smart default
+AGENT=""                              # --agent NAME: flag-only; never inherit common CI env var
 REQUIRE_DEPS=()                       # --require-dep <module>, repeatable
 MODULE_DIR="${MODULE_DIR:-.}"         # where the go.mod to verify lives
 WORKDIR="${WORKDIR:-}"                # repo root the worker edits; used to pin agy's marker path
@@ -124,6 +125,9 @@ dispatch-worker — dispatch a worker brief to a runtime.
                      edit/coding mode the default is "Gemini 3.5 Flash (Medium)" (cheaper).
                      An explicit --model always overrides the default. For codex, threaded
                      as 'codex exec -m M'; unset lets codex pick its config model.
+  --agent NAME       Installed agy persona to dispatch as. agy-only; the name is
+                     validated against 'agy agent' before dispatch so a typo cannot
+                     silently fall back to agy's general assistant.
   --ceremony         Allow the worker network + out-of-cwd writes (codex: --sandbox
                      danger-full-access). OFF by default (codex stays read-only/no-network).
                      Use ONLY for briefs that legitimately need git/gh network ceremony.
@@ -188,6 +192,8 @@ while [ $# -gt 0 ]; do
     --review)   REVIEW=1; shift ;;
     --allow-dirty) ALLOW_DIRTY=1; shift ;;
     --model)    MODEL="${2:-}"; shift 2 ;;
+    --agent)    [ $# -ge 2 ] || { echo "dispatch-worker: --agent requires a value" >&2; exit 2; }
+                AGENT="$2"; shift 2 ;;
     --require-dep) REQUIRE_DEPS+=("${2:-}"); shift 2 ;;
     --module-dir)  MODULE_DIR="${2:-.}"; shift 2 ;;
     --workdir)  WORKDIR="${2:-}"; shift 2 ;;
@@ -200,6 +206,11 @@ while [ $# -gt 0 ]; do
 done
 
 : "$RECALL_PROJECT" "$RECALL_PROJECT_EXPLICIT" "$NO_RECALL"
+
+if [ -n "$AGENT" ] && [ "$RUNTIME" != "agy" ]; then
+  echo "dispatch-worker: --agent is only supported with --runtime agy" >&2
+  exit 2
+fi
 
 # --require-dep is meaningless in --review mode (a read-only review never builds), and the
 # post-dispatch dep gate is skipped under review. Don't drop the flag silently — say so.
@@ -463,6 +474,35 @@ dispatch_agy() {
       return "$auth_rc"
       ;;
   esac
+  if [ -n "$AGENT" ]; then
+    local agent_roster agent_rc=0 roster_timeout=""
+    if command -v timeout >/dev/null 2>&1; then
+      roster_timeout="timeout"
+    elif command -v gtimeout >/dev/null 2>&1; then
+      roster_timeout="gtimeout"
+    fi
+    set +e
+    if [ -n "$roster_timeout" ]; then
+      agent_roster="$("$roster_timeout" 5s agy agent </dev/null 2>&1)"
+    else
+      echo "dispatch-worker: no timeout binary — agy persona roster probe is unbounded" >&2
+      agent_roster="$(agy agent </dev/null 2>&1)"
+    fi
+    agent_rc=$?
+    set -e
+    if [ "$agent_rc" -ne 0 ]; then
+      echo "dispatch-worker: could not validate agy persona '$AGENT': 'agy agent' failed (rc=$agent_rc); refusing to dispatch" >&2
+      return 2
+    fi
+    if [ -z "$agent_roster" ]; then
+      echo "dispatch-worker: could not validate agy persona '$AGENT': 'agy agent' returned no personas; refusing to dispatch" >&2
+      return 2
+    fi
+    if ! grep -qFx -- "$AGENT" <<<"$agent_roster"; then
+      echo "dispatch-worker: unknown agy persona: $AGENT" >&2
+      return 2
+    fi
+  fi
   [ -f "$BRIEF" ] || { echo "dispatch-worker: --brief required + readable" >&2; return 2; }
   # VALIDATED HEADLESS FORM — the prompt comes from bare STDIN (agy 1.1.22).
   # Do NOT use `agy exec - < brief` or `agy - < brief`: both tokens are now rejected
@@ -641,6 +681,7 @@ dispatch_agy() {
   fi
   local -a model_args=()
   [ -n "$agy_model" ] && model_args=(--model "$agy_model")
+  [ -n "$AGENT" ] && model_args+=(--agent="$AGENT")
   if [ "$REVIEW" = "1" ]; then
     if [ "$REVIEW_HERMETIC" = "1" ]; then
       # agy denies suite commands absent from its allowlist; bypassing that policy is safe

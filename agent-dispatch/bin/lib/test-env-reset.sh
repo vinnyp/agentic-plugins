@@ -29,6 +29,7 @@ DISPATCH_ENV_VARS=(
   CODING_BUILD_CMD
   CODING_COMMIT_SCOPE
   AGY_MODEL
+  AGENT
   DISPATCH_GATE_ADVISORY_TTL_SECS
   # Registered 2026-08-27. A real operator knob, not a label: dispatch-worker:340
   # reads ${DISPATCH_LIMIT_NOOP_BYTES:-200} as the byte floor below which a

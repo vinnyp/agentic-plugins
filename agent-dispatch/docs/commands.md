@@ -161,7 +161,7 @@ tests-only gate merges lint debt the repo enforces at ship. There is no auto-det
 
 ```
 dispatch-worker --brief <path> [--runtime codex|agy|claude|workflow|a2a-endpoint]
-                [--review] [--ceremony] [--model M] [--workdir D] [--timeout T]
+                [--review] [--ceremony] [--model M] [--agent NAME] [--workdir D] [--timeout T]
                 [--require-dep M]... [--module-dir D] [--allow-dirty] [--shape S]
 ```
 
@@ -172,13 +172,15 @@ authoritative text.
 | Runtime | Invocation | Default posture |
 |---|---|---|
 | `codex` (default) | `codex exec [-m M] [-C D] --sandbox <mode> -` , brief on stdin | `--sandbox read-only` (no network, no writes). `--workdir` is passed as `-C` when it names an existing directory. `--ceremony` → `--sandbox danger-full-access` + `--skip-git-repo-check`. |
-| `agy` | `agy [--model M] < brief` (bare stdin — never `agy exec -`, `agy -`, or `agy --print "…"`) | auth-preflighted; an autonomous-execution preamble for edits, a read-only preamble for `--review` |
+| `agy` | `agy [--model M] [--agent=NAME] < brief` (bare stdin — never `agy exec -`, `agy -`, or `agy --print "…"`) | auth-preflighted; `--agent NAME` is checked against `agy agent` before dispatch; an autonomous-execution preamble for edits, a read-only preamble for `--review` |
 | `claude` | `claude -p [--model M] < brief` | brief on stdin. `--ceremony` → `--dangerously-skip-permissions`; `--review` → `--permission-mode plan` (read-only, and it ignores `--ceremony`). |
 | `workflow` | emits a JSON hand-off marker on stdout | for a workflow the calling session launches itself |
 | `a2a-endpoint` | not wired yet | returns 3 |
 
 Default agy models: `Gemini 3.1 Pro (High)` under `--review`, `Gemini 3.5 Flash (Medium)` for
 edits. Multi-word model names are kept intact as one argument.
+`--agent NAME` is agy-only and rejects an unknown or unavailable persona roster with exit 2 before
+the brief is dispatched. The selected persona is retained on the one permitted review-timeout retry.
 
 **`--review`** is read-only peer review: the brief is a reviewer persona and the review is the
 deliverable **on stdout**. What "read-only" is enforced by, and whether a *bad* review is caught,
