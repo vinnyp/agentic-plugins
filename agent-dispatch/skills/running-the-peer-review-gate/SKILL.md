@@ -53,8 +53,9 @@ Read [references/peer-review-tiers.md](references/peer-review-tiers.md) and sele
 
 - **Tier 1 — always in `build` mode:** `peer-code-reviewer` + `peer-test-reviewer` (no discretion).
   These review a diff and its green suite, so they apply in `build` mode only. **In `design` mode
-  the baseline is instead the spec-gate checks plus whatever Tier-3 lenses the spec warrants**
-  (architecture at minimum for a structural design) — there is no diff for the Tier-1 pair to review.
+  the baseline is instead the spec-gate checks plus `peer-staff-software-engineer-reviewer` on the
+  spec or plan** (end-to-end soundness — no discretion), with the Tier-3 lenses the spec warrants
+  stacked on top (architecture for a structural design) — there is no diff for the Tier-1 pair to review.
 - **Tier 2 — by trigger:** security / privacy / database (at a release door) / plan (unattended) /
   Apps Script (alongside `peer-code-reviewer`) —
   and the **measurement-lens trigger**: a measurement-shaped change (a new or changed gate,
