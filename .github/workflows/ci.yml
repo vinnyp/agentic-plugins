@@ -151,14 +151,14 @@ jobs:
           echo "::group::agy plugin validate operator-agents"
           timeout 60 agy plugin validate operator-agents 2>&1 | strip_ansi | tee agy-operator-agents.out
           echo "::endgroup::"
-          grep -Eq 'agents[[:space:]]*:[[:space:]]*7 processed' agy-operator-agents.out \
-            || { echo "agy: expected operator-agents agents count == 7, got:"; cat agy-operator-agents.out; exit 1; }
+          grep -Eq 'agents[[:space:]]*:[[:space:]]*8 processed' agy-operator-agents.out \
+            || { echo "agy: expected operator-agents agents count == 8, got:"; cat agy-operator-agents.out; exit 1; }
 
           echo "::group::agy plugin validate peer-reviewer-agents"
           timeout 60 agy plugin validate peer-reviewer-agents 2>&1 | strip_ansi | tee agy-peer-reviewer-agents.out
           echo "::endgroup::"
-          grep -Eq 'agents[[:space:]]*:[[:space:]]*18 processed' agy-peer-reviewer-agents.out \
-            || { echo "agy: expected peer-reviewer-agents agents count == 18, got:"; cat agy-peer-reviewer-agents.out; exit 1; }
+          grep -Eq 'agents[[:space:]]*:[[:space:]]*19 processed' agy-peer-reviewer-agents.out \
+            || { echo "agy: expected peer-reviewer-agents agents count == 19, got:"; cat agy-peer-reviewer-agents.out; exit 1; }
 
           # The per-plugin counts above are asserted against agy's own output; the
           # AGGREGATE in README.md has no such gate and silently drifted once (it

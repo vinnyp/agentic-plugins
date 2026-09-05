@@ -9,7 +9,7 @@ operator, then review it with the matching `peer-*` lens.
 
 ## Runtime Support
 
-All 18 lenses are defined once and run under both **Claude Code** and the
+All 19 lenses are defined once and run under both **Claude Code** and the
 **Antigravity CLI** (`agy`) from the same frontmatter. Install for agy directly
 from the plugin directory (no marketplace/registry flow exists for Antigravity
 yet):
@@ -23,7 +23,7 @@ the Antigravity manifest; `.claude-plugin/plugin.json` is the Claude one — bot
 point at the same agent definitions.
 
 One difference to know about: the read-only contract is enforced differently
-per runtime. Every lens declares a `disallowedTools` frontmatter field — 14
+per runtime. Every lens declares a `disallowedTools` frontmatter field — 15
 deny `Write`, `Edit`, `NotebookEdit`; the 4 local-evidence-only lenses
 (`peer-code-reviewer`, `peer-database-reviewer`, `peer-plan-reviewer`,
 `peer-test-reviewer`) also deny `WebSearch` and `WebFetch`. Claude Code
@@ -54,6 +54,7 @@ its exact pre-check state before the review is returned.
 | `peer-resume-reviewer` | Truthfulness of a candidate's claims, screener readability, evidence quality, tailoring, and applicant-tracking-system parseability. |
 | `peer-retrieval-reviewer` | Retrieval/RAG domain correctness, diagnosis, chunking, embedding, fusion, reranking, and gates. |
 | `peer-security-reviewer` | Security design, exploitability, secrets, auth, and abuse paths. |
+| `peer-staff-software-engineer-reviewer` | End-to-end project soundness: whether a PRD's WHAT is executable, and the primary lens on technical specs (right HOW, fits the existing system) and implementation plans (complete workstreams, risk-first sequencing). |
 | `peer-standards-reviewer` | Consistency with stated standards and whether standards are clear and enforceable. |
 | `peer-test-reviewer` | Test strategy, coverage gaps, regression risk, and verification quality. |
 
@@ -69,6 +70,7 @@ Most role operators have a matching peer-review lens:
 | `operator-agents:release-manager` | `peer-reviewer-agents:peer-release-reviewer` |
 | `operator-agents:resume-writer` | `peer-reviewer-agents:peer-resume-reviewer` |
 | `operator-agents:retrieval-engineer` | `peer-reviewer-agents:peer-retrieval-reviewer` |
+| `operator-agents:staff-software-engineer` | `peer-reviewer-agents:peer-staff-software-engineer-reviewer` |
 | `operator-agents:standards-designer` | `peer-reviewer-agents:peer-standards-reviewer` |
 
 Use additional lenses when the work crosses domains. For example, a retrieval
@@ -98,7 +100,10 @@ changes go to `peer-code-reviewer` (plus `peer-apps-script-reviewer` when the
 change is Apps Script), schema/storage changes go to
 `peer-database-reviewer`, release readiness goes to `peer-release-reviewer`,
 retrieval/RAG changes go to `peer-retrieval-reviewer`, and product artifacts go
-to `peer-product-manager-reviewer`.
+to `peer-product-manager-reviewer`. Technical specs and implementation plans go
+to `peer-staff-software-engineer-reviewer` (with `peer-architecture-reviewer`
+alongside for structural depth, and `peer-plan-reviewer` when the plan runs
+unattended).
 
 ### By Trigger
 

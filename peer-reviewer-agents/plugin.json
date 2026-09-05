@@ -1,5 +1,5 @@
 {
   "$schema": "https://antigravity.google/schemas/v1/plugin.json",
   "name": "peer-reviewer-agents",
-  "description": "Independent peer-review lenses for software, product, release, retrieval, career, Google Workspace, and operations work."
+  "description": "Independent peer-review lenses for software engineering, product, release, retrieval, career, Google Workspace, and operations work."
 }
