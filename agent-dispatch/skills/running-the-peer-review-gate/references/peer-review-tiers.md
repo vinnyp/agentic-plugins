@@ -28,9 +28,18 @@ before commit/merge:
 
 Both are written in diff-and-green-suite terms and do not fit a `design`-mode spec review, which has
 no diff to check. **In `design` mode the baseline is the spec-gate checks below** (substrate
-verification, instrument validity, the recorded pre-build round) **plus whatever Tier-3 lenses the
-spec warrants** — architecture at minimum for a structural design, the product lenses for a
-user-facing one. Tier 2 triggers still apply in either mode where their surface is touched.
+verification, instrument validity, the recorded pre-build round) **plus
+`peer-staff-software-engineer-reviewer` as the primary lens on any technical spec or implementation
+plan** (end-to-end soundness: the WHAT is executable, the HOW fits the existing system, the plan
+builds the spec with complete workstreams), with **whatever Tier-3 lenses the spec warrants stacked
+on top** — the product lenses for a user-facing one, and `peer-architecture-reviewer` when the spec
+is **structural**: it adds a process/service boundary, changes data ownership or a consistency
+model,
+or claims a property like "scales horizontally" — not by default, or the two lenses file the same
+finding twice. Pass the staff lens both documents: `--spec <artifact> --source <upstream>` (the PRD
+for a spec, the spec for a plan) and the claimed properties in `--what`; without the upstream it
+marks its verdict partial. Tier 2 triggers still apply in either mode where their surface is
+touched.
 
 Resolve every **Blocker** before proceeding; **Majors** before merge. The gate's checks must pass
 on a clean runner with pinned tools, not just on the author's machine.
@@ -75,7 +84,9 @@ Mandatory when the trigger fires; skipped only when genuinely N/A.
   entries, this one fires PRE-BUILD. Pass it the plan path plus the spec path. It catches spec→plan
   gaps, sequencing errors, oversized tasks (no single verifiable outcome and no test step), missing
   test steps, and placeholder violations — all cheaper to fix before dispatch than after. Not
-  required for attended execution where a human steps through the tasks.
+  required for attended execution where a human steps through the tasks. It runs alongside
+  `peer-staff-software-engineer-reviewer`, which owns whether the plan is the right way to build
+  the spec; this lens owns the unattended-execution mechanics.
 - **A measurement-methodology lens** — REQUIRED when the change is **measurement-shaped**: it adds
   or changes a gate, threshold, metric, scorecard, eval, or verdict (anything that decides pass/fail
   or quantifies quality). The question is whether the thing actually measures its claim, and whether
@@ -113,6 +124,10 @@ If you are unsure whether a trigger fires, **it fires.**
 Add when the change warrants it; stack them for a high-stakes gate.
 
 - **`peer-architecture-reviewer`** — a design/spec or structural change, **before** build.
+- **`peer-staff-software-engineer-reviewer`** — a PRD / requirements doc before engineering
+  commits to it (is the WHAT executable — unambiguous, complete enough to define the HOW,
+  feasible, non-functionals stated). On a spec or plan it is not discretionary — see the
+  design-mode baseline above.
 - **`peer-performance-reviewer`** — a hot path, scaling, or data-volume change.
 - **`peer-interface-reviewer`** — a CLI/API contract, output-shape, or breaking change.
 - **`peer-reliability-reviewer`** — a long-lived service, deploy, or failure-handling change.

@@ -1,7 +1,7 @@
 {
   "name": "operator-agents",
-  "version": "1.2.0",
-  "description": "Hands-on senior role agents for doing software, product, release, retrieval, career, and operations work.",
+  "version": "1.3.0",
+  "description": "Hands-on senior role agents for doing software engineering, product, release, retrieval, career, and operations work.",
   "author": {
     "name": "Vinny Pasceri"
   },
@@ -16,6 +16,8 @@
     "product-management",
     "release-management",
     "resume",
-    "software-engineering"
+    "software-engineering",
+    "staff-engineer",
+    "technical-design"
   ]
 }
