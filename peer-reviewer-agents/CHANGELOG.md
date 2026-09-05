@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/vinnyp/agentic-plugins/compare/peer-reviewer-agents-v1.3.0...peer-reviewer-agents-v1.4.0) (2026-09-05)
+
+
+### Features
+
+* add the staff-software-engineer / peer-staff-software-engineer-reviewer operator+reviewer pair ([#21](https://github.com/vinnyp/agentic-plugins/issues/21)) ([54f3d83](https://github.com/vinnyp/agentic-plugins/commit/54f3d83c210346f4878921feebe598acc6cf5683))
+
 ## [1.3.0](https://github.com/vinnyp/agentic-plugins/compare/peer-reviewer-agents-v1.2.0...peer-reviewer-agents-v1.3.0) (2026-09-03)
 
 
