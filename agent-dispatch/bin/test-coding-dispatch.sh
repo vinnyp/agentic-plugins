@@ -1219,4 +1219,46 @@ case "$h" in [0-9a-f][0-9a-f]*) ;; *) fail "md5_hex: digest is not lowercase hex
 [ "${#h}" -eq 32 ] || fail "md5_hex: digest is not 32 chars: $h (${#h})"
 echo "test md5_hex (portable bare hex digest) PASS"
 
+# #185: coding-dispatch itself generates the builder-facing declaration in the
+# effective brief. Exercise non-review agy and assert the stdin bytes it receives.
+P_185="$TMP/author_overlap_parent"; new_parent "$P_185"
+export AGY_BRIEF_CAPTURE="$TMP/author-overlap.brief"
+cat > "$TMP/bin/agy" <<'STUB'
+#!/usr/bin/env bash
+cat > "$AGY_BRIEF_CAPTURE"
+printf 'agent change\n' > agent_made_this.txt
+printf '{"status":"complete","files_written":["agent_made_this.txt"],"timestamp":"2026-01-01T00:00:00Z"}\n' > _coding-result.json
+STUB
+chmod +x "$TMP/bin/agy"
+PATH="$TMP/bin:/usr/bin:/bin" CODING_DISPATCH_TIMEOUT=0 bash "$CD" agy "$P_185" "$TMP/prompt" "true" >"$TMP/out_185" 2>&1; rc=$?
+[ "$rc" -eq 0 ] || { cat "$TMP/out_185"; fail "#185 agy dispatch should succeed, got rc $rc"; }
+grep -qFx "If you authored both the fix and the tests that verify it, say so explicitly and name the mutation that should catch a regression in the changed code." "$AGY_BRIEF_CAPTURE" \
+  || fail "#185 generated agy brief lacks the author-wrote-both declaration"
+grep -qFx "If you shipped no new tests, say so explicitly." "$AGY_BRIEF_CAPTURE" \
+  || fail "#185 generated agy brief does not explicitly cover shipping no new tests"
+echo "test #185 generated non-review agy brief declares author/test overlap PASS"
+
+# #187 guard: once the worker has dirtied the tree, a gate that materializes
+# HEAD must warn that it will evaluate pre-dispatch bytes. A working-tree gate
+# remains silent under the same dirty-tree shape.
+cat > "$TMP/bin/codex" <<'STUB'
+#!/usr/bin/env bash
+wd=""; while [ $# -gt 0 ]; do [ "$1" = "-C" ] && { wd="$2"; shift 2; continue; }; shift; done
+: "${wd:=$PWD}"
+printf 'changed line\n' > "$wd/agent_made_this.txt"
+STUB
+chmod +x "$TMP/bin/codex"
+P_187_head="$TMP/head_gate_parent"; new_parent "$P_187_head"
+bash "$CD" codex "$P_187_head" "$TMP/prompt" "git archive HEAD >/dev/null" >"$TMP/out_187_head" 2>&1; rc=$?
+[ "$rc" -eq 0 ] || { cat "$TMP/out_187_head"; fail "#187 HEAD-derived gate should still run, got rc $rc"; }
+grep -qF "HEAD-derived build command will not include the worker's uncommitted changes" "$TMP/out_187_head" \
+  || { cat "$TMP/out_187_head"; fail "#187 dirty tree + git archive HEAD did not warn"; }
+
+P_187_working="$TMP/working_gate_parent"; new_parent "$P_187_working"
+bash "$CD" codex "$P_187_working" "$TMP/prompt" "true # make test" >"$TMP/out_187_working" 2>&1; rc=$?
+[ "$rc" -eq 0 ] || { cat "$TMP/out_187_working"; fail "#187 working-tree gate should succeed, got rc $rc"; }
+! grep -qF "HEAD-derived build command will not include the worker's uncommitted changes" "$TMP/out_187_working" \
+  || { cat "$TMP/out_187_working"; fail "#187 ordinary working-tree gate warned noisily"; }
+echo "test #187 targeted HEAD-derived gate warning and negative control PASS"
+
 echo "ALL PASS"

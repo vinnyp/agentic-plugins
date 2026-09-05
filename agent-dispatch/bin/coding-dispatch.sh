@@ -418,21 +418,25 @@ else
 fi
 rm -f _coding-result.json
 
-# Scope constraint injection: prepend allowlist to brief when --allow-path is given
-_effective_prompt="$prompt_file"
-if [ ${#allow_paths[@]} -gt 0 ]; then
-  _injected_prompt="$(mktemp -t coding-dispatch-scope.XXXXXX)"
-  {
+# Builder disclosure injection: every coding-dispatch brief carries the
+# author-wrote-both declaration. The scope block remains conditional.
+_injected_prompt="$(mktemp -t coding-dispatch-brief.XXXXXX)"
+{
+  echo "## Builder self-declaration (REQUIRED)"
+  echo "If you authored both the fix and the tests that verify it, say so explicitly and name the mutation that should catch a regression in the changed code."
+  echo "If you shipped no new tests, say so explicitly."
+  echo ""
+  if [ ${#allow_paths[@]} -gt 0 ]; then
     echo "## Scope constraint (REQUIRED)"
     echo "ONLY touch files matching these patterns (relative to repo root):"
     for _p in "${allow_paths[@]}"; do echo "  - $_p"; done
     echo "Do NOT create, edit, or delete any file outside these patterns, even if it seems helpful."
     echo ""
-    cat "$prompt_file"
-  } > "$_injected_prompt"
-  _effective_prompt="$_injected_prompt"
-  trap 'rm -f "$_injected_prompt"' EXIT
-fi
+  fi
+  cat "$prompt_file"
+} > "$_injected_prompt"
+_effective_prompt="$_injected_prompt"
+trap 'rm -f "$_injected_prompt"' EXIT
 
 if command -v shasum >/dev/null 2>&1; then
   _brief_hash="$(shasum -a 256 "$prompt_file" 2>/dev/null | cut -c1-12)"
@@ -675,11 +679,12 @@ if [ -z "$(git status --porcelain)" ]; then
     # independently of git's view of the tree): present + parseable + complete ⇒ legitimate
     # TDD, leave the commit(s) intact. Only unwind when no valid marker backs the commit(s) —
     # that is the real stray-commit case.
-    if [ -f _coding-result.json ] && [ "$marker_status" = "complete" ]; then
+    marker_committed_since_base="$(git diff --name-only "$BASE".."$current_head" -- _coding-result.json)"
+    if [ -f _coding-result.json ] && [ "$marker_status" = "complete" ] && [ -z "$marker_committed_since_base" ]; then
       note "ℹ clean tree + HEAD moved off BASE, backed by a valid completion marker — legitimate TDD commit(s), not unwinding (#118/#128b)"
     else
       commit_count="$(git rev-list "$BASE".."$current_head" --count)"
-      note "⚠ worker self-committed $commit_count commit(s) without leaving working-tree changes or a valid marker — stray commit — unwinding via git reset --soft ${BASE:0:12}"
+      note "⚠ worker self-committed $commit_count commit(s) without leaving working-tree changes and an independently valid marker — stray commit — unwinding via git reset --soft ${BASE:0:12}"
       git reset --soft "$BASE"
       git reset HEAD -- . 2>/dev/null || true
       note "↩ stray commit(s) unwound; $commit_count commit(s) collapsed to uncommitted changes for caller review"
@@ -719,6 +724,17 @@ if [ ${#allow_paths[@]} -gt 0 ]; then
       exit 1
     fi
   done <<< "$_gate_out"
+fi
+
+# A gate that materializes files from HEAD cannot see the normal uncommitted
+# coding-dispatch result. Warn only for the known HEAD-derived command shapes;
+# the tree is expected to be dirty here, so dirtiness alone is not actionable.
+if [ -n "$build_cmd" ] && [ -n "$(git status --porcelain)" ]; then
+  case "$build_cmd" in
+    *"git archive"*HEAD*|*"worktree add"*HEAD*)
+      note "⚠ WARNING: HEAD-derived build command will not include the worker's uncommitted changes: $build_cmd"
+      ;;
+  esac
 fi
 
 # 3. Build/vet gate. An explicit build_cmd is AUTHORITATIVE and always runs.

@@ -13,6 +13,10 @@ same safety wrapper: the timeout that the agent's own `--print-timeout` doesn't 
 "did it actually change anything?" check, the revert that doesn't eat a concurrent session's work,
 and the exit code that tells an out-of-credit account apart from a failing build.
 
+Installed Antigravity personas are reachable through
+`dispatch-worker --runtime agy --agent NAME`. The wrapper validates `NAME` against `agy agent`
+before launch, so a typo fails loudly instead of silently using the general assistant.
+
 > ⚠️ **Read this before your first dispatch.** Dispatched agents run **as you — unsandboxed, with
 > your filesystem, your on-disk credentials, and your network**. The coding path invokes
 > `codex exec --dangerously-bypass-approvals-and-sandbox` / `agy --dangerously-skip-permissions`;

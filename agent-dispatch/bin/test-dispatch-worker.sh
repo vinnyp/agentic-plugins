@@ -33,6 +33,15 @@ mkdir -p "$TMPDIR"
 mkdir -p "$TMP/bin"
 cat > "$TMP/bin/agy" <<'STUB'
 #!/usr/bin/env bash
+# PERSONA_ROSTER_STUB
+case "${1:-}" in
+  agent)
+    printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
+    [ "${AGY_ROSTER_MODE:-}" = nonzero ] && exit 19
+    [ "${AGY_ROSTER_MODE:-}" = empty ] || printf '%s\n' peer-security-reviewer peer-code-reviewer
+    exit 0
+    ;;
+esac
 printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
 cat
 STUB
@@ -142,6 +151,15 @@ echo "test 8 (--model override) PASS"
 # runtime actually reached dispatch after healthy auth.
 cat > "$TMP/bin/agy" <<'STUB'
 #!/usr/bin/env bash
+# PERSONA_ROSTER_STUB
+case "${1:-}" in
+  agent)
+    printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
+    [ "${AGY_ROSTER_MODE:-}" = nonzero ] && exit 19
+    [ "${AGY_ROSTER_MODE:-}" = empty ] || printf '%s\n' peer-security-reviewer peer-code-reviewer
+    exit 0
+    ;;
+esac
 printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
 case "${1:-}" in models) exit 0;; esac
 for arg in "$@"; do
@@ -160,6 +178,15 @@ grep -qFx "models" "$AGY_ARGS_FILE" || fail "agy invocation regression did not s
 assert_agy_invocation_has_no_rejected_positionals
 cat > "$TMP/bin/agy" <<'STUB'
 #!/usr/bin/env bash
+# PERSONA_ROSTER_STUB
+case "${1:-}" in
+  agent)
+    printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
+    [ "${AGY_ROSTER_MODE:-}" = nonzero ] && exit 19
+    [ "${AGY_ROSTER_MODE:-}" = empty ] || printf '%s\n' peer-security-reviewer peer-code-reviewer
+    exit 0
+    ;;
+esac
 printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
 cat
 STUB
@@ -310,6 +337,15 @@ make_git_repo() {
 restore_default_agy_stub() {
   cat > "$TMP/bin/agy" <<'STUB'
 #!/usr/bin/env bash
+# PERSONA_ROSTER_STUB
+case "${1:-}" in
+  agent)
+    printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
+    [ "${AGY_ROSTER_MODE:-}" = nonzero ] && exit 19
+    [ "${AGY_ROSTER_MODE:-}" = empty ] || printf '%s\n' peer-security-reviewer peer-code-reviewer
+    exit 0
+    ;;
+esac
 printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
 cat
 STUB
@@ -320,6 +356,15 @@ STUB
 R14="$TMP/repo14"; make_git_repo "$R14"
 cat > "$TMP/bin/agy" <<'STUB'
 #!/usr/bin/env bash
+# PERSONA_ROSTER_STUB
+case "${1:-}" in
+  agent)
+    printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
+    [ "${AGY_ROSTER_MODE:-}" = nonzero ] && exit 19
+    [ "${AGY_ROSTER_MODE:-}" = empty ] || printf '%s\n' peer-security-reviewer peer-code-reviewer
+    exit 0
+    ;;
+esac
 case "$*" in *models*) exit 0;; esac
 printf 'ok'
 STUB
@@ -335,6 +380,15 @@ echo "test 14 (agy short review returns rc 8) PASS"
 R15="$TMP/repo15"; make_git_repo "$R15"
 cat > "$TMP/bin/agy" <<'STUB'
 #!/usr/bin/env bash
+# PERSONA_ROSTER_STUB
+case "${1:-}" in
+  agent)
+    printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
+    [ "${AGY_ROSTER_MODE:-}" = nonzero ] && exit 19
+    [ "${AGY_ROSTER_MODE:-}" = empty ] || printf '%s\n' peer-security-reviewer peer-code-reviewer
+    exit 0
+    ;;
+esac
 case "$*" in *models*) exit 0;; esac
 for i in $(seq 1 60); do printf 'Minor REVIEW LINE %s: no issues found in this pass.\n' "$i"; done
 STUB
@@ -373,6 +427,15 @@ echo "test 15c (unsupplied REVIEW_OUTFILE temp is deleted; review stays on stdou
 R15B="$TMP/repo15b"; make_git_repo "$R15B"
 cat > "$TMP/bin/agy" <<'STUB'
 #!/usr/bin/env bash
+# PERSONA_ROSTER_STUB
+case "${1:-}" in
+  agent)
+    printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
+    [ "${AGY_ROSTER_MODE:-}" = nonzero ] && exit 19
+    [ "${AGY_ROSTER_MODE:-}" = empty ] || printf '%s\n' peer-security-reviewer peer-code-reviewer
+    exit 0
+    ;;
+esac
 case "$*" in *models*) exit 0;; esac
 printf 'I have completed the review. No issues found.'
 STUB
@@ -387,6 +450,15 @@ echo "test 15b (default byte backstop rejects a sign-off-only review) PASS"
 R16="$TMP/repo16"; make_git_repo "$R16"
 cat > "$TMP/bin/agy" <<'STUB'
 #!/usr/bin/env bash
+# PERSONA_ROSTER_STUB
+case "${1:-}" in
+  agent)
+    printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
+    [ "${AGY_ROSTER_MODE:-}" = nonzero ] && exit 19
+    [ "${AGY_ROSTER_MODE:-}" = empty ] || printf '%s\n' peer-security-reviewer peer-code-reviewer
+    exit 0
+    ;;
+esac
 case "$*" in *models*) exit 0;; esac
 printf 'short'
 STUB
@@ -402,6 +474,15 @@ pre_head="$(git -C "$R17" rev-parse HEAD)"
 pre_branch="$(git -C "$R17" branch --show-current)"
 cat > "$TMP/bin/agy" <<'STUB'
 #!/usr/bin/env bash
+# PERSONA_ROSTER_STUB
+case "${1:-}" in
+  agent)
+    printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
+    [ "${AGY_ROSTER_MODE:-}" = nonzero ] && exit 19
+    [ "${AGY_ROSTER_MODE:-}" = empty ] || printf '%s\n' peer-security-reviewer peer-code-reviewer
+    exit 0
+    ;;
+esac
 case "$*" in *models*) exit 0;; esac
 printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
 cat > "$AGY_STDIN_FILE"
@@ -441,6 +522,15 @@ echo "test 17 (agy review runs hermetically) PASS"
 R18="$TMP/non-git-review"; mkdir -p "$R18"
 cat > "$TMP/bin/agy" <<'STUB'
 #!/usr/bin/env bash
+# PERSONA_ROSTER_STUB
+case "${1:-}" in
+  agent)
+    printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
+    [ "${AGY_ROSTER_MODE:-}" = nonzero ] && exit 19
+    [ "${AGY_ROSTER_MODE:-}" = empty ] || printf '%s\n' peer-security-reviewer peer-code-reviewer
+    exit 0
+    ;;
+esac
 case "$*" in *models*) exit 0;; esac
 printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
 cat > "$AGY_STDIN_FILE"
@@ -463,6 +553,15 @@ echo "test 18 (agy non-git review warns and returns output) PASS"
 R19="$TMP/repo19"; make_git_repo "$R19"
 cat > "$TMP/bin/agy" <<'STUB'
 #!/usr/bin/env bash
+# PERSONA_ROSTER_STUB
+case "${1:-}" in
+  agent)
+    printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
+    [ "${AGY_ROSTER_MODE:-}" = nonzero ] && exit 19
+    [ "${AGY_ROSTER_MODE:-}" = empty ] || printf '%s\n' peer-security-reviewer peer-code-reviewer
+    exit 0
+    ;;
+esac
 printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
 case "$*" in *models*) printf '%s\n' 'Error: Please sign in to view available models. Launch the CLI without arguments to sign in.' >&2; exit 1;; esac
 printf 'ok'
@@ -482,6 +581,15 @@ R20="$TMP/repo20"; make_git_repo "$R20"
 printf 'uncommitted draft line\n' >> "$R20/README.md"   # dirty the real tree
 cat > "$TMP/bin/agy" <<'STUB'
 #!/usr/bin/env bash
+# PERSONA_ROSTER_STUB
+case "${1:-}" in
+  agent)
+    printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
+    [ "${AGY_ROSTER_MODE:-}" = nonzero ] && exit 19
+    [ "${AGY_ROSTER_MODE:-}" = empty ] || printf '%s\n' peer-security-reviewer peer-code-reviewer
+    exit 0
+    ;;
+esac
 case "$*" in *models*) exit 0;; esac
 for i in $(seq 1 60); do printf 'Minor REVIEW LINE %s: reviewed committed HEAD.\n' "$i"; done
 STUB
@@ -504,6 +612,15 @@ export AGY_COUNT_FILE="$TMP/agy-count-21"
 : > "$AGY_COUNT_FILE"
 cat > "$TMP/bin/agy" <<'STUB'
 #!/usr/bin/env bash
+# PERSONA_ROSTER_STUB
+case "${1:-}" in
+  agent)
+    printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
+    [ "${AGY_ROSTER_MODE:-}" = nonzero ] && exit 19
+    [ "${AGY_ROSTER_MODE:-}" = empty ] || printf '%s\n' peer-security-reviewer peer-code-reviewer
+    exit 0
+    ;;
+esac
 case "$*" in *models*) exit 0;; esac
 n=$(( $(cat "$AGY_COUNT_FILE" 2>/dev/null || echo 0) + 1 ))
 echo "$n" > "$AGY_COUNT_FILE"
@@ -527,6 +644,15 @@ export AGY_COUNT_FILE="$TMP/agy-count-22"
 : > "$AGY_COUNT_FILE"
 cat > "$TMP/bin/agy" <<'STUB'
 #!/usr/bin/env bash
+# PERSONA_ROSTER_STUB
+case "${1:-}" in
+  agent)
+    printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
+    [ "${AGY_ROSTER_MODE:-}" = nonzero ] && exit 19
+    [ "${AGY_ROSTER_MODE:-}" = empty ] || printf '%s\n' peer-security-reviewer peer-code-reviewer
+    exit 0
+    ;;
+esac
 case "$*" in *models*) exit 0;; esac
 n=$(( $(cat "$AGY_COUNT_FILE" 2>/dev/null || echo 0) + 1 ))
 echo "$n" > "$AGY_COUNT_FILE"
@@ -554,6 +680,15 @@ export AGY_COUNT_FILE="$TMP/agy-count-23"
 : > "$AGY_COUNT_FILE"
 cat > "$TMP/bin/agy" <<'STUB'
 #!/usr/bin/env bash
+# PERSONA_ROSTER_STUB
+case "${1:-}" in
+  agent)
+    printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
+    [ "${AGY_ROSTER_MODE:-}" = nonzero ] && exit 19
+    [ "${AGY_ROSTER_MODE:-}" = empty ] || printf '%s\n' peer-security-reviewer peer-code-reviewer
+    exit 0
+    ;;
+esac
 case "$*" in *models*) exit 0;; esac
 n=$(( $(cat "$AGY_COUNT_FILE" 2>/dev/null || echo 0) + 1 ))
 echo "$n" > "$AGY_COUNT_FILE"
@@ -590,6 +725,15 @@ export AGY_COUNT_FILE="$TMP/agy-count-24"
 : > "$AGY_COUNT_FILE"
 cat > "$TMP/bin/agy" <<'STUB'
 #!/usr/bin/env bash
+# PERSONA_ROSTER_STUB
+case "${1:-}" in
+  agent)
+    printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
+    [ "${AGY_ROSTER_MODE:-}" = nonzero ] && exit 19
+    [ "${AGY_ROSTER_MODE:-}" = empty ] || printf '%s\n' peer-security-reviewer peer-code-reviewer
+    exit 0
+    ;;
+esac
 case "$*" in *models*) exit 0;; esac
 n=$(( $(cat "$AGY_COUNT_FILE" 2>/dev/null || echo 0) + 1 ))
 echo "$n" > "$AGY_COUNT_FILE"
@@ -645,6 +789,15 @@ echo "test 26 (brief names modified-tracked path -> refuse rc 2, no launch) PASS
 # Substantive, severity-shaped output is orthogonal to what tests 27/27b/28 check.
 cat > "$TMP/bin/agy" <<'STUB'
 #!/usr/bin/env bash
+# PERSONA_ROSTER_STUB
+case "${1:-}" in
+  agent)
+    printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
+    [ "${AGY_ROSTER_MODE:-}" = nonzero ] && exit 19
+    [ "${AGY_ROSTER_MODE:-}" = empty ] || printf '%s\n' peer-security-reviewer peer-code-reviewer
+    exit 0
+    ;;
+esac
 case "$*" in *models*) exit 0;; esac
 for i in $(seq 1 60); do printf 'Minor REVIEW LINE %s: reviewed despite the dirty tree.\n' "$i"; done
 STUB
@@ -684,6 +837,15 @@ echo "test 28 (dirty file not named in brief: warn + proceed, no false refusal) 
 R29="$TMP/repo29"; make_git_repo "$R29"
 cat > "$TMP/bin/agy" <<'STUB'
 #!/usr/bin/env bash
+# PERSONA_ROSTER_STUB
+case "${1:-}" in
+  agent)
+    printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
+    [ "${AGY_ROSTER_MODE:-}" = nonzero ] && exit 19
+    [ "${AGY_ROSTER_MODE:-}" = empty ] || printf '%s\n' peer-security-reviewer peer-code-reviewer
+    exit 0
+    ;;
+esac
 case "$*" in *models*) exit 0;; esac
 for i in $(seq 1 40); do printf 'Major finding %s: concise evidence.\n' "$i"; done
 STUB
@@ -703,6 +865,15 @@ echo "test 29 (concise review with severity passes) PASS"
 R30="$TMP/repo30"; make_git_repo "$R30"
 cat > "$TMP/bin/agy" <<'STUB'
 #!/usr/bin/env bash
+# PERSONA_ROSTER_STUB
+case "${1:-}" in
+  agent)
+    printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
+    [ "${AGY_ROSTER_MODE:-}" = nonzero ] && exit 19
+    [ "${AGY_ROSTER_MODE:-}" = empty ] || printf '%s\n' peer-security-reviewer peer-code-reviewer
+    exit 0
+    ;;
+esac
 case "$*" in *models*) exit 0;; esac
 printf '%s\n' '## Review summary' '- The change is internally consistent and the implementation follows the brief.' '- Tests cover the expected success and failure cases.' '- Documentation appears synchronized with behavior.' '- No major issues were found after reading the affected paths.' '- Confidence is high and operational risk is low.'
 for i in $(seq 1 "${SIGNOFF_NOTES:-18}"); do printf 'Additional verification note %s confirms the same findings-free sign-off without a labelled item.\n' "$i"; done
@@ -733,6 +904,15 @@ echo "test 31 (evidence gate can be disabled) PASS"
 R31B="$TMP/repo31b"; make_git_repo "$R31B"
 cat > "$TMP/bin/agy" <<'STUB'
 #!/usr/bin/env bash
+# PERSONA_ROSTER_STUB
+case "${1:-}" in
+  agent)
+    printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
+    [ "${AGY_ROSTER_MODE:-}" = nonzero ] && exit 19
+    [ "${AGY_ROSTER_MODE:-}" = empty ] || printf '%s\n' peer-security-reviewer peer-code-reviewer
+    exit 0
+    ;;
+esac
 case "$*" in *models*) exit 0;; esac
 printf 'Major: concrete but deliberately short finding.'
 STUB
@@ -750,6 +930,15 @@ for evidence_case in pathslash pathext; do
   export EVIDENCE_FIXTURE="$evidence"
   cat > "$TMP/bin/agy" <<'STUB'
 #!/usr/bin/env bash
+# PERSONA_ROSTER_STUB
+case "${1:-}" in
+  agent)
+    printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
+    [ "${AGY_ROSTER_MODE:-}" = nonzero ] && exit 19
+    [ "${AGY_ROSTER_MODE:-}" = empty ] || printf '%s\n' peer-security-reviewer peer-code-reviewer
+    exit 0
+    ;;
+esac
 case "$*" in *models*) exit 0;; esac
 printf 'Finding at %s. ' "$EVIDENCE_FIXTURE"
 for i in $(seq 1 30); do printf 'Concrete review analysis item %s explains behavior and verification. ' "$i"; done
@@ -767,6 +956,15 @@ echo "test 31c-d (both file:line evidence alternatives pass independently) PASS"
 R32="$TMP/repo32"; make_git_repo "$R32"
 cat > "$TMP/bin/agy" <<'STUB'
 #!/usr/bin/env bash
+# PERSONA_ROSTER_STUB
+case "${1:-}" in
+  agent)
+    printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
+    [ "${AGY_ROSTER_MODE:-}" = nonzero ] && exit 19
+    [ "${AGY_ROSTER_MODE:-}" = empty ] || printf '%s\n' peer-security-reviewer peer-code-reviewer
+    exit 0
+    ;;
+esac
 printf 'PWD=%s\n' "$PWD" >> "$AGY_ARGS_FILE"
 case "$*" in *models*) exit 0;; esac
 # GNU coreutils stat may precede BSD stat on PATH, and its -f means something else
@@ -858,6 +1056,170 @@ review_pwd="$(sed -n 's/^PWD=//p' "$AGY_ARGS_FILE" | tail -n 1)"
 case "$review_pwd" in "$TMP36"/*) fail "review worktree silently remained under resolved TMPDIR: $review_pwd";; esac
 rm -rf "$TMP36" "$XDG36"
 echo "test 36 (TMPDIR-contained source redirects outside TMPDIR) PASS"
+
+# 37. --agent is agy-only, validates the installed roster, and is threaded into
+# edit dispatch. Keep the one-line-per-invocation "$*" capture: counts prove the
+# number of dispatch calls without disturbing the existing multi-word --model checks.
+cat > "$TMP/bin/agy" <<'STUB'
+#!/usr/bin/env bash
+# PERSONA_ROSTER_STUB
+case "${1:-}" in
+  agent)
+    printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
+    [ "${AGY_ROSTER_MODE:-}" = nonzero ] && exit 19
+    [ "${AGY_ROSTER_MODE:-}" = empty ] || printf '%s\n' peer-security-reviewer peer-code-reviewer
+    exit 0
+    ;;
+esac
+printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
+case "${1:-}" in
+  models) exit 0 ;;
+  agent) printf '%s\n' peer-security-reviewer peer-code-reviewer; exit 0 ;;
+esac
+cat
+STUB
+chmod +x "$TMP/bin/agy"
+: > "$AGY_ARGS_FILE"
+TIMEOUT=0 "$DW" --runtime agy --brief "$BRIEF" --workdir /repo/x >/dev/null 2>&1
+[ "$(agy_exec_args)" = "--model Gemini 3.5 Flash (Medium)" ] \
+  || fail "non---agent argv changed; golden filters only the auth-probe 'models' line (got: $(cat "$AGY_ARGS_FILE"))"
+: > "$AGY_ARGS_FILE"
+TIMEOUT=0 "$DW" --runtime agy --agent peer-security-reviewer --brief "$BRIEF" --workdir /repo/x >/dev/null 2>&1
+rc=$?
+[ "$rc" -eq 0 ] || fail "known agy persona should dispatch, got rc $rc"
+[ "$(grep -c -- '--agent=peer-security-reviewer' "$AGY_ARGS_FILE")" -eq 1 ] \
+  || fail "agy edit should carry --agent exactly once (got: $(cat "$AGY_ARGS_FILE"))"
+echo "test 37 (agy --agent validates and threads edit invocation) PASS"
+
+# 38. Unknown personas fail loudly before dispatch instead of falling through to
+# agy's rc-0 general assistant. The args log may contain auth + roster probes only.
+: > "$AGY_ARGS_FILE"
+TIMEOUT=0 "$DW" --runtime agy --agent totally-bogus-persona-zzz --brief "$BRIEF" --workdir /repo/x >"$TMP/t38.out" 2>"$TMP/t38.err"
+rc=$?
+[ "$rc" -eq 2 ] || fail "unknown agy persona should exit 2, got rc $rc"
+grep -qF "unknown agy persona: totally-bogus-persona-zzz" "$TMP/t38.err" \
+  || fail "unknown persona error did not name the persona"
+[ "$(agy_exec_args | wc -l | tr -d ' ')" -eq 1 ] || fail "unknown persona reached review/edit dispatch: $(cat "$AGY_ARGS_FILE")"
+echo "test 38 (unknown agy persona fails before dispatch) PASS"
+
+# 39. A persona selector on unsupported runtimes is an argument error.
+for unsupported in codex claude; do
+  TIMEOUT=0 "$DW" --runtime "$unsupported" --agent peer-security-reviewer --brief "$BRIEF" >"$TMP/t39.out" 2>"$TMP/t39.err"
+  rc=$?
+  [ "$rc" -eq 2 ] || fail "--agent with $unsupported should exit 2, got rc $rc"
+  grep -qF -- "--agent is only supported with --runtime agy" "$TMP/t39.err" \
+    || fail "--agent with $unsupported lacked the agy-only error"
+done
+echo "test 39 (--agent rejects codex and claude) PASS"
+
+# An ambient CI variable named AGENT must not act like the explicit --agent flag.
+export AGENT=some-ci-value
+TIMEOUT=0 "$DW" --runtime codex --brief "$BRIEF" >"$TMP/t39b.out" 2>"$TMP/t39b.err"
+rc=$?
+unset AGENT
+[ "$rc" -eq 0 ] || fail "ambient AGENT broke default codex dispatch with rc $rc"
+! grep -qFx -- 'dispatch-worker: --agent is only supported with --runtime agy' "$TMP/t39b.err" \
+  || fail "ambient AGENT was incorrectly treated as an explicit --agent flag"
+echo "test 39b (ambient AGENT cannot select an agy persona) PASS"
+
+# 40. Review first attempt and its one timeout retry both retain the persona.
+export AGY_COUNT_FILE="$TMP/agy-agent-retry-count"
+printf '0\n' > "$AGY_COUNT_FILE"
+cat > "$TMP/bin/agy" <<'STUB'
+#!/usr/bin/env bash
+# PERSONA_ROSTER_STUB
+case "${1:-}" in
+  agent)
+    printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
+    [ "${AGY_ROSTER_MODE:-}" = nonzero ] && exit 19
+    [ "${AGY_ROSTER_MODE:-}" = empty ] || printf '%s\n' peer-security-reviewer peer-code-reviewer
+    exit 0
+    ;;
+esac
+printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
+case "${1:-}" in
+  models) exit 0 ;;
+  agent) printf '%s\n' peer-security-reviewer peer-code-reviewer; exit 0 ;;
+esac
+n="$(cat "$AGY_COUNT_FILE")"; n=$((n + 1)); printf '%s\n' "$n" > "$AGY_COUNT_FILE"
+if [ "$n" -eq 1 ]; then exit 124; fi
+for i in $(seq 1 40); do printf 'Major: security review evidence at src/auth.sh:12, line %s.\n' "$i"; done
+STUB
+chmod +x "$TMP/bin/agy"
+: > "$AGY_ARGS_FILE"
+TIMEOUT=0 "$DW" --runtime agy --review --agent peer-security-reviewer --brief "$BRIEF" --workdir "$R33" >"$TMP/t40.out" 2>"$TMP/t40.err"
+rc=$?
+[ "$rc" -eq 0 ] || fail "persona review timeout retry should succeed, got rc $rc"
+[ "$(grep -c -- '--agent=peer-security-reviewer' "$AGY_ARGS_FILE")" -eq 2 ] \
+  || fail "review first attempt and retry did not both carry persona: $(cat "$AGY_ARGS_FILE")"
+echo "test 40 (agy review first attempt and retry both carry --agent) PASS"
+
+# 41. Persona-roster failures are fail-closed and never reach review dispatch.
+for roster_mode in nonzero empty; do
+  export AGY_ROSTER_MODE="$roster_mode"
+  cat > "$TMP/bin/agy" <<'STUB'
+#!/usr/bin/env bash
+# PERSONA_ROSTER_STUB
+case "${1:-}" in
+  agent)
+    printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
+    [ "${AGY_ROSTER_MODE:-}" = nonzero ] && exit 19
+    [ "${AGY_ROSTER_MODE:-}" = empty ] || printf '%s\n' peer-security-reviewer peer-code-reviewer
+    exit 0
+    ;;
+esac
+printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
+case "${1:-}" in
+  models) exit 0 ;;
+  agent)
+    [ "$AGY_ROSTER_MODE" = nonzero ] && exit 19
+    exit 0
+    ;;
+esac
+printf 'DISPATCHED\n'
+STUB
+  chmod +x "$TMP/bin/agy"
+  : > "$AGY_ARGS_FILE"
+  TIMEOUT=0 "$DW" --runtime agy --agent peer-security-reviewer --brief "$BRIEF" --workdir /repo/x >"$TMP/t41.out" 2>"$TMP/t41.err"
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "$roster_mode persona roster should fail closed"
+  ! grep -qFx 'DISPATCHED' "$TMP/t41.out" || fail "$roster_mode persona roster dispatched anyway"
+  [ "$(agy_exec_args | wc -l | tr -d ' ')" -eq 1 ] || fail "$roster_mode roster reached dispatch: $(cat "$AGY_ARGS_FILE")"
+done
+echo "test 41 (agy persona roster failure/empty output fail closed) PASS"
+
+# 41b. The persona roster probe must detach stdin. This stub's roster arm blocks
+# on cat if the worker leaks its caller's still-open stdin into `agy agent`.
+cat > "$TMP/bin/agy" <<'STUB'
+#!/usr/bin/env bash
+# PERSONA_ROSTER_STUB
+case "${1:-}" in
+  models) exit 0 ;;
+  agent) cat; exit 0 ;;
+esac
+printf 'DISPATCHED\n'
+STUB
+chmod +x "$TMP/bin/agy"
+timeout_cmd="$(command -v timeout || command -v gtimeout || true)"
+if [ -n "$timeout_cmd" ]; then
+  set +e
+  ( sleep 10 ) | "$timeout_cmd" 2s env TIMEOUT=0 "$DW" --runtime agy --agent peer-security-reviewer --brief "$BRIEF" --workdir /repo/x >"$TMP/t41b.out" 2>"$TMP/t41b.err"
+  rc=$?
+  set -e
+  [ "$rc" -ne 124 ] || fail "agy persona roster probe hung on inherited stdin"
+  [ "$rc" -eq 2 ] || fail "empty detached roster should fail closed with rc 2, got rc $rc"
+else
+  fail "test 41b requires timeout or gtimeout"
+fi
+echo "test 41b (agy persona roster probe detaches stdin) PASS"
+
+# The file had 22 agy stubs before the four persona-specific controls above;
+# every definition must answer the roster subcommand instead of falling into cat.
+agy_stub_defs="$(grep -c 'cat > .*bin/ag[y].*STUB' "$0")"
+agy_stub_arms="$(grep -c '^# PERSONA_ROSTER_STU[B]$' "$0")"
+[ "$agy_stub_defs" -eq 26 ] || fail "expected 22 original + 4 persona-control agy stubs, found $agy_stub_defs"
+[ "$agy_stub_arms" -eq "$agy_stub_defs" ] || fail "not every agy stub has an agent) arm ($agy_stub_arms/$agy_stub_defs)"
+echo "test 42 (all 22 original agy stubs handle the agent subcommand) PASS"
 
 restore_default_agy_stub
 if [ "$FAILS" -ne 0 ]; then
