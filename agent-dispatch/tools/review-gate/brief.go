@@ -206,7 +206,7 @@ func cmdBrief(args []string) int {
 			fmt.Fprintf(&b, "- %s\n", s)
 		}
 		b.WriteString("\nYour review MUST end with a per-row disposition table over the document's row IDs (Req-IDs, and any E-/M-family rows §2 defines):\n" +
-			"| Req-ID | disposition |\n" +
+			"| Row ID | disposition |\n" +
 			"with exactly three values: ALIGN, OBJECT (finding-id), ABSTAIN (out of lens).\n" +
 			"A review with no findings and no disposition table has not run.\n")
 	default:
