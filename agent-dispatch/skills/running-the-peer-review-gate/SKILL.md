@@ -281,7 +281,8 @@ to them, it does not restate them.
 ## Requirements-mode specifics (one round)
 
 - **Brief inputs.** The CLI emits the requirements preamble INCLUDING the per-row
-  disposition return contract (ALIGN / OBJECT (finding-id) / ABSTAIN over the doc's Req-IDs).
+  disposition return contract (ALIGN / OBJECT (finding-id) / ABSTAIN over the document's row IDs
+  (Req-IDs, and any E-/M-family rows §2 defines)).
   `--what` carries only the lens's retargeting line (tier reference). The caller's cumulative
   fence file and the prior round's log are passed by PATH as `--source` entries — never inlined
   (paths are fail-closed validated; a missing fence file kills the brief instead of silently

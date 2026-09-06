@@ -436,7 +436,7 @@ func TestBriefRequirementsModeBody(t *testing.T) {
 	if !strings.Contains(out, "Review the following REQUIREMENTS DOCUMENT (WHAT-level rows; judge behavior and verifiability, not missing mechanisms):") {
 		t.Fatalf("requirements preamble missing: %q", out)
 	}
-	if !strings.Contains(out, "per-row disposition table over the document's Req-IDs") ||
+	if !strings.Contains(out, "per-row disposition table over the document's row IDs (Req-IDs, and any E-/M-family rows §2 defines)") ||
 		!strings.Contains(out, "ALIGN, OBJECT (finding-id), ABSTAIN (out of lens)") {
 		t.Fatalf("return-structure block missing: %q", out)
 	}

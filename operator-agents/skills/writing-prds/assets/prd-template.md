@@ -30,9 +30,15 @@ _(what's broken or missing, for whom, and why it matters now)_
 - _(bullet)_
 
 ## 2. Traceability
-<!-- guidance: State the Req-ID convention this document uses and how it maps onto the organization's external tracking scheme. Not conditional: every requirement row needs a stable identity before it can be reviewed, fenced, or shipped against. -->
+<!-- guidance: State the row-ID conventions this document uses — Req-ID plus the §8/§9 ID families — and how Req-IDs map onto the organization's external tracking scheme. Not conditional: every requirement, error/state, and success-metric row needs a stable identity before it can be reviewed, fenced, or shipped against. -->
 
-Every requirement row in §7 gets a Req-ID of the form `R<section>.<n>` (e.g. `R7.4`), assigned once at first draft and never renumbered — a row that is cut or deferred keeps its ID rather than freeing it for reuse.
+This document uses three row-ID families, one per dispositionable table, all sharing the same
+rule: assigned once at first draft and never renumbered — a row that is cut or deferred keeps its
+ID rather than freeing it for reuse.
+
+- Every requirement row in §7 gets a Req-ID of the form `R<section>.<n>` (e.g. `R7.4`).
+- Every error/state row in §8 gets an ID of the form `E<n>` (e.g. `E4`).
+- Every success-metric row in §9 gets an ID of the form `M<n>` (e.g. `M2`).
 
 Req-IDs additionally map onto this project's external tracking scheme, `{{traceability-id-scheme}}` (e.g. a ticket-tracker prefix or ID format) — the Commit PR column in §7 and the Feeds column in §10 are where that mapping becomes concrete as work lands.
 
@@ -101,18 +107,18 @@ flowchart TD
 | | | | | | |
 
 ## 8. Error & State
-<!-- guidance: Catalog every error and state condition this feature can produce. Each row gets a stable identity that is assigned once and never renumbered, even as rows are added, cut, or reordered — a reviewer or a later PRD may need to refer back to exactly this condition. The end-user-visible copy column is conditional on the condition actually being end-user-visible: fill it for conditions the end user sees, and mark it "n/a (internal)" for conditions that never surface past a log line. -->
+<!-- guidance: Catalog every error and state condition this feature can produce. Each row gets a stable identity — the `E<n>` family defined in §2 — assigned once and never renumbered, even as rows are added, cut, or reordered — a reviewer or a later PRD may need to refer back to exactly this condition. The end-user-visible copy column is conditional on the condition actually being end-user-visible: fill it for conditions the end user sees, and mark it "n/a (internal)" for conditions that never surface past a log line. -->
 
 | ID | Condition | Trigger | End-User-Visible Copy (n/a if internal-only) | Recovery | Status |
 |---|---|---|---|---|---|
 | | | | | | |
 
 ## 9. Success Metrics
-<!-- guidance: Define how this feature's success is measured, precisely enough that two people computing the same metric from the same data get the same number. Not conditional — every PRD needs a definition of done that isn't just "shipped." -->
+<!-- guidance: Define how this feature's success is measured, precisely enough that two people computing the same metric from the same data get the same number. Each row gets a stable identity — the `M<n>` family defined in §2 — assigned once and never renumbered. Not conditional — every PRD needs a definition of done that isn't just "shipped." -->
 
-| Metric | Definition (start event, end event, statistic, population) | Candidate target | Method | Status |
-|---|---|---|---|---|
-| | | | | |
+| ID | Metric | Definition (start event, end event, statistic, population) | Candidate target | Method | Status |
+|---|---|---|---|---|---|
+| | | | | | |
 
 ## 10. Open Questions
 <!-- guidance: Track every question this PRD cannot yet answer that blocks a row from reaching aligned status. Each question gets a stable number, the requirement rows it feeds, and what evidence would close it — an OQ without a Req-ID it feeds is scope creep, not a blocker. Not conditional. -->
