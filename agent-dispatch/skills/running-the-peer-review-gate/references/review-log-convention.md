@@ -22,7 +22,7 @@ A log contains:
 
 - **Header** — the subject (the diff SHA range, or the spec path), the reviewers run **plus the
   resolved persona version** (so any skew between the same-model and different-model routes is
-  visible), the date, the mode (`design` or `build`), the gate outcome, and a named
+  visible), the date, the mode (`design`, `build`, or `requirements`), the gate outcome, and a named
   **`tier-rationale:`** line: which Tier-2 and Tier-3 lenses ran and why, or `none — <reason>`. A
   named line keeps the rationale present-or-absent-checkable, the way the disposition columns are.
 - **Per-reviewer sections** — each reviewer's raw findings.
@@ -44,7 +44,7 @@ A log contains:
   the security/privacy vocabulary are advisory: note them in the narrative or summary if useful, but
   they do not require their own disposition row and do not block merge.
 
-`review-gate log-new --topic <slug> --mode <design|build> --persona <X>… [--stdout] [--force]`
+`review-gate log-new --topic <slug> --mode <design|build|requirements> --persona <X>… [--stdout] [--force]`
 scaffolds exactly this. `--stdout` emits to stdout instead of writing in place; `--force`
 overwrites.
 
@@ -85,3 +85,13 @@ When required, the log is committed **alongside** the change it reviews — same
 the diff and its audit trail are never separated. A review that lives only in a chat transcript or
 in `/tmp` is not a record. The briefs are reproducible from the persona plus the spec or diff, but
 the **outputs and dispositions must be preserved** in the repo.
+
+## Multi-round logs (requirements mode)
+
+A multi-round caller creates the log once (round 1) and appends one `## Round N` section per
+round. Round 1's findings and dispositions are written under `## Round 1` (the header's
+`**Reviewers:**` line lists round 1's lenses; each later round restates its own list in its
+section). Each round section carries: the lenses run, their per-row disposition tables, graded
+findings, and the round's verify-the-reviewer dispositions. The per-round lens lists are the
+fresh-lens ledger. The existing top-level shape and the finding-keyed disposition columns are
+unchanged — this subsection is additive.

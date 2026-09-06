@@ -110,7 +110,11 @@ driving a live tmux/cmux session — are documented per command in the
   does not, the dirty-tree refusal, and exactly what leaves your machine to which provider.
 - **[The peer-review gate](docs/peer-review-gate.md)** — the tiered-review capability: the
   `running-the-peer-review-gate` skill and the `review-gate` CLI (brief / cross-model / log-new),
-  and the cross-model egress disclosure.
+  and the cross-model egress disclosure. Three modes: `build` (a diff, post-build) and `design` (a
+  spec/design doc, pre-build) each run to a single completed gate within this skill; `requirements`
+  (a PRD/requirements doc) runs exactly **one round per invocation** — the multi-round loop
+  (fences, owner adjudication, delta verification, lock) belongs to the caller,
+  `operator-agents:writing-prds`.
 - **[Worktree isolation](docs/worktree-isolation.md)** — why `--worktree`, where worktrees land,
   landing the work, salvage on failure, and pruning.
 - **[Operating rules and troubleshooting](docs/operating-and-troubleshooting.md)** — the 3-strike
