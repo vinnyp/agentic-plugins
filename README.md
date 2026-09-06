@@ -7,7 +7,8 @@ the **Antigravity CLI** (`agy`) from the same dual-runtime frontmatter.
 [Contributions welcome](CONTRIBUTING.md).
 
 - `peer-reviewer-agents`: independent peer-review lenses for software development
-- `operator-agents`: hands-on engineering & product senior-role agents
+- `operator-agents`: hands-on engineering & product senior-role agents, plus
+  the writing-prds skill for template-based PRD authoring
 - `agent-dispatch`: dispatch coding work and peer reviews to external agent CLIs
 
 The plugins pair naturally: do the work with an operator, then review it with
@@ -62,14 +63,16 @@ but not tool-enforced.
 See [peer-reviewer-agents/README.md](peer-reviewer-agents/README.md) for the
 full reviewer roster and review method.
 
-`operator-agents` contains 8 senior-role agents:
+`operator-agents` contains 8 senior-role agents plus the `writing-prds` skill:
 
 - DevOps engineer, product manager, product marketing manager, release manager,
   resume writer, retrieval engineer, staff software engineer, and standards
   designer.
+- `writing-prds` drives template-based PRD authoring through an
+  owner-adjudicated, peer-review-gated loop.
 
 See [operator-agents/README.md](operator-agents/README.md) for the operator
-roster and guardrail pattern.
+roster, the skill, and the guardrail pattern.
 
 `agent-dispatch` sends a coding task or a peer review to an external agent CLI
 (codex, agy/Gemini, or claude) instead of running it in the current session:
