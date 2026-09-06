@@ -40,7 +40,7 @@ model,
 or claims a property like "scales horizontally" — not by default, or the two lenses file the same
 finding twice. Pass the staff lens both documents: `--spec <artifact> --source <upstream>` (the PRD
 for a spec, the spec for a plan) and the claimed properties in `--what`; without the upstream it
-marks its verdict partial. Tier 2 triggers still apply in either mode where their surface is
+marks its verdict partial. Tier 2 triggers still apply in any mode where their surface is
 touched.
 
 Resolve every **Blocker** before proceeding; **Majors** before merge. The gate's checks must pass

@@ -147,10 +147,13 @@ func TestBriefClaudeOmitsPersonaBody(t *testing.T) {
 
 func TestBriefDesignRejectsRange(t *testing.T) {
 	_, tmpl := briefFixture(t)
-	rc, _ := runCapt(t, "brief", "--persona", "peer-code-reviewer", "--mode", "design",
+	rc, _, stderr := runCaptAll(t, "brief", "--persona", "peer-code-reviewer", "--mode", "design",
 		"--for", "claude", "--range", "HEAD~1..HEAD", "--closing-template", tmpl)
 	if rc != 1 {
 		t.Fatalf("design+--range rc=%d want 1 (validation)", rc)
+	}
+	if !strings.Contains(stderr, "design mode requires --spec and forbids --range") {
+		t.Fatalf("stderr missing validation message: %q", stderr)
 	}
 }
 
@@ -264,6 +267,9 @@ func TestBriefEmitsRepoRootBuildMode(t *testing.T) {
 	}
 	if !strings.Contains(out, "repo root: "+root) {
 		t.Errorf("build brief missing repo root %q:\n%s", root, out)
+	}
+	if !strings.Contains(out, "Verify the following DIFF against the real contracts") {
+		t.Errorf("build brief missing DIFF preamble:\n%s", out)
 	}
 }
 

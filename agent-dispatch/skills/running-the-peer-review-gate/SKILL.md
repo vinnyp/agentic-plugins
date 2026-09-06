@@ -48,7 +48,7 @@ resolved persona version into every brief and log header, so any skew is visible
   Persona set: the PRD tier in the tier reference. The multi-round loop (fences, owner
   adjudication, fix passes, delta verification, lock) belongs to the caller
   (`operator-agents:writing-prds`); this skill runs exactly one round: brief → dispatch → verify →
-  log.
+  log. Before running phases 6–7 in this mode, read **Requirements-mode specifics** below.
 
 The mode sets the brief preamble and which input is expected: `design` and `requirements` require
 `--spec`, `build` requires `--range`.
@@ -220,7 +220,9 @@ to address; a missed real one is worse. This is judgment — the CLI never resol
 ### 6. Resolve
 
 Resolve all **Blocker/Major** findings (Minor is deferrable, but say so). Multi-file fixes are
-CODING — dispatch them, don't hand-edit inline.
+CODING — dispatch them, don't hand-edit inline. In requirements mode, resolution belongs to the
+caller's owner-adjudicated loop — stop after verify-the-reviewer and hand the findings back (see
+Requirements-mode specifics).
 
 For **`build`** mode, enforce **commit-then-review** ordering: commit the build *before* dispatching
 build-reviewers. A Bash-capable reviewer's mutation cycle issues `git restore` / `git checkout`,
@@ -249,6 +251,9 @@ is indistinguishable from a genuine verdict. **Never add a git-state check to
 `mutation-verify.sh`** — being git-free is precisely what makes it safe on uncommitted work.
 
 ### 7. Preserve the durable log
+
+In requirements mode, log-new runs only on round 1 — later rounds append to the recorded log (see
+Requirements-mode specifics).
 
 Scaffold the log in the caller repo, then fill it:
 
