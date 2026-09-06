@@ -121,9 +121,9 @@ flowchart TD
 | | | | | | |
 
 ## 10. Open Questions
-<!-- guidance: Track every question this PRD cannot yet answer that blocks a row from reaching aligned status. Each question gets a stable number, the requirement rows it feeds, and what evidence would close it — an OQ without a Req-ID it feeds is scope creep, not a blocker. Not conditional. -->
+<!-- guidance: Track every question this PRD cannot yet answer that blocks a row from reaching aligned status. Each question gets a stable number, the rows it feeds (any of §2's three ID families), and what evidence would close it — an OQ without a row ID it feeds is scope creep, not a blocker. Not conditional. -->
 
-| # | Question | Details | Evidence that closes it | Feeds (Req-IDs) | Evidence source | Status | Gated on | Depends on |
+| # | Question | Details | Evidence that closes it | Feeds (row IDs) | Evidence source | Status | Gated on | Depends on |
 |---|---|---|---|---|---|---|---|---|
 | | | | | | | | | |
 
