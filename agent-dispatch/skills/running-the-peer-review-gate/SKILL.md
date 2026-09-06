@@ -1,6 +1,6 @@
 ---
 name: running-the-peer-review-gate
-description: Use after any code build or before committing a non-trivial change/spec to run the tiered peer-review gate consistently across any project — assemble per-persona briefs, dispatch Claude Agent-tool reviewers (and optionally a different-model agy/codex pass), verify-the-reviewer, and preserve a durable review log with a disposition table in the caller repo. Use in BUILD mode for a diff (post-build, pre-merge) or DESIGN mode for a spec/design doc (pre-build, the spec gate). Trigger phrases - "run the peer-review gate", "peer-review this build", "review gate", "get peer reviewers on this", "spec gate", "review this diff before merge", "gate this change".
+description: Use after any code build or before committing a non-trivial change/spec to run the tiered peer-review gate consistently across any project — assemble per-persona briefs, dispatch Claude Agent-tool reviewers (and optionally a different-model agy/codex pass), verify-the-reviewer, and preserve a durable review log with a disposition table in the caller repo. Use in BUILD mode for a diff (post-build, pre-merge) or DESIGN mode for a spec/design doc (pre-build, the spec gate), or REQUIREMENTS mode for a PRD/requirements doc — one round per invocation; the multi-round PRD loop is operator-agents:writing-prds. Trigger phrases - "run the peer-review gate", "peer-review this build", "review gate", "get peer reviewers on this", "spec gate", "requirements gate", "review this diff before merge", "gate this change".
 ---
 
 # running-the-peer-review-gate
@@ -43,16 +43,23 @@ resolved persona version into every brief and log header, so any skew is visible
 
 - **`build`** (post-build, pre-merge): reviews a **diff** — a `--range <base..head>`, and/or paths.
 - **`design`** (pre-build, the spec gate): reviews a **spec/design doc** — a `--spec <path>`.
+- **`requirements`** (the PRD gate, one round per invocation): reviews a **requirements/PRD
+  document** — a `--spec <path>` (pass the OQ results file as a second `--spec` when it exists).
+  Persona set: the PRD tier in the tier reference. The multi-round loop (fences, owner
+  adjudication, fix passes, delta verification, lock) belongs to the caller
+  (`operator-agents:writing-prds`); this skill runs exactly one round: brief → dispatch → verify →
+  log. Before running phases 6–7 in this mode, read **Requirements-mode specifics** below.
 
-The mode sets the brief preamble and which input is expected: `design` requires `--spec`, `build`
-requires `--range`.
+The mode sets the brief preamble and which input is expected: `design` and `requirements` require
+`--spec`, `build` requires `--range`.
 
 ### 2. Select personas per the tier reference — and RECORD the choice
 
 Read [references/peer-review-tiers.md](references/peer-review-tiers.md) and select:
 
 - **Tier 1 — always in `build` mode:** `peer-code-reviewer` + `peer-test-reviewer` (no discretion).
-  These review a diff and its green suite, so they apply in `build` mode only. **In `design` mode
+  These review a diff and its green suite, so they apply in `build` mode only — see the
+  requirements-mode PRD tier for the retargeted exception. **In `design` mode
   the baseline is instead the spec-gate checks plus `peer-staff-software-engineer-reviewer` on the
   spec or plan** (end-to-end soundness — no discretion), with the Tier-3 lenses the spec warrants
   stacked on top (architecture for a structural design) — there is no diff for the Tier-1 pair to review.
@@ -213,7 +220,9 @@ to address; a missed real one is worse. This is judgment — the CLI never resol
 ### 6. Resolve
 
 Resolve all **Blocker/Major** findings (Minor is deferrable, but say so). Multi-file fixes are
-CODING — dispatch them, don't hand-edit inline.
+CODING — dispatch them, don't hand-edit inline. In requirements mode, resolution belongs to the
+caller's owner-adjudicated loop — stop after verify-the-reviewer and hand the findings back (see
+Requirements-mode specifics).
 
 For **`build`** mode, enforce **commit-then-review** ordering: commit the build *before* dispatching
 build-reviewers. A Bash-capable reviewer's mutation cycle issues `git restore` / `git checkout`,
@@ -243,6 +252,9 @@ is indistinguishable from a genuine verdict. **Never add a git-state check to
 
 ### 7. Preserve the durable log
 
+In requirements mode, log-new runs only on round 1 — later rounds append to the recorded log (see
+Requirements-mode specifics).
+
 Scaffold the log in the caller repo, then fill it:
 
 ```bash
@@ -265,6 +277,29 @@ scan or strip anything. See
 [references/review-log-convention.md](references/review-log-convention.md) for the guard and
 [references/peer-review-tiers.md](references/peer-review-tiers.md) for the gate — this skill points
 to them, it does not restate them.
+
+## Requirements-mode specifics (one round)
+
+- **Brief inputs.** The CLI emits the requirements preamble INCLUDING the per-row
+  disposition return contract (ALIGN / OBJECT (finding-id) / ABSTAIN over the document's row IDs
+  (Req-IDs, and any E-/M-family rows §2 defines)).
+  `--what` carries only the lens's retargeting line (tier reference). The caller's cumulative
+  fence file and the prior round's log are passed by PATH as `--source` entries — never inlined
+  (paths are fail-closed validated; a missing fence file kills the brief instead of silently
+  producing a fence-free round).
+- **Flip rule.** A row is flip-eligible only when every non-abstaining lens ALIGNs and at least
+  one lens opined. Owner-locked rows are listed in the brief as out of scope; a reviewer may flag
+  one only if a later edit changed it.
+- **Non-conforming reviewer.** A lens that returns no per-row and no per-finding verdicts has not
+  run — re-dispatch it; never interpret prose as a verdict. The body is the trigger, not the exit
+  code.
+- **Verify-the-reviewer applies unchanged**, including to per-row OBJECTs.
+- **Log.** `log-new` runs exactly ONCE per PRD, at round 1; the caller records the created path
+  and every later round APPENDS a `## Round N` section to it (see the multi-round subsection of
+  the review-log convention). Re-running `log-new` for the same PRD is the defect — a second file
+  splits the fresh-lens ledger.
+- **Runtime.** The Claude route is the default; a cross-model pass is opt-in (callers decide
+  cadence — `writing-prds` offers it once, on its first full round).
 
 ## Gate
 

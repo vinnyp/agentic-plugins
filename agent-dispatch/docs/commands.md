@@ -345,11 +345,11 @@ missing sources, or a failed build.
 ## `review-gate`
 
 ```
-review-gate brief       --persona <peer-X-reviewer> --mode <design|build> --for <claude|cross-model>
+review-gate brief       --persona <peer-X-reviewer> --mode <design|build|requirements> --for <claude|cross-model>
                         (--range <A..B> | --spec <path>...) [--source <path>]... [--what <text>]
                         [--repo-root <dir>] [--closing-template <path>]
 review-gate cross-model [--runtime <agy|codex>] [--timeout <dur>] [--workdir <dir>] --brief <path>...
-review-gate log-new     --topic <slug> [--mode <design|build>] [--persona <name>]...
+review-gate log-new     --topic <slug> [--mode <design|build|requirements>] [--persona <name>]...
                         [--project <slug>] [--stdout] [--force]
 ```
 
@@ -369,7 +369,8 @@ and when the root is a git repo the `--range` must resolve there. A brief naming
 stale range otherwise renders byte-identically to a correct one, and the only thing left to catch it
 is the reviewer's own self-report. The probe is skipped when the root is not a git repo, so a brief
 authored outside one is never failed for a check that could not run. `--mode design`
-requires `--spec` and forbids `--range`; `--mode build` is the reverse. `--for cross-model` prepends
+requires `--spec` and forbids `--range`; `--mode build` is the reverse; `--mode requirements`
+behaves like `design` (requires `--spec`). `--for cross-model` prepends
 the full persona body (another runtime cannot auto-load it); `--for claude` omits it. Both append
 `templates/review-brief-closing.md`, which carries the "return exactly this structure" instruction
 and the file:line requirement — one source for both routes.

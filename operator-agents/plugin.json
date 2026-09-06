@@ -1,5 +1,5 @@
 {
   "$schema": "https://antigravity.google/schemas/v1/plugin.json",
   "name": "operator-agents",
-  "description": "Hands-on senior role agents for doing software engineering, product, release, retrieval, career, and operations work."
+  "description": "Hands-on senior role agents for doing software engineering, product, release, retrieval, career, and operations work — plus the writing-prds skill that drives template-based PRD authoring through an owner-adjudicated, peer-review-gated loop."
 }

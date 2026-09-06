@@ -22,6 +22,23 @@ Installed agents then show up in `agy agent`. The top-level `plugin.json` is
 the Antigravity manifest; `.claude-plugin/plugin.json` is the Claude one — both
 point at the same agent definitions.
 
+The `writing-prds` skill (below) is runtime-neutral rather than dual-defined:
+structured adjudication and subagent dispatch use Claude Code tools
+(`AskUserQuestion`, the Agent tool) where available, and fall back to
+plain-text adjudication plus the peer-review gate's pluggable-runtime dispatch
+path on other runtimes. It is validated end-to-end on Claude Code.
+
+## Skills
+
+| Skill | What it is for |
+| --- | --- |
+| `writing-prds` | Turns a product idea or an existing scaffold into a locked, review-aligned PRD — template-based authoring, an owner-adjudication loop, and a multi-round peer-review gate that runs until every row is aligned and the document is safe to hand to engineering. The skill drives; the owner decides all WHAT/WHY. |
+
+`writing-prds` requires the `agent-dispatch` plugin (>= the release carrying
+`--mode requirements`) from the same marketplace — it calls
+`agent-dispatch:running-the-peer-review-gate` in `requirements` mode for each
+review round.
+
 ## Guardrail Pattern
 
 Each operator acts like a senior practitioner: it investigates, drafts, edits,

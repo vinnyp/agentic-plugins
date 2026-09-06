@@ -32,7 +32,7 @@
     {
       "name": "operator-agents",
       "source": "./operator-agents",
-      "description": "Hands-on senior role agents for doing software engineering, product, release, retrieval, career, and operations work.",
+      "description": "Hands-on senior role agents for doing software engineering, product, release, retrieval, career, and operations work — plus the writing-prds skill that drives template-based PRD authoring through an owner-adjudicated, peer-review-gated loop.",
       "category": "Productivity",
       "keywords": [
         "agents",
@@ -40,8 +40,11 @@
         "claude-agents",
         "hiring",
         "operator-agents",
+        "prd",
         "product-management",
+        "product-requirements",
         "release-management",
+        "requirements",
         "resume",
         "software-engineering",
         "staff-engineer",

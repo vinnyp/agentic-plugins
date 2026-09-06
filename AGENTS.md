@@ -11,15 +11,18 @@ credentials, personal data, or local machine paths.
 - `peer-reviewer-agents` is an agents-only plugin. Its manifest is
   `peer-reviewer-agents/.claude-plugin/plugin.json` and its agents live in
   `peer-reviewer-agents/agents/`.
-- `operator-agents` is an agents-only plugin. Its manifest is
-  `operator-agents/.claude-plugin/plugin.json` and its agents live in
-  `operator-agents/agents/`.
+- `operator-agents` is an agents + skills plugin. Its manifest is
+  `operator-agents/.claude-plugin/plugin.json`, its agents live in
+  `operator-agents/agents/`, and its one skill lives in
+  `operator-agents/skills/writing-prds/`.
 - `agent-dispatch` is a `bin/` + `skills/` plugin. Its
   manifest is `agent-dispatch/.claude-plugin/plugin.json`; its bare-PATH CLIs
   live in `agent-dispatch/bin/` (with shared helpers under `agent-dispatch/bin/lib/`
-  and their tests as `agent-dispatch/bin/test-*.sh`), its one skill lives in
-  `agent-dispatch/skills/driving-agent-sessions/`, and its own test fixtures
-  live in `agent-dispatch/test/`.
+  and their tests as `agent-dispatch/bin/test-*.sh`), its skills live in
+  `agent-dispatch/skills/` (`dispatching-into-a-worktree`,
+  `driving-agent-sessions`, `running-the-peer-review-gate`,
+  `stubbing-external-agents-in-tests`, `validating-agent-bootstrap`), and its
+  own test fixtures live in `agent-dispatch/test/`.
 
 ## Agent frontmatter contract
 

@@ -122,7 +122,7 @@ func validateTargets(root string, specs, sources []string, rng string) error {
 func cmdBrief(args []string) int {
 	fs := flag.NewFlagSet("brief", flag.ContinueOnError)
 	persona := fs.String("persona", "", "peer-X-reviewer slug")
-	mode := fs.String("mode", "", "design|build")
+	mode := fs.String("mode", "", "design|build|requirements")
 	forRoute := fs.String("for", "", "claude|cross-model")
 	rng := fs.String("range", "", "SHA..range (build mode)")
 	what := fs.String("what", "", "what the change should do")
@@ -134,8 +134,8 @@ func cmdBrief(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if *mode != "design" && *mode != "build" {
-		fmt.Fprintln(os.Stderr, "brief: --mode must be design|build")
+	if *mode != "design" && *mode != "build" && *mode != "requirements" {
+		fmt.Fprintln(os.Stderr, "brief: --mode must be design|build|requirements")
 		return 1
 	}
 	if *forRoute != "claude" && *forRoute != "cross-model" {
@@ -143,9 +143,9 @@ func cmdBrief(args []string) int {
 		return 1
 	}
 	// mode gates --spec vs --range
-	if *mode == "design" {
+	if *mode == "design" || *mode == "requirements" {
 		if len(specs) == 0 || *rng != "" {
-			fmt.Fprintln(os.Stderr, "brief: design mode requires --spec and forbids --range")
+			fmt.Fprintf(os.Stderr, "brief: %s mode requires --spec and forbids --range\n", *mode)
 			return 1
 		}
 	} else {
@@ -194,12 +194,22 @@ func cmdBrief(args []string) int {
 		b.WriteString("Every path below is relative to that root. READ them — the brief does not\n" +
 			"quote the code, and an excerpt is not the subject under review.\n\n")
 	}
-	if *mode == "design" {
+	switch *mode {
+	case "design":
 		b.WriteString("Review the following DESIGN SPEC for soundness (consultant mode):\n")
 		for _, s := range specs {
 			fmt.Fprintf(&b, "- %s\n", s)
 		}
-	} else {
+	case "requirements":
+		b.WriteString("Review the following REQUIREMENTS DOCUMENT (WHAT-level rows; judge behavior and verifiability, not missing mechanisms):\n")
+		for _, s := range specs {
+			fmt.Fprintf(&b, "- %s\n", s)
+		}
+		b.WriteString("\nYour review MUST end with a per-row disposition table over the document's row IDs (Req-IDs, and any E-/M-family rows §2 defines):\n" +
+			"| Row ID | disposition |\n" +
+			"with exactly three values: ALIGN, OBJECT (finding-id), ABSTAIN (out of lens).\n" +
+			"A review with no findings and no disposition table has not run.\n")
+	default:
 		fmt.Fprintf(&b, "Verify the following DIFF against the real contracts:\n- range: %s\n", *rng)
 	}
 	if len(sources) > 0 {
@@ -213,6 +223,9 @@ func cmdBrief(args []string) int {
 	}
 	b.WriteString("\n")
 	b.Write(closing)
+	if *mode == "requirements" {
+		b.WriteString("\n**Requirements-mode addendum:** the per-row disposition table required above is part of the return format — append it after your persona's structure. The closing's \"and nothing else\" does not waive it.\n")
+	}
 	fmt.Fprint(os.Stdout, b.String())
 	return 0
 }

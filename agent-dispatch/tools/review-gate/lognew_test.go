@@ -39,6 +39,18 @@ func TestLogNewStdoutSkeleton(t *testing.T) {
 	}
 }
 
+func TestLogNewAcceptsRequirementsMode(t *testing.T) {
+	logNewPersonaFixture(t)
+	rc, out := runCapt(t, "log-new", "--topic", "prd", "--mode", "requirements",
+		"--persona", "peer-product-manager-reviewer", "--stdout")
+	if rc != 0 {
+		t.Fatalf("rc=%d out=%s", rc, out)
+	}
+	if !strings.Contains(out, "**Mode:** requirements") {
+		t.Fatalf("log skeleton did not carry the requirements mode:\n%s", out)
+	}
+}
+
 func TestLogNewUnresolvedPersonaVersionIsLoud(t *testing.T) {
 	clearPersonaEnv(t)
 	t.Setenv("HOME", t.TempDir())

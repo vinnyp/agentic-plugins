@@ -147,10 +147,13 @@ func TestBriefClaudeOmitsPersonaBody(t *testing.T) {
 
 func TestBriefDesignRejectsRange(t *testing.T) {
 	_, tmpl := briefFixture(t)
-	rc, _ := runCapt(t, "brief", "--persona", "peer-code-reviewer", "--mode", "design",
+	rc, _, stderr := runCaptAll(t, "brief", "--persona", "peer-code-reviewer", "--mode", "design",
 		"--for", "claude", "--range", "HEAD~1..HEAD", "--closing-template", tmpl)
 	if rc != 1 {
 		t.Fatalf("design+--range rc=%d want 1 (validation)", rc)
+	}
+	if !strings.Contains(stderr, "design mode requires --spec and forbids --range") {
+		t.Fatalf("stderr missing validation message: %q", stderr)
 	}
 }
 
@@ -264,6 +267,9 @@ func TestBriefEmitsRepoRootBuildMode(t *testing.T) {
 	}
 	if !strings.Contains(out, "repo root: "+root) {
 		t.Errorf("build brief missing repo root %q:\n%s", root, out)
+	}
+	if !strings.Contains(out, "Verify the following DIFF against the real contracts") {
+		t.Errorf("build brief missing DIFF preamble:\n%s", out)
 	}
 }
 
@@ -414,6 +420,146 @@ func TestBriefSkipsRangeProbeOutsideGitRepo(t *testing.T) {
 		"--closing-template", tmpl)
 	if rc != 0 {
 		t.Fatalf("range probe must be skipped outside a git repo; rc=%d", rc)
+	}
+}
+
+// --- requirements mode ---
+
+func TestBriefRequirementsModeBody(t *testing.T) {
+	_, tmpl := briefFixture(t)
+	root := targetRoot(t, "prd.md")
+	rc, out := runCapt(t, "brief", "--persona", "peer-code-reviewer", "--mode", "requirements",
+		"--for", "claude", "--spec", "prd.md", "--repo-root", root, "--closing-template", tmpl)
+	if rc != 0 {
+		t.Fatalf("rc=%d", rc)
+	}
+	if !strings.Contains(out, "Review the following REQUIREMENTS DOCUMENT (WHAT-level rows; judge behavior and verifiability, not missing mechanisms):") {
+		t.Fatalf("requirements preamble missing: %q", out)
+	}
+	if !strings.Contains(out, "per-row disposition table over the document's row IDs (Req-IDs, and any E-/M-family rows §2 defines)") ||
+		!strings.Contains(out, "ALIGN, OBJECT (finding-id), ABSTAIN (out of lens)") {
+		t.Fatalf("return-structure block missing: %q", out)
+	}
+	if !strings.Contains(out, "- prd.md") {
+		t.Fatalf("spec not listed: %q", out)
+	}
+}
+
+// The closing template's "and nothing else." instruction (templates/review-brief-closing.md)
+// would otherwise contradict the requirements-mode disposition-table requirement above it,
+// since the closing is appended AFTER the mode preamble. The addendum must land after the
+// closing so it is the LAST instruction the reviewer reads. Uses the REAL closing template
+// (not the fixture's token stand-in) so "and nothing else." is actually present to order against.
+func TestBriefRequirementsAddendumFollowsClosing(t *testing.T) {
+	briefFixture(t)
+	root := targetRoot(t, "prd.md")
+	realClosing := filepath.Join("..", "..", "templates", "review-brief-closing.md")
+	rc, out := runCapt(t, "brief", "--persona", "peer-code-reviewer", "--mode", "requirements",
+		"--for", "claude", "--spec", "prd.md", "--repo-root", root, "--closing-template", realClosing)
+	if rc != 0 {
+		t.Fatalf("rc=%d out=%s", rc, out)
+	}
+	closingIdx := strings.Index(out, "and nothing else.")
+	if closingIdx < 0 {
+		t.Fatalf("brief missing the closing's \"and nothing else.\" text:\n%s", out)
+	}
+	addendumIdx := strings.Index(out, "Requirements-mode addendum")
+	if addendumIdx < 0 {
+		t.Fatalf("requirements-mode brief missing the addendum:\n%s", out)
+	}
+	if addendumIdx < closingIdx {
+		t.Fatalf("addendum (offset %d) appears BEFORE the closing's \"and nothing else.\" text (offset %d); it must come after so it is the last instruction the reviewer reads", addendumIdx, closingIdx)
+	}
+}
+
+// The addendum resolves a requirements-mode-only contract conflict; it must not leak into
+// design or build mode, where no disposition table is required and there is nothing to waive.
+func TestBriefAddendumOnlyInRequirementsMode(t *testing.T) {
+	_, tmpl := briefFixture(t)
+	designRoot := targetRoot(t, "s.md")
+	_, designOut := runCapt(t, "brief", "--persona", "peer-code-reviewer", "--mode", "design",
+		"--for", "claude", "--spec", "s.md", "--repo-root", designRoot, "--closing-template", tmpl)
+	if strings.Contains(designOut, "Requirements-mode addendum") {
+		t.Fatalf("design-mode brief must not contain the requirements-mode addendum:\n%s", designOut)
+	}
+	buildRoot := gitRepoWithCommits(t)
+	_, buildOut := runCapt(t, "brief", "--persona", "peer-code-reviewer", "--mode", "build",
+		"--for", "claude", "--range", "HEAD~1..HEAD", "--repo-root", buildRoot, "--closing-template", tmpl)
+	if strings.Contains(buildOut, "Requirements-mode addendum") {
+		t.Fatalf("build-mode brief must not contain the requirements-mode addendum:\n%s", buildOut)
+	}
+}
+
+func TestBriefRequirementsRequiresSpec(t *testing.T) {
+	_, tmpl := briefFixture(t)
+	root := targetRoot(t)
+	rc, out, stderr := runCaptAll(t, "brief", "--persona", "peer-code-reviewer", "--mode", "requirements",
+		"--for", "claude", "--repo-root", root, "--closing-template", tmpl)
+	if rc != 1 {
+		t.Fatalf("requirements with no --spec rc=%d want 1; a brief naming no document must not be emitted:\n%s", rc, out)
+	}
+	if !strings.Contains(stderr, "requirements mode requires --spec and forbids --range") {
+		t.Fatalf("wrong rejection reason: %q", stderr)
+	}
+	if strings.Contains(out, "REQUIREMENTS DOCUMENT") {
+		t.Fatalf("rejected brief was still emitted:\n%s", out)
+	}
+}
+
+func TestBriefRequirementsRejectsRange(t *testing.T) {
+	_, tmpl := briefFixture(t)
+	rc, _, stderr := runCaptAll(t, "brief", "--persona", "peer-code-reviewer", "--mode", "requirements",
+		"--for", "claude", "--spec", "prd.md", "--range", "HEAD~1..HEAD", "--closing-template", tmpl)
+	if rc != 1 {
+		t.Fatalf("requirements+--range rc=%d want 1", rc)
+	}
+	if !strings.Contains(stderr, "requirements mode requires --spec and forbids --range") {
+		t.Fatalf("rejected for the WRONG reason (mode validation, not spec/range gating): %q", stderr)
+	}
+}
+
+func TestBriefRejectsUnknownMode(t *testing.T) {
+	_, tmpl := briefFixture(t)
+	root := gitRepoWithCommits(t)
+	rc, out, stderr := runCaptAll(t, "brief", "--persona", "peer-code-reviewer", "--mode", "requirments",
+		"--for", "claude", "--range", "HEAD~1..HEAD", "--repo-root", root, "--closing-template", tmpl)
+	if rc != 1 {
+		t.Fatalf("typo'd --mode rc=%d want 1; a misspelled mode silently produced a brief:\n%s", rc, out)
+	}
+	if !strings.Contains(stderr, "must be design|build|requirements") {
+		t.Fatalf("mode allowlist message missing: %q", stderr)
+	}
+}
+
+func TestBriefRequirementsListsEverySpec(t *testing.T) {
+	_, tmpl := briefFixture(t)
+	root := targetRoot(t, "prd.md", "prd-oq-results.md")
+	rc, out := runCapt(t, "brief", "--persona", "peer-code-reviewer", "--mode", "requirements",
+		"--for", "claude", "--spec", "prd.md", "--spec", "prd-oq-results.md",
+		"--repo-root", root, "--closing-template", tmpl)
+	if rc != 0 {
+		t.Fatalf("rc=%d out=%s", rc, out)
+	}
+	for _, want := range []string{"- prd.md", "- prd-oq-results.md"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("requirements brief omitted %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestBriefRequirementsCarriesSources(t *testing.T) {
+	_, tmpl := briefFixture(t)
+	root := targetRoot(t, "prd.md", "docs/agent-reviews/2026-01-01-prd-peer-reviews.md")
+	rc, out := runCapt(t, "brief", "--persona", "peer-code-reviewer", "--mode", "requirements",
+		"--for", "claude", "--spec", "prd.md",
+		"--source", "docs/agent-reviews/2026-01-01-prd-peer-reviews.md",
+		"--repo-root", root, "--closing-template", tmpl)
+	if rc != 0 {
+		t.Fatalf("rc=%d out=%s", rc, out)
+	}
+	if !strings.Contains(out, "Contract sources to READ:") ||
+		!strings.Contains(out, "docs/agent-reviews/2026-01-01-prd-peer-reviews.md") {
+		t.Fatalf("requirements brief dropped the prior-round log passed by --source:\n%s", out)
 	}
 }
 

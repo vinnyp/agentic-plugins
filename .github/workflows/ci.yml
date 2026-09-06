@@ -157,6 +157,12 @@ jobs:
           echo "::endgroup::"
           grep -Eq 'agents[[:space:]]*:[[:space:]]*8 processed' agy-operator-agents.out \
             || { echo "agy: expected operator-agents agents count == 8, got:"; cat agy-operator-agents.out; exit 1; }
+          # operator-agents ships its first skill (writing-prds) as of this change;
+          # assert it's processed at all (nonzero) so a silently-unloaded skill
+          # fails CI instead of shipping invisible, same rationale as agent-dispatch
+          # above.
+          grep -Eq 'skills[[:space:]]*:[[:space:]]*[1-9][0-9]* processed' agy-operator-agents.out \
+            || { echo "agy: expected operator-agents skills line with a nonzero processed count, got:"; cat agy-operator-agents.out; exit 1; }
 
           echo "::group::agy plugin validate peer-reviewer-agents"
           timeout 60 agy plugin validate peer-reviewer-agents 2>&1 | strip_ansi | tee agy-peer-reviewer-agents.out

@@ -17,8 +17,9 @@ The reviewers are the `peer-*-reviewer` personas shipped by the `peer-reviewer-a
 
 ## Tier 1 — Baseline (ALWAYS in `build` mode, no discretion)
 
-This tier is **`build`-mode only** — it reviews a diff and its green suite. On every code build,
-before commit/merge:
+This tier is **`build`-mode only** — it reviews a diff and its green suite. (For requirements docs,
+see the PRD tier below — the test lens applies there only retargeted.) On every code build, before
+commit/merge:
 
 - **`peer-code-reviewer`** — correctness against the real contracts the change integrates with;
   seam bugs.
@@ -27,7 +28,8 @@ before commit/merge:
   redaction layer has shipped non-functional twice behind a passing suite.
 
 Both are written in diff-and-green-suite terms and do not fit a `design`-mode spec review, which has
-no diff to check. **In `design` mode the baseline is the spec-gate checks below** (substrate
+no diff to check — see the requirements-mode PRD tier for the retargeted exception. **In `design`
+mode the baseline is the spec-gate checks below** (substrate
 verification, instrument validity, the recorded pre-build round) **plus
 `peer-staff-software-engineer-reviewer` as the primary lens on any technical spec or implementation
 plan** (end-to-end soundness: the WHAT is executable, the HOW fits the existing system, the plan
@@ -38,11 +40,37 @@ model,
 or claims a property like "scales horizontally" — not by default, or the two lenses file the same
 finding twice. Pass the staff lens both documents: `--spec <artifact> --source <upstream>` (the PRD
 for a spec, the spec for a plan) and the claimed properties in `--what`; without the upstream it
-marks its verdict partial. Tier 2 triggers still apply in either mode where their surface is
+marks its verdict partial. Tier 2 triggers still apply in any mode where their surface is
 touched.
 
 Resolve every **Blocker** before proceeding; **Majors** before merge. The gate's checks must pass
 on a clean runner with pinned tools, not just on the author's machine.
+
+## `requirements` mode — the PRD tier
+
+For a requirements/PRD document (no diff, no suite, WHAT-level rows). One round per invocation; a
+multi-round loop (fences, adjudication, delta verification, lock) is the CALLER's to run — the
+`operator-agents:writing-prds` skill owns it and invokes this gate once per round. Requires
+`agent-dispatch` >= the release carrying `--mode requirements`; if `review-gate brief --mode
+requirements` is rejected, upgrade agent-dispatch and say so in the log — do not fall back to
+design mode.
+
+**Always:** `peer-product-manager-reviewer`, `peer-staff-software-engineer-reviewer`, and
+`peer-test-reviewer`. The test lens is retargeted — pass in `--what`: "Review this PRD as the spec
+tests will be written from: can each row become an objective acceptance test, and does every
+verification obligation have an injection path?" (For a PRD authored with `writing-prds`, its
+process rules guarantee such obligations exist; for other requirements docs, drop the test lens
+when the doc carries none.)
+
+**By document shape:** `peer-privacy-reviewer` (personal data or network paths),
+`peer-product-marketing-manager-reviewer` (end-user-visible copy), `peer-architecture-reviewer`
+(system boundaries or interactions with decided architecture).
+
+**Mandatory before the caller declares lock:** `peer-plan-reviewer`, retargeted — pass in `--what`:
+"Could the follow-on spike and first build phase execute from this document unattended — is every
+open question actionable, every deferred constant named, every dependency ordered?" — plus at
+least one lens that has not previously reviewed the document (the fresh-lens rule; the caller's
+review log records each round's lenses, which is the ledger).
 
 ## Tier 2 — Conditional-required (by trigger, no discretion)
 
