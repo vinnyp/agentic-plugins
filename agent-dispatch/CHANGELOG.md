@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.5.0...agent-dispatch-v1.6.0) (2026-09-06)
+
+
+### Features
+
+* add the writing-prds skill and the review-gate requirements mode ([7f19808](https://github.com/vinnyp/agentic-plugins/commit/7f19808d4e82b00d6ed28a810ed2b27cb3b53003))
+
 ## [1.5.0](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.4.0...agent-dispatch-v1.5.0) (2026-09-05)
 
 
