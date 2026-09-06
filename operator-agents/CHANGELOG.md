@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/vinnyp/agentic-plugins/compare/operator-agents-v1.3.0...operator-agents-v1.4.0) (2026-09-06)
+
+
+### Features
+
+* add the writing-prds skill and the review-gate requirements mode ([7f19808](https://github.com/vinnyp/agentic-plugins/commit/7f19808d4e82b00d6ed28a810ed2b27cb3b53003))
+
 ## [1.3.0](https://github.com/vinnyp/agentic-plugins/compare/operator-agents-v1.2.0...operator-agents-v1.3.0) (2026-09-05)
 
 
