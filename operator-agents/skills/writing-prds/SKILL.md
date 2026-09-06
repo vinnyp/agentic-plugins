@@ -57,8 +57,9 @@ All of this lives **beside the PRD, in the project repo — never in `/tmp`**:
   its path is recorded in the fence-file header. Every later round **appends** a `## Round N`
   section to this same file.
 - **The cumulative fence file** — `<prd-dir>/<prd-slug>-fences.md`. Records owner decisions
-  **and** owner-rejected findings. Carried into every subsequent brief and editing dispatch as
-  `--source`.
+  **and** owner-rejected findings. The fence file's header also enumerates the currently
+  owner-locked Req-IDs (the list the brief marks out of scope) and records the round-1
+  review-log path. Carried into every subsequent brief and editing dispatch as `--source`.
 - **Per-round fix files** — `<prd-dir>/<prd-slug>-round-<N>-fixes.md`, one per round: the
   checkbox list that is that round's resume point.
 - **The OQ results file** — `<prd-dir>/<prd-slug>-oq-results.md`, one `## OQ <id>` section per
@@ -100,8 +101,9 @@ State owner: this skill (see State artifacts, above). Each iteration runs five s
 
 (a) **Invoke the gate** (`agent-dispatch:running-the-peer-review-gate`, `requirements` mode) for
 one round. Round 1 creates the review log via the gate's `log-new`, and the created path is
-recorded in the fence-file header. Every later round passes that recorded log path **and** the
-fence file as `--source` — never inlined. On the **first full round only**, the orchestrator also
+recorded in the fence-file header. Round 1 passes the fence file; every later round passes the
+fence file and the recorded log path as `--source` — never inlined. On the **first full round
+only**, the orchestrator also
 offers the owner an optional different-model (cross-model) pass via the gate's cross-model route
 — it is never repeated unprompted on any later round, and any cross-model findings delta-verify by
 the same re-dispatch as step (e).

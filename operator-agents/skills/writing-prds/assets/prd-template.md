@@ -61,7 +61,12 @@ flowchart TD
 ## 5. Legend
 <!-- guidance: Declare the two vocabularies every later table in this document depends on: the priority semantics (what each Pri value means, and where the build-order-vs-cut-line falls within the current release) and the row-status vocabulary. Not conditional: the Requirements table in §7 is unreadable without this section existing first. -->
 
-**Priority (build order within the release; the cut line is stated explicitly per release, not implied by ordering):**
+**Priority — choose exactly one semantic for this release and delete the other bullet before lock:**
+
+- **Build order within the release — nothing droppable.** Every P0/P1/P2 row ships in this
+  release; priority only orders the sequence work happens in.
+- **Cut line — lower priorities may not ship.** Priority marks what survives if scope tightens;
+  the cut line is stated explicitly per release, never implied by ordering.
 
 | Pri | Meaning |
 |---|---|
