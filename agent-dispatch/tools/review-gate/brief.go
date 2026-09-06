@@ -223,6 +223,9 @@ func cmdBrief(args []string) int {
 	}
 	b.WriteString("\n")
 	b.Write(closing)
+	if *mode == "requirements" {
+		b.WriteString("\n**Requirements-mode addendum:** the per-row disposition table required above is part of the return format — append it after your persona's structure. The closing's \"and nothing else\" does not waive it.\n")
+	}
 	fmt.Fprint(os.Stdout, b.String())
 	return 0
 }

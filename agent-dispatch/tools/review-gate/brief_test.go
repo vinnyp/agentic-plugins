@@ -445,6 +445,51 @@ func TestBriefRequirementsModeBody(t *testing.T) {
 	}
 }
 
+// The closing template's "and nothing else." instruction (templates/review-brief-closing.md)
+// would otherwise contradict the requirements-mode disposition-table requirement above it,
+// since the closing is appended AFTER the mode preamble. The addendum must land after the
+// closing so it is the LAST instruction the reviewer reads. Uses the REAL closing template
+// (not the fixture's token stand-in) so "and nothing else." is actually present to order against.
+func TestBriefRequirementsAddendumFollowsClosing(t *testing.T) {
+	briefFixture(t)
+	root := targetRoot(t, "prd.md")
+	realClosing := filepath.Join("..", "..", "templates", "review-brief-closing.md")
+	rc, out := runCapt(t, "brief", "--persona", "peer-code-reviewer", "--mode", "requirements",
+		"--for", "claude", "--spec", "prd.md", "--repo-root", root, "--closing-template", realClosing)
+	if rc != 0 {
+		t.Fatalf("rc=%d out=%s", rc, out)
+	}
+	closingIdx := strings.Index(out, "and nothing else.")
+	if closingIdx < 0 {
+		t.Fatalf("brief missing the closing's \"and nothing else.\" text:\n%s", out)
+	}
+	addendumIdx := strings.Index(out, "Requirements-mode addendum")
+	if addendumIdx < 0 {
+		t.Fatalf("requirements-mode brief missing the addendum:\n%s", out)
+	}
+	if addendumIdx < closingIdx {
+		t.Fatalf("addendum (offset %d) appears BEFORE the closing's \"and nothing else.\" text (offset %d); it must come after so it is the last instruction the reviewer reads", addendumIdx, closingIdx)
+	}
+}
+
+// The addendum resolves a requirements-mode-only contract conflict; it must not leak into
+// design or build mode, where no disposition table is required and there is nothing to waive.
+func TestBriefAddendumOnlyInRequirementsMode(t *testing.T) {
+	_, tmpl := briefFixture(t)
+	designRoot := targetRoot(t, "s.md")
+	_, designOut := runCapt(t, "brief", "--persona", "peer-code-reviewer", "--mode", "design",
+		"--for", "claude", "--spec", "s.md", "--repo-root", designRoot, "--closing-template", tmpl)
+	if strings.Contains(designOut, "Requirements-mode addendum") {
+		t.Fatalf("design-mode brief must not contain the requirements-mode addendum:\n%s", designOut)
+	}
+	buildRoot := gitRepoWithCommits(t)
+	_, buildOut := runCapt(t, "brief", "--persona", "peer-code-reviewer", "--mode", "build",
+		"--for", "claude", "--range", "HEAD~1..HEAD", "--repo-root", buildRoot, "--closing-template", tmpl)
+	if strings.Contains(buildOut, "Requirements-mode addendum") {
+		t.Fatalf("build-mode brief must not contain the requirements-mode addendum:\n%s", buildOut)
+	}
+}
+
 func TestBriefRequirementsRequiresSpec(t *testing.T) {
 	_, tmpl := briefFixture(t)
 	root := targetRoot(t)
