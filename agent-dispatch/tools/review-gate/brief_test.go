@@ -417,6 +417,101 @@ func TestBriefSkipsRangeProbeOutsideGitRepo(t *testing.T) {
 	}
 }
 
+// --- requirements mode ---
+
+func TestBriefRequirementsModeBody(t *testing.T) {
+	_, tmpl := briefFixture(t)
+	root := targetRoot(t, "prd.md")
+	rc, out := runCapt(t, "brief", "--persona", "peer-code-reviewer", "--mode", "requirements",
+		"--for", "claude", "--spec", "prd.md", "--repo-root", root, "--closing-template", tmpl)
+	if rc != 0 {
+		t.Fatalf("rc=%d", rc)
+	}
+	if !strings.Contains(out, "Review the following REQUIREMENTS DOCUMENT (WHAT-level rows; judge behavior and verifiability, not missing mechanisms):") {
+		t.Fatalf("requirements preamble missing: %q", out)
+	}
+	if !strings.Contains(out, "per-row disposition table over the document's Req-IDs") ||
+		!strings.Contains(out, "ALIGN, OBJECT (finding-id), ABSTAIN (out of lens)") {
+		t.Fatalf("return-structure block missing: %q", out)
+	}
+	if !strings.Contains(out, "- prd.md") {
+		t.Fatalf("spec not listed: %q", out)
+	}
+}
+
+func TestBriefRequirementsRequiresSpec(t *testing.T) {
+	_, tmpl := briefFixture(t)
+	root := targetRoot(t)
+	rc, out, stderr := runCaptAll(t, "brief", "--persona", "peer-code-reviewer", "--mode", "requirements",
+		"--for", "claude", "--repo-root", root, "--closing-template", tmpl)
+	if rc != 1 {
+		t.Fatalf("requirements with no --spec rc=%d want 1; a brief naming no document must not be emitted:\n%s", rc, out)
+	}
+	if !strings.Contains(stderr, "requirements mode requires --spec and forbids --range") {
+		t.Fatalf("wrong rejection reason: %q", stderr)
+	}
+	if strings.Contains(out, "REQUIREMENTS DOCUMENT") {
+		t.Fatalf("rejected brief was still emitted:\n%s", out)
+	}
+}
+
+func TestBriefRequirementsRejectsRange(t *testing.T) {
+	_, tmpl := briefFixture(t)
+	rc, _, stderr := runCaptAll(t, "brief", "--persona", "peer-code-reviewer", "--mode", "requirements",
+		"--for", "claude", "--spec", "prd.md", "--range", "HEAD~1..HEAD", "--closing-template", tmpl)
+	if rc != 1 {
+		t.Fatalf("requirements+--range rc=%d want 1", rc)
+	}
+	if !strings.Contains(stderr, "requirements mode requires --spec and forbids --range") {
+		t.Fatalf("rejected for the WRONG reason (mode validation, not spec/range gating): %q", stderr)
+	}
+}
+
+func TestBriefRejectsUnknownMode(t *testing.T) {
+	_, tmpl := briefFixture(t)
+	root := gitRepoWithCommits(t)
+	rc, out, stderr := runCaptAll(t, "brief", "--persona", "peer-code-reviewer", "--mode", "requirments",
+		"--for", "claude", "--range", "HEAD~1..HEAD", "--repo-root", root, "--closing-template", tmpl)
+	if rc != 1 {
+		t.Fatalf("typo'd --mode rc=%d want 1; a misspelled mode silently produced a brief:\n%s", rc, out)
+	}
+	if !strings.Contains(stderr, "must be design|build|requirements") {
+		t.Fatalf("mode allowlist message missing: %q", stderr)
+	}
+}
+
+func TestBriefRequirementsListsEverySpec(t *testing.T) {
+	_, tmpl := briefFixture(t)
+	root := targetRoot(t, "prd.md", "prd-oq-results.md")
+	rc, out := runCapt(t, "brief", "--persona", "peer-code-reviewer", "--mode", "requirements",
+		"--for", "claude", "--spec", "prd.md", "--spec", "prd-oq-results.md",
+		"--repo-root", root, "--closing-template", tmpl)
+	if rc != 0 {
+		t.Fatalf("rc=%d out=%s", rc, out)
+	}
+	for _, want := range []string{"- prd.md", "- prd-oq-results.md"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("requirements brief omitted %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestBriefRequirementsCarriesSources(t *testing.T) {
+	_, tmpl := briefFixture(t)
+	root := targetRoot(t, "prd.md", "docs/agent-reviews/2026-01-01-prd-peer-reviews.md")
+	rc, out := runCapt(t, "brief", "--persona", "peer-code-reviewer", "--mode", "requirements",
+		"--for", "claude", "--spec", "prd.md",
+		"--source", "docs/agent-reviews/2026-01-01-prd-peer-reviews.md",
+		"--repo-root", root, "--closing-template", tmpl)
+	if rc != 0 {
+		t.Fatalf("rc=%d out=%s", rc, out)
+	}
+	if !strings.Contains(out, "Contract sources to READ:") ||
+		!strings.Contains(out, "docs/agent-reviews/2026-01-01-prd-peer-reviews.md") {
+		t.Fatalf("requirements brief dropped the prior-round log passed by --source:\n%s", out)
+	}
+}
+
 // gitRepoWithCommits builds a real two-commit repo so a range probe has
 // something to resolve against.
 func gitRepoWithCommits(t *testing.T) string {

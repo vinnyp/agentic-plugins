@@ -87,7 +87,7 @@ func vaultFrontmatter(date, project string) string {
 func cmdLogNew(args []string) int {
 	fs := flag.NewFlagSet("log-new", flag.ContinueOnError)
 	topic := fs.String("topic", "", "log topic slug")
-	mode := fs.String("mode", "", "design|build (informational)")
+	mode := fs.String("mode", "", "design|build|requirements (informational)")
 	toStdout := fs.Bool("stdout", false, "emit to stdout instead of writing in place")
 	force := fs.Bool("force", false, "overwrite an existing log")
 	project := fs.String("project", "", "vault project slug (only used when the target repo is an Obsidian vault; adds a project: frontmatter key)")
