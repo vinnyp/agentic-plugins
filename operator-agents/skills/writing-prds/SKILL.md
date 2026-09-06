@@ -58,7 +58,8 @@ All of this lives **beside the PRD, in the project repo — never in `/tmp`**:
   section to this same file.
 - **The cumulative fence file** — `<prd-dir>/<prd-slug>-fences.md`. Records owner decisions
   **and** owner-rejected findings. The fence file's header also enumerates the currently
-  owner-locked Req-IDs (the list the brief marks out of scope) and records the round-1
+  owner-locked row IDs — any of the template §2's three families (`R<section>.<n>`, `E<n>`,
+  `M<n>`) — (the list the brief marks out of scope) and records the round-1
   review-log path. Carried into every subsequent brief and editing dispatch as `--source`.
 - **Per-round fix files** — `<prd-dir>/<prd-slug>-round-<N>-fixes.md`, one per round: the
   checkbox list that is that round's resume point.
@@ -84,8 +85,9 @@ time. An unresolved placeholder is a **lock-blocking defect** — checked, and e
 
 Dispatch `operator-agents:product-manager` with the scaffold, its template guidance comments,
 `references/process-rules.md`, the research inventoried in Phase 0, and the parameterized
-upstream docs. Every row it produces gets a Req-ID (`R<section>.<n>`, assigned once, never
-renumbered) and lands at pre-alignment status. The operator flags gaps and forks; **it never
+upstream docs. Every dispositionable row it produces gets the row ID the template's §2 defines
+for its table — `R<section>.<n>` for §7 requirements, `E<n>` for §8 error/state rows, `M<n>` for
+§9 success metrics — assigned once, never renumbered — and lands at pre-alignment status. The operator flags gaps and forks; **it never
 marks anything decided** — that authority belongs to the owner alone, in Phase 3.
 
 ## Phase 3 — Owner adjudication
