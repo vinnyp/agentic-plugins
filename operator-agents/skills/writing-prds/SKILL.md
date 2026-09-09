@@ -125,13 +125,19 @@ passed as `--source`, asking per-finding RESOLVED/UNRESOLVED. Same-session agent
 optimization when available — **never the contract**; cross-model findings delta-verify the same
 re-dispatch way.
 
-**Editorial edits do not re-open a row.** An edit that changes no row's rule text — wording, an
-index / Legend / fence-to-row map entry, a cite label, punctuation — is an *editorial edit*: the
+**Editorial edits do not re-open a row.** An edit that changes no *meaning* is an *editorial
+edit* — a link target or label that keeps the same owning document, an index / Legend /
+fence-to-row map entry, typography and punctuation, a status cell the fix file authorizes: the
 orchestrator verifies the diff against the fix file word by word, records it in the round's log
 section as editorial, and the row keeps its alignment (process rule 6: owner-authorized edits to
-an aligned row keep alignment and say so inline). It does not trigger a lens round; only a change
-to rule text re-opens a row for the lenses. Rationale: seven rows whose rule text never changed
-cost six delta rounds when every index repair was treated as a re-open.
+an aligned row keep alignment and say so inline). It does not trigger a lens round.
+
+Anything that changes meaning is **not** editorial, even when no rule cell was retyped. A change
+to Legend priority semantics, to the wording of user-facing copy, to which PRD a cite names as
+owner, or to any rule cell goes through a lens round — a delta over the edited rows is enough.
+Rationale: seven rows whose rule text never changed cost six delta rounds when every index repair
+was treated as a re-open; the class is narrow to save those rounds, not to pass a contract change
+by the lenses unreviewed.
 
 **Resume rule.** On entering Phase 4: if the latest round's fix file has unticked boxes, resume
 at (d). If the log's latest round lacks a verification note, resume at (e). `log-new` is
@@ -146,12 +152,14 @@ uses, build-order within the release or cut line, before this pass runs.
 
 ## Phase 6 — Lock
 
-**Mechanical lock preconditions (orchestrator-run, before the pre-lock round).** No lens can see
+**Mechanical lock preconditions (orchestrator-run, bracketing the pre-lock round).** No lens can see
 these — each lens is briefed on one document and disposes rows one by one — so the orchestrator
 runs them itself and records the result (what was checked, the misses, the fix or the post-lock
 item) in the review log's lock record:
 
-1. **Cross-PRD consistency**, over every pair of PRDs that cite each other: (a) inherited
+1. **Cross-PRD consistency**, over every PRD this document cites *or* is cited by — the direction
+   does not matter and the citation need not be reciprocal, and each such pair gets every check
+   below: (a) inherited
    obligations agree both ways — every line in this PRD's obligations table that names another
    PRD has its counterpart there, each naming the rows that carry it; (b) shared rows agree on
    priority — where one document says a row "moves into" or "is in" a build phase, the other's
@@ -168,6 +176,12 @@ item) in the review log's lock record:
    rows an upstream PRD places at a higher priority, undefined terms the rows lean on. Each
    becomes an Open Question or a Phase 3 adjudication *before* the pre-lock round — never
    discovered one per verification round afterwards.
+
+**The clean result must belong to the document that locks.** The checks run once before the
+pre-lock round *and again after the last edit of that round's fix pass* — the state that actually
+locks. Any edit after a clean check re-runs all three before lock: a row, an Open Question, a
+fence, the Legend, the fence-to-row map, a companion file. A result recorded for an earlier state
+does not carry forward, and an editorial edit (Phase 4) is still an edit for this purpose.
 
 The same three checks re-run before any re-lock (a refactor of a locked PRD, a companion split, an
 amendment that moves rows). Rationale: one PRD carried a shared row at P1 while its sibling's
@@ -191,7 +205,8 @@ Lock requires all of the following:
 - **The mandatory pre-lock round has run** — the retargeted `peer-plan-reviewer` plus fresh-lens
   requirement above, with its findings adjudicated per Phase 3 (see above).
 - **The mechanical preconditions ran clean** — cross-PRD consistency, index sync, and the
-  latent-decision inventory above, with the result in the lock record.
+  latent-decision inventory above, run against the state being locked, with the result in the
+  lock record.
 - **The OQ contract complete** — a results-file section for every answered Open Question.
 - **Zero unresolved placeholders.**
 - **Template guidance comments deleted.**
