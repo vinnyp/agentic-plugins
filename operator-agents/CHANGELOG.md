@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.5.0](https://github.com/vinnyp/agentic-plugins/compare/operator-agents-v1.4.0...operator-agents-v1.5.0) (2026-09-09)
+
+
+### Features
+
+* **operator-agents:** add mechanical PRD lock preconditions ([#30](https://github.com/vinnyp/agentic-plugins/issues/30)) ([428238d](https://github.com/vinnyp/agentic-plugins/commit/428238dcafa15e674f3fa97b77f7267b9a8ee6bb))
+* **operator-agents:** add PRD row, companion, and budget rules ([#29](https://github.com/vinnyp/agentic-plugins/issues/29)) ([8bf3974](https://github.com/vinnyp/agentic-plugins/commit/8bf39740aa83924928ddc24112e4e5ca0bfe674b))
+
 ## [1.4.0](https://github.com/vinnyp/agentic-plugins/compare/operator-agents-v1.3.0...operator-agents-v1.4.0) (2026-09-06)
 
 
