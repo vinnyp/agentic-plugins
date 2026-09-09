@@ -52,17 +52,11 @@ flowchart TD
 ```
 
 ## 4. User Journeys
-<!-- guidance: Enumerate every user journey this feature supports. Each journey gets its happy-path steps AND its explicit failure branches — an error path is a journey, not an afterthought, and belongs here rather than only in §8. A diagram may accompany a journey to clarify branching, but it complements the written steps; it never replaces them — a reviewer who reads only the diagram must not miss a failure branch that only the prose captures. Not conditional. -->
+<!-- guidance: Index every user journey this feature supports — one row per journey: a stable journey ID, its name, the rows it exercises, and a link to its full entry in the journeys companion (`<prd-slug>-journeys.md`, process rule 8). The companion holds each journey's happy-path steps AND its explicit failure branches — an error path is a journey, not an afterthought, and belongs there rather than only in §8. A diagram may accompany a journey in the companion to clarify branching, but it complements the written steps; it never replaces them — a reviewer who reads only the diagram must not miss a failure branch that only the prose captures. The full journeys never live inline here: the PRD body has a word budget and the companion does not. Not conditional. -->
 
-### Journey: _(name)_
-
-**Happy path:**
-
-1. _(step)_
-
-**Failure branches:**
-
-- _(condition)_ → _(what the user sees / what happens next)_
+| Journey | Name | Rows exercised | Entry |
+|---|---|---|---|
+| J1 | _(name)_ | _(Req-IDs)_ | _(link to `<prd-slug>-journeys.md#journey-…`)_ |
 
 ## 5. Legend
 <!-- guidance: Declare the two vocabularies every later table in this document depends on: the priority semantics (what each Pri value means, and where the build-order-vs-cut-line falls within the current release) and the row-status vocabulary. Not conditional: the Requirements table in §7 is unreadable without this section existing first. -->
@@ -93,11 +87,11 @@ flowchart TD
 
 ## 6. Surfaces
 <!-- conditional: user-facing surfaces only -->
-<!-- guidance: Enumerate every user-facing surface this feature touches (a screen, a CLI output, an API response body, an email, a notification) and what changes on each. Conditional: if this product area has no user-facing surface (a purely internal or backend-only change), delete this section's heading and body entirely rather than leaving it empty — an internal-only PRD owes nothing here. -->
+<!-- guidance: Enumerate every user-facing surface this feature touches (a screen, a CLI output, an API response body, an email, a notification) and what changes on each. The user-facing strings themselves live in the copy companion (`<prd-slug>-copy.md`, process rule 8), keyed by copy ID and each naming the row that backs it (process rule 5); this table names the copy IDs a surface shows, never the strings. Conditional: if this product area has no user-facing surface (a purely internal or backend-only change), delete this section's heading and body entirely rather than leaving it empty — an internal-only PRD owes nothing here. -->
 
-| Surface | What changes | Req-IDs |
-|---|---|---|
-| | | |
+| Surface | What changes | Req-IDs | Copy IDs |
+|---|---|---|---|
+| | | | |
 
 ## 7. Requirements
 <!-- guidance: This is the load-bearing table the gate reviews and the owner adjudicates row by row. Every row gets a Req-ID per §2, a Release, a Pri per §5, the requirement statement itself (WHAT-level: behavior and verifiability, not implementation), a Status per §5, and the Commit PR that lands it once in-progress or done. Not conditional. Split into multiple tables (e.g. one per release or per subsystem) if that reads better, but repeat this exact header on each. -->

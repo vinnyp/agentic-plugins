@@ -39,6 +39,18 @@ path on other runtimes. It is validated end-to-end on Claude Code.
 `agent-dispatch:running-the-peer-review-gate` in `requirements` mode for each
 review round.
 
+Two rules shape how that loop ends. **Lock has mechanical preconditions** no
+lens can check: before a PRD locks, the orchestrator itself runs cross-PRD
+consistency (over every PRD the document cites or is cited by), index sync, and
+a latent-decision inventory, re-running them after the last edit so the clean
+result belongs to the state that actually locks. **Editorial edits do not
+re-open a row**: an edit that changes no meaning — a link target or label
+keeping the same owning document, an index or map entry, typography, a status
+cell the fix file authorizes — is recorded as editorial and keeps the row's
+alignment, while anything that changes meaning (Legend priority semantics,
+user-facing copy wording, which PRD a cite names as owner, any rule cell) goes
+through a lens round.
+
 ## Guardrail Pattern
 
 Each operator acts like a senior practitioner: it investigates, drafts, edits,
