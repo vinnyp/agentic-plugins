@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.1](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.6.0...agent-dispatch-v1.6.1) (2026-09-09)
+
+
+### Bug Fixes
+
+* **agent-dispatch:** accept per-row verdicts as review evidence ([f39604a](https://github.com/vinnyp/agentic-plugins/commit/f39604a7c6fa056596e5f8f1e8644357fa8d240b))
+
 ## [1.6.0](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.5.0...agent-dispatch-v1.6.0) (2026-09-06)
 
 
