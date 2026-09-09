@@ -65,6 +65,12 @@ All of this lives **beside the PRD, in the project repo — never in `/tmp`**:
   checkbox list that is that round's resume point.
 - **The OQ results file** — `<prd-dir>/<prd-slug>-oq-results.md`, one `## OQ <id>` section per
   answered Open Question.
+- **The journeys and copy companions** — `<prd-dir>/<prd-slug>-journeys.md` (one
+  `### Journey: <name>` section per journey: happy-path steps and failure branches) and
+  `<prd-dir>/<prd-slug>-copy.md` (one entry per user-facing string: ID, surface, the string, the
+  rows that back it). Process rule 8: the PRD's §4 and §6 carry only their index, so a reviewer
+  traces a journey step or a string back to the row that backs it, and the PRD body stays inside
+  its word budget (Phase 2).
 
 ## Phase 0 — Research inventory
 
@@ -78,8 +84,10 @@ Rationale, verbatim: "late evidence ingestion after lock costs a full re-open/ve
 ## Phase 1 — Scaffold
 
 Instantiate `${CLAUDE_PLUGIN_ROOT}/skills/writing-prds/assets/prd-template.md` into the project's
-product-docs directory. The template's `{{placeholder}}` parameters are substituted at scaffold
-time. An unresolved placeholder is a **lock-blocking defect** — checked, and enforced, at Phase 6.
+product-docs directory, alongside the two empty companions (`<prd-slug>-journeys.md`,
+`<prd-slug>-copy.md` — see State artifacts). The template's `{{placeholder}}` parameters are
+substituted at scaffold time. An unresolved placeholder is a **lock-blocking defect** — checked,
+and enforced, at Phase 6.
 
 ## Phase 2 — Fill
 
@@ -89,6 +97,16 @@ upstream docs. Every dispositionable row it produces gets the row ID the templat
 for its table — `R<section>.<n>` for §7 requirements, `E<n>` for §8 error/state rows, `M<n>` for
 §9 success metrics — assigned once, never renumbered — and lands at pre-alignment status. The operator flags gaps and forks; **it never
 marks anything decided** — that authority belongs to the owner alone, in Phase 3.
+
+**Word budget.** The PRD body — tables, Legend, Open Questions; companions excluded — has a word
+budget: the project-supplied value (a parameter to this skill), default **12,000 words**. The fill
+brief states it, and the orchestrator reports the count after the fill and after every fix pass.
+Over budget is a defect of the fill, not a fence for the owner to impose in a late round: run a
+compaction pass under process rules 7 and 8 before the next round. A document that cannot fit
+because it has too many rows is two PRDs — split it, as its row-ID families and cross-PRD cites
+already allow. Rationale: a PRD reached ~33k words before the owner fenced two-sentence rows at
+round 15 and a companion split at round 16, each costing a full verification round; the next PRD
+in the same project repeated the refactor under its own fence.
 
 ## Phase 3 — Owner adjudication
 

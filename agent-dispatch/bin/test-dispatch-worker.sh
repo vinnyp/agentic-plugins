@@ -951,6 +951,46 @@ done
 unset EVIDENCE_FIXTURE
 echo "test 31c-d (both file:line evidence alternatives pass independently) PASS"
 
+# 31e. Requirements-mode evidence (vinnyp/foundry#192): a per-row disposition table (row ID
+# + ALIGN/OBJECT/ABSTAIN) is the deliverable a PRD review brief asks for and carries neither
+# a severity token nor a file:line cite. It must pass the evidence gate AND the byte backstop
+# (a small PRD's complete table is well under 1200B), while row-free prose in the same
+# vocabulary ("Aligned rows: no objection ... ALIGN") still fails closed as rc 8.
+R31E="$TMP/repo31e"; make_git_repo "$R31E"
+cat > "$TMP/bin/agy" <<'STUB'
+#!/usr/bin/env bash
+# PERSONA_ROSTER_STUB
+case "${1:-}" in
+  agent)
+    printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
+    [ "${AGY_ROSTER_MODE:-}" = nonzero ] && exit 19
+    [ "${AGY_ROSTER_MODE:-}" = empty ] || printf '%s\n' peer-security-reviewer peer-code-reviewer
+    exit 0
+    ;;
+esac
+case "$*" in *models*) exit 0;; esac
+if [ "${ROWVERDICT_MODE:-table}" = table ]; then
+  printf '%s\n' '## Per-row dispositions' '| Row | Disposition |' '|---|---|' '| R1.1 | ALIGN |' '| R1.2 | ALIGN |' '| E3 | ABSTAIN (out of lens) |' '| M1 | ALIGN |' '' 'Findings: none.'
+else
+  printf '%s\n' '## Per-row dispositions' 'Aligned rows: no objection. Every row reads as ALIGN from this lens.' 'Findings: none.'
+fi
+STUB
+chmod +x "$TMP/bin/agy"
+REVIEW_OUTFILE="$TMP/t31e-table.review.md" TIMEOUT=0 "$DW" --runtime agy --review --brief "$BRIEF" --workdir "$R31E" >"$TMP/t31e-table.out" 2>"$TMP/t31e-table.err"
+rc=$?
+[ "$rc" -eq 0 ] || fail "short per-row disposition table should pass as requirements-mode evidence, got rc $rc"
+review_file="$(sed -n 's/^REVIEW_OUTFILE=\([^ ]*\).*/\1/p' "$TMP/t31e-table.err" | tail -n 1)"
+[ "$(wc -c < "$review_file" | tr -d ' ')" -lt 1200 ] || fail "row-verdict fixture must sit below the 1200B backstop to prove the exemption"
+ROWVERDICT_MODE=prose DISPATCH_MIN_REVIEW_BYTES=1 REVIEW_OUTFILE="$TMP/t31e-prose.review.md" TIMEOUT=0 "$DW" --runtime agy --review --brief "$BRIEF" --workdir "$R31E" >"$TMP/t31e-prose.out" 2>"$TMP/t31e-prose.err"
+rc=$?
+[ "$rc" -eq 8 ] || fail "row-free ALIGN prose should still fail closed as rc 8, got $rc"
+grep -q "no labelled severity or file:line evidence" "$TMP/t31e-prose.err" || fail "row-free ALIGN prose did not hit the evidence-specific rejection"
+ROWVERDICT_MODE=prose REVIEW_OUTFILE="$TMP/t31e-prose-short.review.md" TIMEOUT=0 "$DW" --runtime agy --review --brief "$BRIEF" --workdir "$R31E" >"$TMP/t31e-prose-short.out" 2>"$TMP/t31e-prose-short.err"
+rc=$?
+[ "$rc" -eq 8 ] || fail "row-free short prose must still hit the byte backstop, got rc $rc"
+grep -q "output too short" "$TMP/t31e-prose-short.err" || fail "row-free short prose did not hit the byte-specific branch"
+echo "test 31e (requirements-mode per-row verdicts pass; row-free ALIGN prose still fails) PASS"
+
 # 32. The default isolated worktree is adjacent to the source repos under the
 # house .worktrees directory, not the platform temporary worktree template.
 R32="$TMP/repo32"; make_git_repo "$R32"
@@ -1217,7 +1257,7 @@ echo "test 41b (agy persona roster probe detaches stdin) PASS"
 # every definition must answer the roster subcommand instead of falling into cat.
 agy_stub_defs="$(grep -c 'cat > .*bin/ag[y].*STUB' "$0")"
 agy_stub_arms="$(grep -c '^# PERSONA_ROSTER_STU[B]$' "$0")"
-[ "$agy_stub_defs" -eq 26 ] || fail "expected 22 original + 4 persona-control agy stubs, found $agy_stub_defs"
+[ "$agy_stub_defs" -eq 27 ] || fail "expected 22 original + 4 persona-control + 1 row-verdict agy stubs, found $agy_stub_defs"
 [ "$agy_stub_arms" -eq "$agy_stub_defs" ] || fail "not every agy stub has an agent) arm ($agy_stub_arms/$agy_stub_defs)"
 echo "test 42 (all 22 original agy stubs handle the agent subcommand) PASS"
 
