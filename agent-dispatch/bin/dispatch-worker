@@ -146,7 +146,8 @@ from a real build failure and NOT retry it as a build):
       the reset shown in the output, then re-dispatch; treat as BLOCKED).
   7   agy not authenticated (run \`agy\` to sign in) — do NOT retry as a build.
   8   agy --review is NOT a pass: rc=0 output is below DISPATCH_MIN_REVIEW_BYTES
-      or lacks labelled-severity/file:line review evidence, OR a timeout
+      or lacks labelled-severity/file:line review evidence (a requirements-mode
+      per-row ALIGN/OBJECT/ABSTAIN verdict table also counts as evidence), OR a timeout
       (rc=124/137) also failed on retry —
       regardless of how many bytes the timed-out attempt wrote (a long partial is
       still truncated, not complete). Fall back to a LOCAL reviewer.
@@ -716,15 +717,25 @@ dispatch_agy() {
       review_bytes="$(wc -c < "$review_outfile" 2>/dev/null | tr -d ' ')"
       review_bytes="${review_bytes:-0}"
     fi
-    if [ "$agy_rc" -eq 0 ] && [ "$review_bytes" -lt "$MIN_REVIEW_BYTES" ]; then
+    # Requirements-mode evidence (vinnyp/foundry#192): a PRD review's deliverable is the
+    # per-row disposition table the brief itself asks for — a row ID (R<n>.<n> / E<n> /
+    # M<n>) with ALIGN / OBJECT / ABSTAIN on the same line. It carries neither a severity
+    # token nor a file:line cite, and a small document's complete table sits under
+    # MIN_REVIEW_BYTES, so without this the gate returned rc 8 on every all-ALIGN review. A
+    # body with at least one such line is evidenced and exempt from the byte backstop;
+    # row-free prose in the same vocabulary ("Aligned rows: no objection") is neither.
+    local _rowverdict='(^|[^[:alnum:]_])(R[0-9]+\.[0-9]+|[EM][0-9]+)([^[:alnum:]_]|$).*(^|[^[:alnum:]_])(ALIGN|OBJECT|ABSTAIN)([^[:alnum:]_]|$)'
+    local has_rowverdict=0
+    if [ "$agy_rc" -eq 0 ] && grep -Eq "$_rowverdict" "$review_outfile"; then has_rowverdict=1; fi
+    if [ "$agy_rc" -eq 0 ] && [ "$review_bytes" -lt "$MIN_REVIEW_BYTES" ] && [ "$has_rowverdict" -eq 0 ]; then
       echo "dispatch-worker: REVIEW FAILED — output too short (${review_bytes}B < ${MIN_REVIEW_BYTES}B min). A rc=0-but-empty/short agy review is NOT a pass; do NOT accept it. Fall back to a LOCAL reviewer (Claude Agent-tool peer-*-reviewer, or Opus verify-the-reviewer) — do NOT retry the wedged agy." >&2
       agy_rc=8
     elif [ "$agy_rc" -eq 0 ] && [ "$REVIEW_REQUIRE_EVIDENCE" != "0" ]; then
       local _sev='(^|[^[:alnum:]_])(Blocker|Major|Minor|Nit|Critical)([^[:alnum:]_]|$)'
       local _pathslash='(^|[^[:alnum:]_./-])[[:alnum:]_.-]+/[[:alnum:]_./-]*[[:alnum:]_-]:[0-9]+'
       local _pathext='(^|[^[:alnum:]_./-])[[:alnum:]_-]+\.[[:alpha:]][[:alnum:]]*:[0-9]+'
-      if ! grep -Eq "$_sev|$_pathslash|$_pathext" "$review_outfile"; then
-        echo "dispatch-worker: REVIEW FAILED — review produced no labelled severity or file:line evidence and is not a pass. Fall back to a LOCAL reviewer (Claude Agent-tool peer-*-reviewer, or Opus verify-the-reviewer) — do NOT retry the wedged agy." >&2
+      if [ "$has_rowverdict" -eq 0 ] && ! grep -Eq "$_sev|$_pathslash|$_pathext" "$review_outfile"; then
+        echo "dispatch-worker: REVIEW FAILED — review produced no labelled severity or file:line evidence (and no requirements-mode per-row ALIGN/OBJECT/ABSTAIN verdict) and is not a pass. Fall back to a LOCAL reviewer (Claude Agent-tool peer-*-reviewer, or Opus verify-the-reviewer) — do NOT retry the wedged agy." >&2
         agy_rc=8
       fi
     elif [ "$agy_rc" -eq 124 ] || [ "$agy_rc" -eq 137 ]; then
