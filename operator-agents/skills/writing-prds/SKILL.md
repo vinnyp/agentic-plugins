@@ -127,14 +127,17 @@ re-dispatch way.
 
 **Editorial edits do not re-open a row.** An edit that changes no *meaning* is an *editorial
 edit* — a link target or label that keeps the same owning document, an index / Legend /
-fence-to-row map entry, typography and punctuation, a status cell the fix file authorizes: the
+fence-to-row map entry, typography and punctuation, a status cell the fix file authorizes as
+bookkeeping for a disposition already on the record: the
 orchestrator verifies the diff against the fix file word by word, records it in the round's log
 section as editorial, and the row keeps its alignment (process rule 6: owner-authorized edits to
 an aligned row keep alignment and say so inline). It does not trigger a lens round.
 
-Anything that changes meaning is **not** editorial, even when no rule cell was retyped. A change
+Anything that changes meaning is **not** editorial, even when no rule cell was retyped: a change
 to Legend priority semantics, to the wording of user-facing copy, to which PRD a cite names as
-owner, or to any rule cell goes through a lens round — a delta over the edited rows is enough.
+owner, to any rule cell, or a status change that *carries* a disposition rather than transcribing
+one (`needs-discussion` → `aligned`). Each goes through a lens round — a delta over the edited
+rows is enough.
 Rationale: seven rows whose rule text never changed cost six delta rounds when every index repair
 was treated as a re-open; the class is narrow to save those rounds, not to pass a contract change
 by the lenses unreviewed.
@@ -158,8 +161,10 @@ runs them itself and records the result (what was checked, the misses, the fix o
 item) in the review log's lock record:
 
 1. **Cross-PRD consistency**, over every PRD this document cites *or* is cited by — the direction
-   does not matter and the citation need not be reciprocal, and each such pair gets every check
-   below: (a) inherited
+   does not matter and the citation need not be reciprocal. The outbound set is read off this
+   document; the inbound set is **not** derivable from it, so enumerate the sibling PRDs and their
+   companions and search them for links to this document and to its row-ID families. Each pair the
+   two sets produce gets every check below: (a) inherited
    obligations agree both ways — every line in this PRD's obligations table that names another
    PRD has its counterpart there, each naming the rows that carry it; (b) shared rows agree on
    priority — where one document says a row "moves into" or "is in" a build phase, the other's
