@@ -203,7 +203,9 @@ pass**; say so in the tier-rationale log entry (Phase 2).
 - **Fallback ownership — honor the dispatch gate and inspect the body.** If a `cross-model`-only
   lens returns rc **8**, or a short or empty review body, run a **Claude** Agent-tool reviewer for
   that lens instead. **The trigger is the body, not the exit code**: rc 7/8/124 are the common
-  carriers, and rc 8 also covers a body lacking labelled-severity or file:line evidence. An unlisted
+  carriers, and rc 8 also covers a body lacking labelled-severity or file:line evidence — except
+  that in requirements mode a per-row ALIGN/OBJECT/ABSTAIN table is evidence in its own right: an
+  all-ALIGN table with no findings is a completed review, and `dispatch-worker` passes it. An unlisted
   rc with an empty body (rc 1 has been observed twice) gets the same treatment — a lens that
   returned nothing has not been reviewed, whatever it exited with. Read the per-brief **body
   length** from the run summary and apply the rule mechanically; never read a non-enumerated rc as
