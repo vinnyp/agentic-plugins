@@ -29,9 +29,11 @@ others).
 
 ```bash
 # Check for a project contract in cwd and parents (prefer AGENTS.md).
-# Stop at the repository root; cap the walk at four levels for non-git trees.
+# The real stops are: a .git at the repository root, $HOME, and /. The numeric
+# cap is only a runaway backstop for a pathological tree — it must be generous
+# enough that a repo root several levels up is still reached.
 dir=.; depth=0
-while [ "$depth" -lt 4 ]; do
+while [ "$depth" -lt 6 ]; do
   # Guard FIRST: never read a contract file that sits at $HOME or /. A home-level
   # CLAUDE.md is a global personal file, not a project artifact.
   case "$(cd "$dir" && pwd)" in "$HOME"|/) break ;; esac
@@ -193,6 +195,11 @@ Derive `<slug>` by lowercasing the topic, replacing every run of characters
 outside ASCII `a-z0-9` with a single `-`, and trimming leading and trailing `-`.
 Use ASCII explicitly, not a locale-aware or Unicode character class — a topic
 like "API v2 (café)" must produce the same filename on every machine.
+
+If the slug is empty — a topic with no ASCII alphanumeric characters, such as
+one written entirely in a non-Latin script — use the date instead, e.g.
+`briefs/research-brief-2026-09-10.md`. Never write `research-brief-.md`, which
+would put unrelated topics in one filename namespace.
 
 If the target file already exists, do not overwrite it — append `-2`, `-3`, …
 to the stem.

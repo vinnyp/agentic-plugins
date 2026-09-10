@@ -53,8 +53,8 @@ too narrow — broaden it rather than inventing filler areas.]
 For each question, provide the answer with:
 - Source links, version numbers, and package names where applicable
 - Side-by-side comparison tables where the question spans multiple options
-- A clear statement of which position is most commonly held in recent
-  (2024–2025) sources when community opinion is divided
+- A clear statement of which position is most commonly held in sources from
+  the most recent two years when community opinion is divided
 
 Flag any answer that is inferred from indirect evidence rather than explicit
 documentation. State the version of any SDK, framework, or specification the
