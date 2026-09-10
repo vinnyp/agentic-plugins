@@ -717,7 +717,7 @@ dispatch_agy() {
       review_bytes="$(wc -c < "$review_outfile" 2>/dev/null | tr -d ' ')"
       review_bytes="${review_bytes:-0}"
     fi
-    # Requirements-mode evidence (vinnyp/foundry#192): a PRD review's deliverable is the
+    # Requirements-mode evidence: a PRD review's deliverable is the
     # per-row disposition table the brief itself asks for — a row ID (R<n>.<n> / E<n> /
     # M<n>) with ALIGN / OBJECT / ABSTAIN on the same line. It carries neither a severity
     # token nor a file:line cite, and a small document's complete table sits under
