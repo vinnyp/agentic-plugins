@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/vinnyp/agentic-plugins/compare/operator-agents-v1.5.0...operator-agents-v1.6.0) (2026-09-10)
+
+
+### Features
+
+* **operator-agents:** add the generating-research-briefs skill ([#33](https://github.com/vinnyp/agentic-plugins/issues/33)) ([3957b55](https://github.com/vinnyp/agentic-plugins/commit/3957b551716aebf8f74d33e2a1ae5692cb960735))
+
 ## [1.5.0](https://github.com/vinnyp/agentic-plugins/compare/operator-agents-v1.4.0...operator-agents-v1.5.0) (2026-09-09)
 
 
