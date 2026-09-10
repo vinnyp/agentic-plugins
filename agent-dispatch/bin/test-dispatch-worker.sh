@@ -951,7 +951,7 @@ done
 unset EVIDENCE_FIXTURE
 echo "test 31c-d (both file:line evidence alternatives pass independently) PASS"
 
-# 31e. Requirements-mode evidence (vinnyp/foundry#192): a per-row disposition table (row ID
+# 31e. Requirements-mode evidence: a per-row disposition table (row ID
 # + ALIGN/OBJECT/ABSTAIN) is the deliverable a PRD review brief asks for and carries neither
 # a severity token nor a file:line cite. It must pass the evidence gate AND the byte backstop
 # (a small PRD's complete table is well under 1200B), while row-free prose in the same
