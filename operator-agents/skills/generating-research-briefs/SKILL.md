@@ -32,11 +32,13 @@ others).
 # Stop at the repository root; cap the walk at four levels for non-git trees.
 dir=.; depth=0
 while [ "$depth" -lt 4 ]; do
+  # Guard FIRST: never read a contract file that sits at $HOME or /. A home-level
+  # CLAUDE.md is a global personal file, not a project artifact.
+  case "$(cd "$dir" && pwd)" in "$HOME"|/) break ;; esac
   for name in AGENTS.md AGENT.md CLAUDE.md; do
     if [ -f "$dir/$name" ]; then echo "== $dir/$name =="; cat "$dir/$name"; break 3; fi
   done
   [ -e "$dir/.git" ] && break
-  case "$(cd "$dir" && pwd)" in "$HOME"|/) break ;; esac
   dir="$dir/.."; depth=$((depth + 1))
 done
 ```
@@ -199,15 +201,12 @@ After writing, report the path.
 
 If the write fails (read-only tree, no permission, `briefs` exists as a file),
 say so explicitly, name the path and the reason, and state that the stdout copy
-in 6a is the complete artifact.
+in 6a is the complete artifact. Treat this as a successful completion in a
+degraded state, not a failed task — the brief exists and was delivered.
 
 The brief is a plain markdown file. Routing it into whatever system the project
 files documents in — a docs tree, a wiki, an issue tracker, a knowledge base —
 is the user's call and outside this skill's scope. State the path and stop.
-
-If the findings come back missing the Question Status or Unanswered Questions —
-Summary section, re-prompt the research agent naming that section explicitly
-rather than accepting the response as complete.
 
 ## Constraints
 
@@ -240,6 +239,11 @@ rather than accepting the response as complete.
   summary of the template. The Question Status and Unanswered Questions —
   Summary sections come from the template, and a brief without them does not
   satisfy the deliverable contract.
+- The brief's contract requires the research agent to return a Question Status
+  and an Unanswered Questions — Summary section. This skill never sees that
+  response. If you are later handed findings that omit either section, re-prompt
+  the research agent naming that section explicitly rather than accepting the
+  response as complete.
 - The Context block paraphrases project context. Never copy personal names,
   email addresses, customer identifiers, internal hostnames, credentials, or
   tracker IDs out of a contract file into the brief.

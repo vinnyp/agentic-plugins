@@ -79,11 +79,13 @@ actions — but it must be a decision, not a list of options. Cite the key
 sources that informed the recommendation inline.
 
 **The following two sections are also mandatory. The response is considered
-incomplete without all four of: answers with inline citations, closing
+incomplete without all five of: answers with inline citations, closing
 recommendation, Question Status, Unanswered Questions Summary, and References.**
 
 **Question Status** — reproduce every question from this brief, grouped under
-its original concern area heading. Mark each [x] if answered or [ ] if not.
+its original concern area heading. Mark each [x] only if FULLY answered, or
+[ ] if partially or completely unanswered — a partial answer is unanswered, and
+its gap belongs in the summary. Do not invent other marks such as [-].
 For every unanswered question, provide: (1) the reason it was not answered,
 citing the specific gap in available documentation or sources, and (2) a
 concrete, specific follow-up action the reader can take to close the gap.
