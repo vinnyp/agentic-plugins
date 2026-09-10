@@ -22,17 +22,25 @@ Installed agents then show up in `agy agent`. The top-level `plugin.json` is
 the Antigravity manifest; `.claude-plugin/plugin.json` is the Claude one — both
 point at the same agent definitions.
 
-The `writing-prds` skill (below) is runtime-neutral rather than dual-defined:
-structured adjudication and subagent dispatch use Claude Code tools
-(`AskUserQuestion`, the Agent tool) where available, and fall back to
-plain-text adjudication plus the peer-review gate's pluggable-runtime dispatch
-path on other runtimes. It is validated end-to-end on Claude Code.
+The skills below are runtime-neutral rather than dual-defined. `writing-prds`
+prefers Claude Code tools (`AskUserQuestion`, the Agent tool) for structured
+adjudication and subagent dispatch, with plain-text adjudication plus the
+peer-review gate's pluggable-runtime dispatch path as fallbacks on other
+runtimes. `generating-research-briefs` names no runtime-specific tool at all —
+it reads its template by relative path and halts rather than degrading if that
+read fails. Both are validated end-to-end on Claude Code only.
 
 ## Skills
 
 | Skill | What it is for |
 | --- | --- |
+| `generating-research-briefs` | Turns a topic into a structured brief for a deep research agent — a clarification gate, 8-10 concern areas, and a deliverable contract that requires citations, an opinionated recommendation, and a full accounting of every question left unanswered. |
 | `writing-prds` | Turns a product idea or an existing scaffold into a locked, review-aligned PRD — template-based authoring, an owner-adjudication loop, and a multi-round peer-review gate that runs until every row is aligned and the document is safe to hand to engineering. The skill drives; the owner decides all WHAT/WHY. |
+
+`generating-research-briefs` pairs naturally with `writing-prds`: run it to
+close open questions before or during `writing-prds` Phase 2. This is a
+suggested pairing, not a dependency: unlike `writing-prds`,
+`generating-research-briefs` requires no other plugin.
 
 `writing-prds` requires the `agent-dispatch` plugin (>= the release carrying
 `--mode requirements`) from the same marketplace — it calls
