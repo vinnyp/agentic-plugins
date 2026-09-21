@@ -3,6 +3,13 @@ name: CI
 on:
   push:
   pull_request:
+    # `edited` is NOT in the default set ([opened, synchronize, reopened]) and is
+    # load-bearing here: the "prospective squash message" step below lints the PR
+    # title and body, which are edited independently of any commit. Without
+    # `edited`, a body changed after the check last ran leaves a green required
+    # check sitting above text nobody linted — the same "nobody is forced to call
+    # it" shape this check replaces (vinnyp/foundry#202).
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read
@@ -298,9 +305,31 @@ jobs:
       - name: Install commitlint
         run: npm install -g @commitlint/cli @commitlint/config-conventional
 
-      - name: Write commitlint config
+      # The rules now live in the checked-in commitlint.config.cjs at the repo
+      # root, which commitlint discovers from the working directory. CI used to
+      # write that file inline here, so the rules existed only inside this step
+      # and agent-dispatch/bin/wrap-merge-body.sh had nothing to read.
+
+      # This is the step that makes the goal true. The commitlint runs below lint
+      # the BRANCH's commits; on a squash merge none of them become the commit
+      # that lands — GitHub composes that from the PR title and body, which were
+      # linted by nothing and cannot be rewritten once pushed to public main.
+      # `3957b55` (164/349/184/365/341-character body lines) and `0f8f7c2`
+      # (200/119/121) each left a failing push run on main for exactly that
+      # reason. Linting the prospective squash message catches it while the body
+      # is still editable.
+      - name: Commitlint the prospective squash message
+        if: github.event_name == 'pull_request'
+        env:
+          # Through the environment, never interpolated into the shell: a body
+          # beginning with `-`, or containing `$(...)` or a backtick, is data.
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
         run: |
-          echo "module.exports = { extends: ['@commitlint/config-conventional'] };" > commitlint.config.cjs
+          set -euo pipefail
+          msg="$(mktemp)"
+          printf '%s\n\n%s\n' "$PR_TITLE" "$PR_BODY" > "$msg"
+          commitlint --edit "$msg" --verbose
 
       - name: Commitlint pull request
         if: github.event_name == 'pull_request'

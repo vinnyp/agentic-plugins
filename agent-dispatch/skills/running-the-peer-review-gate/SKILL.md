@@ -108,6 +108,31 @@ state absent from `appsscript.json`. Pass the manifest as a `--source` and put t
 This is a documented workaround, not a designed slot — `review-gate brief` has no `--context` flag
 yet. A lens not given these facts must report them unverified rather than infer them.
 
+**Every brief carries the dispatch preamble.** Before dispatching, concatenate the block from
+[../../docs/dispatch-preamble.md](../../docs/dispatch-preamble.md) onto the top of each brief file —
+both routes, every persona. It is concatenated, not cited: a reviewer who is only pointed at a rule
+is the shape that left two correct rules unreachable.
+
+```bash
+PRE="${CLAUDE_PLUGIN_ROOT}/docs/dispatch-preamble.md"
+DIRTY="$(git status --porcelain | sed 's/^...//' | sed 's/^/`/; s/$/`/' | paste -sd ' ' -)"
+[ -n "$DIRTY" ] || DIRTY='none'
+for b in /tmp/brief-*.md; do
+  { sed -n '/<!-- PREAMBLE:START -->/,/<!-- PREAMBLE:END -->/p' "$PRE" | sed '1d;$d' \
+      | sed "s|{{DIRTY_PATHS}}|$DIRTY|"; echo; cat "$b"; } > "$b.tmp" && mv "$b.tmp" "$b"
+done
+```
+
+Run it against the tree the reviewers will read — a worktree's dirty paths, not your cwd's — and
+check no brief still contains the literal `{{DIRTY_PATHS}}`. The three clauses are:
+
+- **Never touch a file you did not create.** `rm`, `git checkout`, `git restore`, `git reset`, `git clean` and `git stash` are forbidden against any path outside your task's declared files. Treat unknown files as foreign and leave them. This binds every dispatched agent — a coding worker, a reviewer, a research or archival subagent, any runtime — not only a `coding-dispatch.sh` run.
+- **These paths are already dirty and are not yours:** {{DIRTY_PATHS}}. Reverting or deleting one of them is the failure this rule exists to prevent.
+- **You do not run the long gate.** Run every command in the foreground and let it finish. A subagent cannot receive a completion notification, so a backgrounded command hangs forever with nothing to wake it; if you catch yourself writing "I'll wait for the notification", that IS the violation. Never kill or signal a process you did not start.
+
+The third clause matters most here: a reviewer given Bash will otherwise background the suite it was
+asked to run and then wait for a notification that has no channel to arrive on.
+
 **Never hand-roll a brief out of pasted excerpts.** `review-gate brief` emits PATHS (`--spec`,
 `--range`, `--source`) plus a `repo root:` line, and tells the reviewer to open them. That is the
 point: an excerpt-briefed review is a consistency check on the brief, not a correctness gate on the

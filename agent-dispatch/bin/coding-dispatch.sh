@@ -227,6 +227,25 @@ command -v jq >/dev/null 2>&1 || die "jq is required"
 case "$agent" in codex|agy) ;; *) die "unknown agent '$agent' (use: codex|agy)";; esac
 [ "$WORKTREE" -eq 1 ] || [ -z "$BASE_REF" ] || die "--base requires --worktree"
 [ "$WORKTREE" -eq 1 ] || [ "$ALLOW_STALE_BASE" -eq 0 ] || die "--allow-stale-base requires --worktree"
+
+# Dispatch preamble: the three clauses in docs/dispatch-preamble.md are
+# CONCATENATED into every brief (see the assembly below), not cited from it.
+# They used to be a rule each assembling path was expected to reference, which
+# is how two correct rules ended up unreachable — a citation register is not
+# joined by the next path that assembles a brief. This is the primary assembly
+# site in the system.
+#
+# Resolved and validated HERE, before anything with a side effect: a broken
+# install must refuse before it creates a worktree and a branch it will then
+# abandon. A missing or empty block is a hard failure, never a silently shorter
+# brief — that is the exact defect this replaces, since the dispatch would look
+# successful while the agent was never told not to delete files it did not
+# create.
+_preamble_file="${CODING_DISPATCH_PREAMBLE:-$SCRIPT_DIR/../docs/dispatch-preamble.md}"
+[ -r "$_preamble_file" ] || die "dispatch preamble not found at $_preamble_file — refusing to send a brief without it"
+_preamble="$(sed -n '/<!-- PREAMBLE:START -->/,/<!-- PREAMBLE:END -->/p' "$_preamble_file" | sed '1d;$d')"
+[ -n "$_preamble" ] || die "the dispatch preamble block in $_preamble_file is empty or its markers moved"
+
 if [ -z "${CODING_DISPATCH_TIMEOUT:-}" ]; then
   if [ "$agent" = "agy" ]; then TIMEOUT="25m"; else TIMEOUT="15m"; fi
 fi
@@ -418,10 +437,24 @@ else
 fi
 rm -f _coding-result.json
 
+# The preamble was read and validated during argument checking, above. Only the
+# {{DIRTY_PATHS}} substitution happens here, because it must be read from the
+# TARGET tree — a brief dispatched into a worktree must name that worktree's
+# files, not the caller's. We are already inside it.
+_dirty="$(git status --porcelain 2>/dev/null | sed 's/^...//' | sed 's/^/`/; s/$/`/' | paste -sd ' ' -)"
+[ -n "$_dirty" ] || _dirty='none'
+_preamble="${_preamble//\{\{DIRTY_PATHS\}\}/$_dirty}"
+case "$_preamble" in
+  *'{{DIRTY_PATHS}}'*) die "the dispatch preamble still carries an unsubstituted {{DIRTY_PATHS}} token" ;;
+esac
+
 # Builder disclosure injection: every coding-dispatch brief carries the
 # author-wrote-both declaration. The scope block remains conditional.
 _injected_prompt="$(mktemp -t coding-dispatch-brief.XXXXXX)"
 {
+  echo "## Ground rules for every dispatched agent (REQUIRED)"
+  printf '%s\n' "$_preamble"
+  echo ""
   echo "## Builder self-declaration (REQUIRED)"
   echo "If you authored both the fix and the tests that verify it, say so explicitly and name the mutation that should catch a regression in the changed code."
   echo "If you shipped no new tests, say so explicitly."

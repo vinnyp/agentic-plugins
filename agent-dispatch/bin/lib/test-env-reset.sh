@@ -26,6 +26,10 @@ DISPATCH_ENV_VARS=(
   CODING_DISPATCH_WORKTREE
   CODING_DISPATCH_RM_ON_FAIL
   CODING_DISPATCH_CHILD_ENV
+  # Registered with the dispatch preamble. coding-dispatch.sh reads it to locate
+  # docs/dispatch-preamble.md, so an operator value pointing at a stale or empty
+  # copy would change what every brief in a test run carries.
+  CODING_DISPATCH_PREAMBLE
   CODING_BUILD_CMD
   CODING_COMMIT_SCOPE
   AGY_MODEL
