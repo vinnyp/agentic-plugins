@@ -50,17 +50,26 @@ on a clean runner with pinned tools, not just on the author's machine.
 
 For a requirements/PRD document (no diff, no suite, WHAT-level rows). One round per invocation; a
 multi-round loop (fences, adjudication, delta verification, lock) is the CALLER's to run — the
-`operator-agents:writing-prds` skill owns it and invokes this gate once per round. Requires
-`agent-dispatch` >= the release carrying `--mode requirements`; if `review-gate brief --mode
+`operator-agents:writing-prds` and `operator-agents:writing-agent-prds` skills each own such a
+loop and invoke this gate once per round. Requires `agent-dispatch` >= the release carrying
+`--mode requirements`; if `review-gate brief --mode
 requirements` is rejected, upgrade agent-dispatch and say so in the log — do not fall back to
 design mode.
 
 **Always:** `peer-product-manager-reviewer`, `peer-staff-software-engineer-reviewer`, and
 `peer-test-reviewer`. The test lens is retargeted — pass in `--what`: "Review this PRD as the spec
 tests will be written from: can each row become an objective acceptance test, and does every
-verification obligation have an injection path?" (For a PRD authored with `writing-prds`, its
-process rules guarantee such obligations exist; for other requirements docs, drop the test lens
-when the doc carries none.)
+verification obligation have an injection path?" (For a PRD authored with `writing-prds` or with
+`writing-agent-prds`, the process rules of both formats guarantee such obligations exist, so the
+test lens always applies — neither skill's documents are the "other requirements docs" this
+carve-out is for. For a requirements doc authored some other way, drop the test lens only when the
+doc carries no verification obligation at all.)
+
+**For a `writing-agent-prds` document, add `peer-interface-reviewer`** to the standing set. That
+format's rows carry cross-document obligation seams and a copy contract that the building agent
+reads as an interface, and the skill's own standing set is those four lenses — without this line the
+tier reference and the skill disagree about who reviews. Its retargeting line goes in `--what` the
+same way.
 
 **By document shape:** `peer-privacy-reviewer` (personal data or network paths),
 `peer-product-marketing-manager-reviewer` (end-user-visible copy), `peer-architecture-reviewer`

@@ -1,6 +1,6 @@
 ---
 name: running-the-peer-review-gate
-description: Use after any code build or before committing a non-trivial change/spec to run the tiered peer-review gate consistently across any project — assemble per-persona briefs, dispatch Claude Agent-tool reviewers (and optionally a different-model agy/codex pass), verify-the-reviewer, and preserve a durable review log with a disposition table in the caller repo. Use in BUILD mode for a diff (post-build, pre-merge) or DESIGN mode for a spec/design doc (pre-build, the spec gate), or REQUIREMENTS mode for a PRD/requirements doc — one round per invocation; the multi-round PRD loop is operator-agents:writing-prds. Trigger phrases - "run the peer-review gate", "peer-review this build", "review gate", "get peer reviewers on this", "spec gate", "requirements gate", "review this diff before merge", "gate this change".
+description: Use after any code build or before committing a non-trivial change/spec to run the tiered peer-review gate consistently across any project — assemble per-persona briefs, dispatch Claude Agent-tool reviewers (and optionally a different-model agy/codex pass), verify-the-reviewer, and preserve a durable review log with a disposition table in the caller repo. Use in BUILD mode for a diff (post-build, pre-merge) or DESIGN mode for a spec/design doc (pre-build, the spec gate), or REQUIREMENTS mode for a PRD/requirements doc — one round per invocation; the multi-round PRD loop belongs to the caller — operator-agents:writing-prds, or operator-agents:writing-agent-prds for an agent-audience PRD. Trigger phrases - "run the peer-review gate", "peer-review this build", "review gate", "get peer reviewers on this", "spec gate", "requirements gate", "review this diff before merge", "gate this change".
 ---
 
 # running-the-peer-review-gate
@@ -46,9 +46,10 @@ resolved persona version into every brief and log header, so any skew is visible
 - **`requirements`** (the PRD gate, one round per invocation): reviews a **requirements/PRD
   document** — a `--spec <path>` (pass the OQ results file as a second `--spec` when it exists).
   Persona set: the PRD tier in the tier reference. The multi-round loop (fences, owner
-  adjudication, fix passes, delta verification, lock) belongs to the caller
-  (`operator-agents:writing-prds`); this skill runs exactly one round: brief → dispatch → verify →
-  log. Before running phases 6–7 in this mode, read **Requirements-mode specifics** below.
+  adjudication, fix passes, delta verification, lock) belongs to the caller —
+  `operator-agents:writing-prds`, or `operator-agents:writing-agent-prds` for an agent-audience
+  PRD; this skill runs exactly one round: brief → dispatch → verify → log. Before running
+  phases 6–7 in this mode, read **Requirements-mode specifics** below.
 
 The mode sets the brief preamble and which input is expected: `design` and `requirements` require
 `--spec`, `build` requires `--range`.
@@ -301,7 +302,7 @@ to them, it does not restate them.
   the review-log convention). Re-running `log-new` for the same PRD is the defect — a second file
   splits the fresh-lens ledger.
 - **Runtime.** The Claude route is the default; a cross-model pass is opt-in (callers decide
-  cadence — `writing-prds` offers it once, on its first full round).
+  cadence — `writing-prds` and `writing-agent-prds` each offer it once, on their first full round).
 
 ## Gate
 

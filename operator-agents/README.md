@@ -23,29 +23,38 @@ the Antigravity manifest; `.claude-plugin/plugin.json` is the Claude one — bot
 point at the same agent definitions.
 
 The skills below are runtime-neutral rather than dual-defined. `writing-prds`
-prefers Claude Code tools (`AskUserQuestion`, the Agent tool) for structured
-adjudication and subagent dispatch, with plain-text adjudication plus the
-peer-review gate's pluggable-runtime dispatch path as fallbacks on other
-runtimes. `generating-research-briefs` names no runtime-specific tool at all —
-it reads its template by relative path and halts rather than degrading if that
-read fails. Both are validated end-to-end on Claude Code only.
+and `writing-agent-prds` prefer Claude Code tools (`AskUserQuestion`, the
+Agent tool) for structured adjudication and subagent dispatch, with
+plain-text adjudication plus the peer-review gate's pluggable-runtime
+dispatch path as fallbacks on other runtimes. `generating-research-briefs`
+names no runtime-specific tool at all — it reads its template by relative
+path and halts rather than degrading if that read fails. `writing-prds` and
+`generating-research-briefs` are validated end-to-end on Claude Code only;
+`writing-agent-prds` shares `writing-prds`'s runtime assumptions, and its loop
+was exercised on Claude Code before it was packaged.
 
 ## Skills
 
 | Skill | What it is for |
 | --- | --- |
 | `generating-research-briefs` | Turns a topic into a structured brief for a deep research agent — a clarification gate, 8-10 concern areas, and a deliverable contract that requires citations, an opinionated recommendation, and a full accounting of every question left unanswered. |
+| `writing-agent-prds` | Turns a product idea into an agent-audience PRD — build contract, row-transition index, constants and closure gates, Given/When/Assert acceptance tables — through the same owner-adjudicated, peer-review-gated loop as `writing-prds`, or converts an already-locked human-format PRD into that shape through an owner-ratified amendment. |
 | `writing-prds` | Turns a product idea or an existing scaffold into a locked, review-aligned PRD — template-based authoring, an owner-adjudication loop, and a multi-round peer-review gate that runs until every row is aligned and the document is safe to hand to engineering. The skill drives; the owner decides all WHAT/WHY. |
+
+`writing-agent-prds` ships a worked example at
+`skills/writing-agent-prds/assets/example/` — a small locked PRD and its four companions that
+passes the format's own mechanical checks, so the format has a reference instance rather than only
+empty scaffolds.
 
 `generating-research-briefs` pairs naturally with `writing-prds`: run it to
 close open questions before or during `writing-prds` Phase 2. This is a
 suggested pairing, not a dependency: unlike `writing-prds`,
 `generating-research-briefs` requires no other plugin.
 
-`writing-prds` requires the `agent-dispatch` plugin (>= the release carrying
-`--mode requirements`) from the same marketplace — it calls
-`agent-dispatch:running-the-peer-review-gate` in `requirements` mode for each
-review round.
+`writing-prds` and `writing-agent-prds` each require the `agent-dispatch`
+plugin (>= the release carrying `--mode requirements`) from the same
+marketplace — each calls `agent-dispatch:running-the-peer-review-gate` in
+`requirements` mode for each review round.
 
 Two rules shape how that loop ends. **Lock has mechanical preconditions** no
 lens can check: before a PRD locks, the orchestrator itself runs cross-PRD

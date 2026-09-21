@@ -101,8 +101,11 @@ jobs:
           fi
           # Every peer-*-reviewer named in the published dispatch docs must resolve
           # to a real agent, so a roster/doc rename cannot strand a dispatcher.
+          # The skills are in scope too: they dispatch lenses BY NAME, and a skill
+          # that names a lens no agent defines dispatches nothing.
           for n in $(grep -ohE 'peer-[a-z-]+-reviewer' README.md peer-reviewer-agents/README.md \
               agent-dispatch/skills/running-the-peer-review-gate/references/peer-review-tiers.md \
+              operator-agents/skills/*/SKILL.md operator-agents/skills/*/references/*.md \
               | sort -u); do
             grep -qx "$n" "$names_file" || { echo "docs reference '$n', which no agent defines"; fail=1; }
           done
@@ -111,6 +114,101 @@ jobs:
           tr '\n' ' ' < peer-reviewer-agents/README.md | tr -s ' ' | grep -Fq "All ${lenses} lenses" \
             || { echo "peer-reviewer-agents/README.md lens count != ${lenses}"; fail=1; }
           [ "$fail" -eq 0 ] && echo "agent frontmatter contract OK (${lenses} lenses)"
+          exit "$fail"
+
+      # Neither `claude plugin validate` above nor the agy "N processed" assertions
+      # below can see a skill that is ABSENT. Verified by mutation: deleting the
+      # whole of operator-agents/skills/writing-agent-prds left every other gate in
+      # this workflow green — the agy skills assertion is nonzero-only and the two
+      # surviving skills already satisfied it, and nothing else in CI reads
+      # skills/ at all. This step is the one that sees a missing skill, a skill
+      # whose frontmatter name has drifted from its directory (which makes it
+      # unaddressable), and a template or reference a SKILL.md points at that is no
+      # longer on disk. It is filesystem-derived — it enumerates
+      # operator-agents/skills/*/ rather than carrying a list — deterministic, and
+      # offline (jq is preinstalled on the runner image). Mutation-verified in a
+      # copy of the tree: delete the skill dir -> RED; change the frontmatter name
+      # -> RED; delete one asset -> RED; unmutated -> GREEN.
+      - name: Skill contract (roster, frontmatter name, link resolution)
+        shell: bash
+        run: |
+          set -euo pipefail
+          fail=0
+          roster_file="$(mktemp)"
+          count=0
+          for d in operator-agents/skills/*/; do
+            [ -d "$d" ] || continue
+            count=$((count + 1))
+            base="$(basename "$d")"
+            skill="${d}SKILL.md"
+            if [ ! -s "$skill" ]; then
+              echo "$d: missing or empty SKILL.md — the directory ships but nothing loads it"
+              fail=1
+              continue
+            fi
+            fm="$(awk '/^---$/{c++; next} c==1' "$skill")"
+            name="$(printf '%s\n' "$fm" | sed -n 's/^name:[[:space:]]*//p' | head -1 | tr -d '"'"'"'"'"'"'"'"'")"
+            if [ -z "$name" ]; then
+              echo "$skill: missing 'name:' in frontmatter"
+              fail=1
+            elif [ "$name" != "$base" ]; then
+              echo "$skill: name '$name' does not match directory '$base'"
+              fail=1
+            fi
+            printf '%s\n' "$base" >> "$roster_file"
+            # Every assets/ or references/ markdown file a SKILL.md names must exist on
+            # disk — both the markdown-link and the backticked form these skills use.
+            # A deleted template or reference is then a RED here rather than a dangling
+            # pointer the reader discovers at runtime.
+            refs="$(grep -ohE '(assets|references)/[A-Za-z0-9._-]+\.md' "$skill" | sort -u || true)"
+            for r in $refs; do
+              [ -e "${d}${r}" ] || { echo "$skill: names '$r', which does not exist"; fail=1; }
+            done
+            # Any other relative markdown link must resolve too.
+            links="$(grep -ohE '\]\([^) ]+\.md\)' "$skill" | sed -E 's/^\]\(//; s/\)$//' | grep -v '^[a-z][a-z0-9+.-]*:' | sort -u || true)"
+            for l in $links; do
+              [ -e "${d}${l}" ] || { echo "$skill: link target '$l' does not resolve"; fail=1; }
+            done
+          done
+          if [ "$count" -eq 0 ]; then
+            echo "no skill directories under operator-agents/skills/ — an empty enumeration is NOT-RUN, not a pass"
+            exit 1
+          fi
+          # Pin the roster to the published prose, so a deleted or renamed skill is a DIFF
+          # rather than a silent drop: the derived count drives the spelled number in
+          # README.md and in the plugin description, and every skill on disk must be named
+          # in both. Same derivation as the agent aggregate above, which drifted once.
+          case "$count" in
+            1) word=one ;; 2) word=two ;; 3) word=three ;; 4) word=four ;;
+            5) word=five ;; 6) word=six ;; 7) word=seven ;; 8) word=eight ;;
+            *) echo "skill count $count has no spelled form here — extend this case"; fail=1; word='__unspelled__' ;;
+          esac
+          # tr collapses newlines first: the phrase may wrap across lines.
+          readme_flat="$(tr '\n' ' ' < README.md | tr -s ' ')"
+          printf '%s' "$readme_flat" | grep -Fq "${word} authoring skills" \
+            || { echo "README.md authoring-skill count != ${count}: expected the phrase '${word} authoring skills'. On-disk roster: $(tr '\n' ' ' < "$roster_file")"; fail=1; }
+          # The operator-agents description is carried in three manifests and must be
+          # byte-identical in all three: the marketplace entry, the agy plugin.json, and
+          # the Claude .claude-plugin/plugin.json.
+          desc_marketplace="$(jq -er '.plugins[] | select(.name == "operator-agents") | .description' .claude-plugin/marketplace.json)"
+          desc_agy="$(jq -er '.description' operator-agents/plugin.json)"
+          desc_claude="$(jq -er '.description' operator-agents/.claude-plugin/plugin.json)"
+          if [ "$desc_marketplace" != "$desc_agy" ] || [ "$desc_marketplace" != "$desc_claude" ]; then
+            echo "the three operator-agents descriptions are not byte-identical:"
+            printf '  .claude-plugin/marketplace.json: %s\n' "$desc_marketplace"
+            printf '  operator-agents/plugin.json:     %s\n' "$desc_agy"
+            printf '  operator-agents/.claude-plugin:  %s\n' "$desc_claude"
+            fail=1
+          fi
+          printf '%s' "$desc_marketplace" | grep -Fq "${word} authoring skills" \
+            || { echo "operator-agents description authoring-skill count != ${count}: expected '${word} authoring skills'. On-disk roster: $(tr '\n' ' ' < "$roster_file")"; fail=1; }
+          while read -r s; do
+            printf '%s' "$readme_flat" | grep -Fq "$s" \
+              || { echo "README.md names no skill '$s'"; fail=1; }
+            printf '%s' "$desc_marketplace" | grep -Fq "$s" \
+              || { echo "operator-agents description names no skill '$s'"; fail=1; }
+          done < "$roster_file"
+          [ "$fail" -eq 0 ] && echo "skill contract OK (${count} skills: $(tr '\n' ' ' < "$roster_file"))"
           exit "$fail"
 
       # Antigravity CLI (agy) has no npm/brew package — its only public install path
@@ -157,10 +255,11 @@ jobs:
           echo "::endgroup::"
           grep -Eq 'agents[[:space:]]*:[[:space:]]*8 processed' agy-operator-agents.out \
             || { echo "agy: expected operator-agents agents count == 8, got:"; cat agy-operator-agents.out; exit 1; }
-          # operator-agents ships its first skill (writing-prds) as of this change;
-          # assert it's processed at all (nonzero) so a silently-unloaded skill
-          # fails CI instead of shipping invisible, same rationale as agent-dispatch
-          # above.
+          # operator-agents ships three skills; assert they're processed at all
+          # (nonzero) so a silently-unloaded skill fails CI instead of shipping
+          # invisible, same rationale as agent-dispatch above. Nonzero is all this
+          # can assert — the count is not environment-stable (see above) — so the
+          # per-skill roster gate is the "Skill contract" step earlier in this job.
           grep -Eq 'skills[[:space:]]*:[[:space:]]*[1-9][0-9]* processed' agy-operator-agents.out \
             || { echo "agy: expected operator-agents skills line with a nonzero processed count, got:"; cat agy-operator-agents.out; exit 1; }
 

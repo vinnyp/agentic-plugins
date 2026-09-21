@@ -8,7 +8,8 @@ the **Antigravity CLI** (`agy`) from the same dual-runtime frontmatter.
 
 - `peer-reviewer-agents`: independent peer-review lenses for software development
 - `operator-agents`: hands-on engineering & product senior-role agents, plus
-  the writing-prds and generating-research-briefs authoring skills
+  the writing-prds, writing-agent-prds, and generating-research-briefs
+  authoring skills
 - `agent-dispatch`: dispatch coding work and peer reviews to external agent CLIs
 
 The plugins pair naturally: do the work with an operator, then review it with
@@ -63,13 +64,16 @@ but not tool-enforced.
 See [peer-reviewer-agents/README.md](peer-reviewer-agents/README.md) for the
 full reviewer roster and review method.
 
-`operator-agents` contains 8 senior-role agents plus two authoring skills:
+`operator-agents` contains 8 senior-role agents plus three authoring skills:
 
 - DevOps engineer, product manager, product marketing manager, release manager,
   resume writer, retrieval engineer, staff software engineer, and standards
   designer.
 - `writing-prds` drives template-based PRD authoring through an
   owner-adjudicated, peer-review-gated loop.
+- `writing-agent-prds` produces an agent-audience PRD format (build contract,
+  row-transition index, acceptance tables) through the same loop, plus a flow
+  for converting an already-locked PRD into that shape.
 - `generating-research-briefs` turns a topic into a structured brief for a
   deep research agent.
 

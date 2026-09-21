@@ -1,7 +1,7 @@
 {
   "name": "operator-agents",
   "version": "1.6.0",
-  "description": "Hands-on senior role agents for doing software engineering, product, release, retrieval, career, and operations work — plus two authoring skills: writing-prds, which drives template-based PRD authoring through an owner-adjudicated, peer-review-gated loop, and generating-research-briefs, which turns a topic into a structured brief for a deep research agent.",
+  "description": "Hands-on senior role agents for doing software engineering, product, release, retrieval, career, and operations work — plus three authoring skills: writing-prds, which drives template-based PRD authoring through an owner-adjudicated, peer-review-gated loop, writing-agent-prds, which produces an agent-audience PRD format (build contract, row-transition index, acceptance tables) through the same loop, plus a flow for converting an already-locked PRD into that shape, and generating-research-briefs, which turns a topic into a structured brief for a deep research agent.",
   "author": {
     "name": "Vinny Pasceri"
   },

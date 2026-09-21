@@ -1,6 +1,6 @@
 ---
 name: writing-prds
-description: "Use when turning a product idea or scaffold into a locked, review-aligned PRD — template-driven authoring with an owner-adjudication loop and a multi-round peer-review gate. The skill drives; the OWNER decides all WHAT/WHY. Requires the agent-dispatch plugin (running-the-peer-review-gate with requirements mode). Trigger phrases - \"write a PRD\", \"fill out my PRD scaffold\", \"requirements doc for X\", \"lock the PRD\", \"run the PRD loop\". NOT for a single review round on an existing document — that is agent-dispatch:running-the-peer-review-gate in requirements mode."
+description: "Use when turning a product idea or scaffold into a locked, review-aligned PRD — template-driven authoring with an owner-adjudication loop and a multi-round peer-review gate. The skill drives; the OWNER decides all WHAT/WHY. Requires the agent-dispatch plugin (running-the-peer-review-gate with requirements mode). Trigger phrases - \"write a PRD\", \"fill out my PRD scaffold\", \"requirements doc for X\", \"lock the PRD\", \"run the PRD loop\". NOT for a single review round on an existing document — that is agent-dispatch:running-the-peer-review-gate in requirements mode. NOT for a PRD whose primary reader is the building agent — that is operator-agents:writing-agent-prds."
 ---
 
 # writing-prds

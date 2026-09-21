@@ -113,8 +113,8 @@ driving a live tmux/cmux session — are documented per command in the
   and the cross-model egress disclosure. Three modes: `build` (a diff, post-build) and `design` (a
   spec/design doc, pre-build) each run to a single completed gate within this skill; `requirements`
   (a PRD/requirements doc) runs exactly **one round per invocation** — the multi-round loop
-  (fences, owner adjudication, delta verification, lock) belongs to the caller,
-  `operator-agents:writing-prds`.
+  (fences, owner adjudication, delta verification, lock) belongs to the caller:
+  `operator-agents:writing-prds`, or `operator-agents:writing-agent-prds` for an agent PRD.
 - **[Worktree isolation](docs/worktree-isolation.md)** — why `--worktree`, where worktrees land,
   landing the work, salvage on failure, and pruning.
 - **[Operating rules and troubleshooting](docs/operating-and-troubleshooting.md)** — the 3-strike
