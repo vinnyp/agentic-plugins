@@ -6,7 +6,7 @@ Every fence below is **settled**: it is carried into every review brief and ever
 for this PRD, and it is never re-litigated. A reviewer finding that a fence already settles is not
 re-raised.
 
-**Historical baseline:** fences F1–F3 predate the current lock and stand as recorded. An
+**Historical baseline:** fences F1–F4 predate the current lock and stand as recorded. An
 amendment preserves them; it does not re-decide them.
 
 **Review log:** `docs/agent-reviews/2026-02-20-link-shortener-peer-reviews.md`.
@@ -17,12 +17,14 @@ range that authorises that amendment. Its presence says that the fences in that 
 closed and the rows they touch are not yet re-ratified. The bookkeeping close clears it here and in
 every other place the document carries it, in the one push that closes the amendment.
 
-**Resolved base.** While that amendment is open, the preamble also records the commit the diff
-checks compare against — the commit at which this document was most recently locked, resolved once
-at round 1 and written here as a SHA rather than as a branch name or a description. The diff checks
-read it from here, and every run of one records the `(base, head)` pair it used beside its result.
-A branch name resolves differently on two days; a SHA does not, which is the whole reason this line
-exists rather than each run resolving the base for itself.
+**Resolved baselines.** While that amendment is open, the preamble also records the two commits the
+diff checks compare against, each resolved once at round 1 and written here as a SHA: the
+**preservation baseline**, the commit at which this document was most recently locked, and the
+**change baseline**, the merge-base of this amendment's branch with the trunk it targets. A check
+that asks what has been preserved since the lock reads the first; a check that asks what this
+amendment changed reads the second. This document is at its first lock with no amendment open, so
+it records neither SHA: there is no prior locked revision to preserve against and no amendment
+branch to take a merge-base from.
 
 ## Fences
 
@@ -30,12 +32,10 @@ exists rather than each run resolving the base for itself.
 (the owner decision that made it, by link), **Decision** (what the owner decided, in the owner's
 terms), **Why** (optional) and **Carried by**, in that order.
 
-**Carried by grammar.** A **Carried by** value is a comma-separated list of IDs and nothing else —
-row IDs, case IDs, copy-state IDs, metric IDs and sibling fence numbers. Each item is a bare ID,
-optionally preceded by the name of the document that owns it for a cross-document reference ("the
-device PRD R6.27"), so the ID is the last whitespace-separated token of the item. No prose, no
-ranges, no "see above": the mechanical checks build the fence → row map from this line rather than
-trusting the map section, and rationale belongs in **Why**.
+**Carried by grammar.** A **Carried by** value is a comma-separated list of the IDs the decision
+now lives in — row IDs, case IDs, copy-state IDs, metric IDs and sibling fence numbers. A
+cross-document reference is preceded by the name of the document that owns it ("the device PRD
+R6.27"); an ID written bare is this PRD's own.
 
 **A fence's original text is never rewritten.** A later clarification, narrowing, demotion or close
 is appended under the fence as its own dated line, `**Clarified <date> (<authority>):** …`; where
@@ -74,11 +74,27 @@ destination as submitted, before any redirect the destination itself performs.
   the seam may move wholesale.
 - **Carried by:** R2.3, M2
 
+### F4 — Interim attribution for the copy event (2026-03-10)
+
+- **Authority:** the example owner, on the pre-lock fix pass of 2026-03-10. Illustrative, as F1
+  states.
+- **Decision:** until OQ 3 closes, M1 attributes a copied event to the earliest unmatched
+  submission of that short code in the session. The question stays open; this is an interim, not
+  the answer.
+- **Why:** R2.2 makes a resubmission return the short code already assigned, so without a stated
+  attribution two people computing M1 from the same stream get different numbers.
+- **Carried by:** M1
+
 ## Fence → row map
+
+Each line of this map names the IDs one fence governs, by the **Carried by** grammar above — or
+the single clause `governs no rows`, where a blanket amendment fence authorises a rewrite rather
+than deciding a WHAT.
 
 - **F1** — R1.1, R1.2, R1.5, E1, E2, E3
 - **F2** — R1.1, E2
 - **F3** — R2.3, M2
+- **F4** — M1
 
 ## Rejected findings
 

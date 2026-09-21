@@ -31,9 +31,9 @@ structure from the audit through the bookkeeping close and the attended merge. P
 adjudication and Phase 4's verify-the-reviewer discipline apply unchanged inside it, and so do
 these Phase 6 lock conditions, every one of them: the mechanical preconditions (including their
 NOT-RUN rule), the OQ contract, zero unresolved placeholders, template guidance comments deleted,
-and no "peer review pending" wording left. Exactly one condition does **not** carry across: Phase
-6's pre-lock lens round, which on this path is replaced by the bounded orchestrator final check at
-step 6 of the conversion flow. Do not restate that flow here — read it.
+and no "peer review pending" wording left on a current status surface. Exactly one condition does
+**not** carry across: Phase 6's pre-lock lens round, which on this path is replaced by the bounded
+orchestrator final check at step 6 of the conversion flow. Do not restate that flow here — read it.
 
 ## The load-bearing principle
 
@@ -129,7 +129,8 @@ All of this lives **beside the PRD, in the project repo — never in `/tmp`**:
 
 The fence file is carried into every subsequent brief and editing dispatch as `--source`, never
 inlined. Its preamble is settled: it is never re-litigated, and it records the historical
-baseline and the review-log path.
+baseline, the review-log path and — while an amendment is open — the amendment's pending mark and
+the two resolved baselines its diff checks compare against.
 
 ## Phase 0 — Research inventory
 
@@ -358,13 +359,21 @@ Lock requires all of the following:
   release, or cut line, never both. A `Pri` cell that could mean either is not comparable between
   rounds, and not comparable at all against a sibling PRD.
 - **Template guidance comments deleted.**
-- **No "peer review pending" wording left.** A conversion carries that clause in its status line,
-  index and fence preamble while its rounds run; the bookkeeping close (conversion flow, step 7)
-  rewrites it to "peer review closed <date> (PR #<n>); re-locked on merge", verified by grep, with
-  nothing else changing in that push.
+- **No "peer review pending" wording left on any current status surface.** A conversion carries
+  that clause on its **status surfaces** — the PRD status line, the product-docs index entry, the
+  fence preamble's pending item, and any sibling status or OQ line the re-lock touches — while its
+  rounds run; the bookkeeping close (conversion flow, step 7) rewrites each of them to "peer
+  review closed <date> (PR #<n>); re-locked on merge", with nothing else changing in that push.
+  The condition is checked against the **derived inventory of those surfaces**, never as a global
+  string count. A status surface states what the document is NOW; a fence records what was decided
+  THEN, and a fence body or Authority line is immutable, so an amendment that ran several fences
+  legitimately keeps the pending wording in its history. **Zero hits on an inventoried surface is
+  the bar; zero hits across the files is a falsified record.** Step 7 carries the inventory, the
+  four-part verification and a worked case.
 
 The status line reads `Status: locked (<date>)`. Then ship via the project's own workflow — this
-skill does not define one of its own, and on the conversion path the merge is attended.
+skill does not define one of its own, and on the conversion path the merge is attended in the
+owner-authorized sense of conversion flow, step 8.
 
 **Format version and compatibility.** Every document in this format declares the version it was
 authored to, on the `Format:` line the PRD template carries beside the Companions line. That
@@ -379,6 +388,15 @@ a document authored to an older one, and report misses that are not defects of t
 - **A re-lock runs the checks and lock conditions of the version the document declares**, not the
   version installed. A miss reported only by a newer check against an older declared version is
   recorded as such and is not a defect of that document.
+
+**What the version pins — the fixed core.** A locked document cites this contract by its `Format:`
+line rather than restating it, so the contract lives here. Fixed: every section heading, and the
+column set of the row-transitions, constants-and-closure-gates, build-dependencies, requirement,
+obligations, copy-index, metrics and open-questions tables — the checks parse them by name. A
+project may **add** a requirement section, **add** a trailing column to a requirement table, or
+**delete** a section this format marks conditional. Any other reshaping is a **fork** of this
+format, not an instance of it, and a fork must not keep the `Format: agent-prd v1` line, because
+that line is what tells a later reader which checks the document was built to satisfy.
 - **Re-locking under a newer format version is a deliberate migration**, never a side effect of
   running the loop: the owner decides it, it is recorded as its own dated fence, the `Format:`
   line is updated in the same change, and only from that change do the newer checks and lock
@@ -388,7 +406,8 @@ a document authored to an older one, and report misses that are not defects of t
 
 | If a dispatch, editor, or reviewer argues... | The rule stands regardless |
 |---|---|
-| "the agent chose it under the blanket approval, so it's settled" | a blanket approval authorizes the rewrite, not the WHAT inside it |
+| "the agent chose it under the blanket approval, so it's settled" | an approval settles the scope it approved: a bare "proceed" or a structural audit authorizes the rewrite, not the WHAT inside it |
+| "the owner approved the recommendations, but re-ask anyway" | an approved recommendation IS the owner's decision; cite it by number, re-ask only what it left unstated |
 | "the fence can settle the phase / the numerator too" | a fence records exactly what the owner decided; deciding more is a defect |
 | "assert that the counts are correct / unchanged" | an assert names a value, a state or a count; adjectives are not oracles |
 | "state the rule in the preamble / a note" | a rule lives in an ID-carrying row; everything else restates and cites |

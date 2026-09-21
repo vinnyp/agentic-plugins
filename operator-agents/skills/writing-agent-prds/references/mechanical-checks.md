@@ -40,6 +40,30 @@ never PASS.** The worked case is check 12: run its word count against a mistyped
 comfortable pass in this file. Every check below can fail that way, which is why the record has
 three states rather than clean-or-miss.
 
+**The subject and the applicable set are two different things, and only the first drives NOT-RUN.**
+The subject is the file, section or table a check reads; the applicable set is what the check finds
+in it. NOT-RUN belongs to a subject that is **missing, unreadable or unparseable**. A subject that
+exists, parses, and legitimately carries **zero** members — a constants table with no data rows, a
+results companion with no answered question, a copy companion whose states offer no labels — yields
+an empty applicable set; the check's assertion is satisfied over it, and **that is a PASS**. Check 2
+already says so for the Legend derivations, and the rest of this file follows it. The alternative is
+worse than pedantry: lock requires zero NOT-RUNs, so calling a legitimate empty set NOT-RUN prices a
+fully specified product at an owner fence and teaches an author to invent uncertainty to avoid one.
+
+Those two states look identical at the point of measurement, so **every check that can produce an
+empty set records which of the two it observed and what told them apart**. A parsed-but-empty table
+is told from an absent one by the header and separator row the parse found; a results companion with
+no answered question from one whose sections the extraction marker missed by whether the file
+carries any `##` heading at all; a copy companion that offers no labels from one whose fields were
+renamed by whether the `- Actions:` and `- Variant:` lines parsed. **A check that cannot state that
+test does not get the PASS.** NOT-RUN exists so that "I did not look" cannot be spelled "clean", and
+a PASS over a skipped subject is that same defect wearing the better word.
+
+Where a set is non-empty **by construction** — this document's cites of its own rows, the case
+tables, the dispositionable cells, the links across the tree, the test-controls map — an empty
+result is an extraction failure and stays NOT-RUN. Each such check says so in its own guard, and
+the reason it gives is the construction, not the emptiness.
+
 Mechanically, that is three habits. Every throwaway script opens with
 
 ```bash
@@ -58,6 +82,11 @@ And every check that enumerates a set before comparing it asserts the enumeratio
 ```bash
 [ -s "$labels" ] || { echo "NOT-RUN: no labels extracted from $copy"; exit 3; }
 ```
+
+A guard only guards if its message escapes the capture. Writing the extraction as
+`parse_constants "$prd" > "$constants"` with the `NOT-RUN:` echo inside the function put that line
+**into `$constants`**, which then read as a one-element constants set — observed on a fixture while
+writing check 7. Guards print outside the redirect, or to stderr.
 
 Under `set -e`, a `grep` whose empty output is the passing case returns `1` and would abort the
 script; write those as `grep … || true` and read the **output**, not the exit status — and remember
@@ -119,35 +148,89 @@ Never paste a path or a pattern from another project's run.
 
 ## Applicability
 
-**Checks 1–7, 10–13 and 15–19 run on both paths** — authoring and conversion — every time they are
+**Checks 1–7, 10–13 and 15–20 run on both paths** — authoring and conversion — every time they are
 run at all.
 
 **Check 8's second direction, check 9 and check 14 are DIFF CHECKS.** They compare this document
 against the revision it amends, so they run **on the conversion path and on any re-lock**. On a
-first lock there is no prior locked revision: `git show <base>:…` is a fatal error, and check 8's
-"every touched ID is carried by a fence" fails for every ID in the document, all of which are new.
-On a first lock each is recorded **NOT-RUN (reason: first lock, no prior locked revision)**. Check
-8's first direction — every row the fence map names still exists — reads only the current text and
-runs on both paths.
+first lock there is no prior locked revision: `git show "$lockbase":…` is a fatal error, and
+check 8's "every touched ID is carried by a fence" fails for every ID in the document, all of which
+are new. On a first lock each is recorded **NOT-RUN (reason: first lock, no prior locked
+revision)**. Check 8's first direction — every row the fence map names still exists — reads only
+the current text and runs on both paths.
 
-**`<base>` is the commit at which this document was most recently locked** — the commit whose tree
-carries the `Status: locked (<date>)` the amendment starts from. It is not the branch point, not
-`origin/main`, and not the last commit that touched the file. Resolve it once, at round 1, and
-**record the resolved SHA in the fence-file header** beside the review-log path. Every diff check
-records the `(base, head)` pair it ran against alongside its result; a result whose pair is not
-recorded does not carry forward to a later run.
+### The two baselines
 
-Use three dots, not two:
+**A diff check needs two immutable SHAs, not one, because two different questions are being asked.**
+Both are resolved once, at round 1, and **both are recorded in the fence-file header** beside the
+review-log path. Every diff check records the `(baseline, head)` pair it ran against alongside its
+result, **naming which of the two baselines it used**; a result whose pair is not recorded does not
+carry forward to a later run.
+
+- **The preservation baseline** — the commit at which this document was most recently locked: the
+  commit whose tree carries the `Status: locked (<date>)` the amendment starts from. It is not the
+  branch point, not `origin/main`, and not the last commit that touched the file. **Check 9 uses
+  this one**, because check 9 asks whether IDs, priorities and statuses have been preserved *since
+  lock*. The lock is the promise, so the lock commit is the only thing worth comparing against.
+- **The change baseline** — `git merge-base <trunk> HEAD`, where `<trunk>` is the branch this
+  amendment targets. **Check 8's second direction and check 14 use this one**, because they ask
+  what *this amendment* changed and which ticks it may attribute to its own change record.
 
 ```bash
-base="<base-sha>"
+lockbase="<sha recorded in the fence header>"     # preservation: the last lock commit
+changebase="$(git merge-base <trunk> HEAD)"       # change: this amendment's fork point
 head="$(git rev-parse HEAD)"
-git diff -U0 "$base"...HEAD -- "$docs"
 ```
 
-`<base>...HEAD` diffs against the merge base, so commits that landed on the trunk after this
-amendment forked stay out of the amendment's evidence. `<base>..HEAD` imports them, and the
-amendment is then asked to account for rows somebody else changed.
+**The two frequently coincide** — when nothing has landed on the trunk since the lock, the merge
+base *is* the lock commit — and they are still recorded as two values, because a run cannot tell
+from a single SHA which of the two jobs it did.
+
+**Swapping them produces a wrong verdict in each direction.**
+
+- Check 9 against the **change** baseline is a **false PASS**. Anything renumbered or re-statused on
+  the trunk after the lock sits *below* the merge base, so the check never looks at it and reports
+  the lock promise intact while it is broken.
+- Check 8 against the **preservation** baseline is a **false MISS**. Every row another change landed
+  on the trunk since the lock enters this amendment's evidence, and check 8 then demands this
+  amendment's fences authorize rows somebody else already settled. **A change already authorized on
+  the trunk is not this amendment's to fence.** Check 14 mis-scopes the same way in the quieter
+  direction: it collects ticks another change flipped and files them in this amendment's lock
+  record, so what it reports is not a fact about this amendment at all.
+
+**Worked verification — the A/B/C ancestry case.** Three commits. `A` locks the document with
+`R1.1 | P0 | open` and `R2.1 | P1 | open`. `B` lands on the trunk and flips `R1.1` to `done`. The
+amendment branches from `B`, and `C` moves `R2.1` to `P2`. `main` stays at `B`, so
+`git merge-base main HEAD` resolves to `B`. Run against that fixture:
+
+| Run | What it reports |
+|---|---|
+| `git diff -U0 A...HEAD` | `R1.1` **and** `R2.1` |
+| `git diff -U0 A..HEAD` | `R1.1` **and** `R2.1` — byte-identical to the line above |
+| `git diff -U0 B...HEAD` | `R2.1` only |
+
+`A` is an ancestor of `HEAD` — `git merge-base --is-ancestor A HEAD` succeeds — and the merge base
+of an ancestor with its descendant is that ancestor, so `A...HEAD` **is** `A..HEAD` and the third
+dot excludes nothing. Three dots are still the form to write, because a baseline is not always an
+ancestor; what they cannot do is the job the preceding paragraphs give to the second SHA. What
+separates `R1.1` from `R2.1` above is not the dot count. It is which commit is on the left.
+
+Check 9 wants the first row of that table: `R1.1` went from `open` to `done` since the lock, and the
+lock record has to account for it. Check 8 wants the third: `R2.1` is what this amendment changed
+and what its fences must carry. Read across both and `R1.1` is the residue — inside the since-lock
+delta, outside this amendment's delta — and that residue is **not a MISS against this amendment's
+fences**:
+
+```bash
+trip() { git show "$1:$prd" \
+  | awk -F'|' '/^\| *R[0-9]+\.[0-9]+[a-z]? *\|/ {gsub(/ /,""); print $2"|"$3"|"$4}' | sort; }
+comm -23 <(diff <(trip "$lockbase")   <(trip HEAD) | grep -E '^[<>]' | sort -u) \
+         <(diff <(trip "$changebase") <(trip HEAD) | grep -E '^[<>]' | sort -u)
+```
+
+On the fixture that prints `< R1.1|P0|open` and `> R1.1|P0|done` and nothing else: the trunk's
+change, named, and separated from the amendment's own. Check 9 asserts a fence carries each line of
+that residue; it does not require that fence to be dated in this amendment.
 
 ---
 
@@ -253,8 +336,13 @@ stated in two places and computed in none, so compute it here, in both direction
   an open question with no interim rule" bullet.
 - Assert the reverse: no ID appears in that bullet that this derivation does not produce.
 - Run the same two directions for the **Interim stated** bullet, from the rows whose open question
-  *does* carry an interim rule. The two bullets are never merged, so the two derivations stay
-  separate.
+  *does* carry an interim rule. That derivation is **not** `Pri`-filtered, and the asymmetry is
+  deliberate: the first list answers "can the first build start?", which is inherently a P0
+  question, while this one answers "which rows run under a named rule and must be re-checked when
+  the question closes?", which has no reason to be P0-only — and a metric row, which carries no
+  `Pri` column at all, can only ever appear here. Filtering this list by `Pri` would make such a row
+  underivable and then fail the reverse direction for being listed. The two bullets are never
+  merged, so the two derivations stay separate.
 
 Subject guard: if the Open Questions section is absent or its table does not parse, this is
 NOT-RUN. If the table parses and carries zero rows, the derived sets are legitimately empty and
@@ -386,15 +474,40 @@ copy state with no case, which means nothing observes it.
 
 ### 7. Legend constants named in an owning row
 
-**Method.** Parse the `Constant` column of the constants-and-closure-gates table. If the table is
-present and carries no data rows, that is NOT-RUN (reason: no constants declared) — whether a
-product with no named constant is right is check 3's first class, not this check's.
+**Method.** Parse the `Constant` column of the constants-and-closure-gates table. The parse has
+**three** outcomes, and the header row is what tells the last two apart:
 
-Then **restrict the search to the requirement tables**, by deriving their line ranges from the
-`### <n>.` headings, and require a hit **inside a requirement row** — a table line whose first cell
-is an `R<section>.<n>` ID. "At least one hit outside the Legend" is not enough: it passes when the
-only other hit is in the Open Questions table, the build-dependencies table or the Surfaces table,
-which is exactly the state this check exists to catch.
+```bash
+constants="$(mktemp)"
+grep -qE '^\| *Constant *\|' -- "$prd" \
+  || { echo "NOT-RUN: no constants-and-closure-gates table header in $prd"; exit 3; }
+awk -F'|' '/^\| *Constant *\|/ {h=1; next} h && /^\| *-+/ {next}
+           h && /^\|/ {gsub(/^ +| +$/,"",$2); print $2; next} h {exit}' "$prd" > "$constants"
+[ -s "$constants" ] || { echo "PASS: constants table parses and declares zero constants"; exit 0; }
+```
+
+- **No `| Constant |` header** — the table is absent, renamed or reshaped. The subject did not
+  parse, so this is **NOT-RUN**, and the reason names the header the parse looked for.
+- **Header and separator present, zero data rows** — the subject parsed and the applicable set is
+  legitimately empty. This product declares no constant, there is nothing for the assertions below
+  to range over, and that is a **PASS**. Whether a product with no named constant is *right* is
+  check 3's first class, not this check's; a product that is fully specified has no provisional
+  constant to gate, and this check is not the place to make it produce one.
+- **Data rows** — run both assertions below.
+
+**Worked verification — the no-provisional-constants state.** Run that parse against three versions
+of the same PRD. As shipped, with one data row, it prints `max-destination-length` and the
+assertions run. With the data row deleted but the header and separator left in place, it prints
+`PASS: constants table parses and declares zero constants`. With the whole table deleted — header
+included — it prints `NOT-RUN: no constants-and-closure-gates table header`. The middle state is the
+one the earlier wording of this check reported NOT-RUN, and it is the state of every PRD whose
+numbers are all settled.
+
+Then, for a non-empty set, **restrict the search to the requirement tables**, by deriving their
+line ranges from the `### <n>.` headings, and require a hit **inside a requirement row** — a table
+line whose first cell is an `R<section>.<n>` ID. "At least one hit outside the Legend" is not
+enough: it passes when the only other hit is in the Open Questions table, the build-dependencies
+table or the Surfaces table, which is exactly the state this check exists to catch.
 
 ```bash
 rows="$(mktemp)"
@@ -426,14 +539,18 @@ pass rule admitted while its own failure line named it.
 **Fence → row map**, assert each row, case, copy state and sibling fence it names still exists in
 the current text.
 
-*Direction 2 — changed content against the fences (diff check).* Derive what changed from the
-**changed lines**, not from ID tokens found in the diff:
+*Direction 2 — changed content against the fences (diff check).* **This direction runs against the
+change baseline**, `$changebase` — what *this amendment* changed. Run it against the preservation
+baseline instead and every row the trunk moved since the lock arrives here unfenced, and the check
+reports somebody else's settled change as this amendment's unratified WHAT. Derive what changed from
+the **changed lines**, not from ID tokens found in the diff:
 
 ```bash
 diff_out="$(mktemp)"; changed="$(mktemp)"
-git diff -U0 "$base"...HEAD -- "$docs" > "$diff_out"
+id_lines="$(mktemp)"; idless_lines="$(mktemp)"
+git diff -U0 "$changebase"...HEAD -- "$docs" > "$diff_out"
 [ -s "$diff_out" ] \
-  || { echo "NOT-RUN: empty diff against $base — wrong base, or nothing changed"; exit 3; }
+  || { echo "NOT-RUN: empty diff against $changebase — wrong baseline, or nothing changed"; exit 3; }
 grep -E '^[+-]' -- "$diff_out" | grep -vE '^(\+\+\+|---)' > "$changed"
 [ -s "$changed" ] || { echo "NOT-RUN: no changed lines extracted from the diff"; exit 3; }
 id_re='(R[0-9]+\.[0-9]+[a-z]?|E[0-9]+|M[0-9]+|T[0-9]+|UJ[0-9]+\.[0-9]+-[a-z])'
@@ -454,8 +571,25 @@ b. **A changed line carrying no ID** must match an entry on this round's fix fil
    the changed set from ID tokens yields the empty set for every one of them — an assertion that is
    vacuously true.
 
-An empty ID set against a non-empty diff is **NOT-RUN, not PASS**. Record the `(base, head)` pair
-with the result.
+**The guard is the partition, not the emptiness of either part.** `$id_lines` and `$idless_lines`
+are a partition of `$changed`, so assert that their line counts sum to `$changed`'s. That assertion
+is what catches the extraction failure — an `id_re` that stopped matching, a diff format the greps
+did not anticipate — and it holds whichever part is empty:
+
+```bash
+[ "$(( $(wc -l < "$id_lines") + $(wc -l < "$idless_lines") ))" -eq "$(wc -l < "$changed")" ] \
+  || { echo "NOT-RUN: the ID/ID-less partition did not cover the changed set"; exit 3; }
+```
+
+Either part may then be legitimately empty, and a legitimately empty part is a **PASS** for its
+direction: an amendment that rewrote only the Legend's priority bullet has an empty `$id_lines` and
+(a) is satisfied over nothing, while (b) does all the work; an amendment that touched only table
+rows has an empty `$idless_lines` and the reverse holds. The earlier rule — "an empty ID set against
+a non-empty diff is NOT-RUN" — made the first of those two a lock-blocking NOT-RUN, which is exactly
+backwards: SKILL.md names a Legend priority change as the one thing that is explicitly **not**
+editorial, so a pure-Legend amendment is a case this check most needs to reach a verdict on.
+
+Record the `(changebase, head)` pair with the result, naming the baseline.
 
 **Failure looks like.** A map entry pointing at text the rewrite deleted. A row changed on the
 branch that no fence carries — an unratified WHAT, which is the defect this check exists for. Or a
@@ -464,9 +598,14 @@ unattributed change, which the ID-token form of this check could not see at all.
 
 ### 9. ID, priority and status diff against the base
 
-**Method.** A diff check (see Applicability). Extract `(ID, Pri, Status)` triples from the base
-revision and from `HEAD` and diff them — but the triple's shape is **per family**, because only the
-requirement tables have a `Pri` column:
+**Method.** A diff check (see Applicability). **This check runs against the preservation baseline**,
+`$lockbase` — the commit at which the document was last locked — because the question is whether
+the lock's promise has held, and only the lock commit carries that promise. Run it against the change
+baseline instead and a renumber or a status flip that landed on the trunk after the lock sits below
+the merge base, invisible, and the check reports preserved over a document that was not.
+
+Extract `(ID, Pri, Status)` triples from the baseline revision and from `HEAD` and diff them — but
+the triple's shape is **per family**, because only the requirement tables have a `Pri` column:
 
 | Family | Table | Columns read |
 |---|---|---|
@@ -484,15 +623,26 @@ as the PRD: assert the PRD copy index's `Status` and the copy companion's `- Sta
 
 ```bash
 basefile="$(mktemp)"
-git show "$base:$docs/$slug.md" > "$basefile" \
-  || { echo "NOT-RUN: no $slug.md at $base (first lock, or wrong base)"; exit 3; }
-[ -s "$basefile" ] || { echo "NOT-RUN: $slug.md at $base is empty"; exit 3; }
+git show "$lockbase:$docs/$slug.md" > "$basefile" \
+  || { echo "NOT-RUN: no $slug.md at $lockbase (first lock, or wrong baseline)"; exit 3; }
+[ -s "$basefile" ] || { echo "NOT-RUN: $slug.md at $lockbase is empty"; exit 3; }
 ```
 
 Then parse both files' tables into `ID|Pri|Status` lines, sort, and `diff`. Any ID **added, removed
-or renumbered**, and any changed `Pri` or `Status` cell, must be named in a fence dated in this
-amendment. The expected result for a conversion is an empty diff apart from the fenced lines: an
-amendment is not an implementation completion. Record the `(base, head)` pair with the result.
+or renumbered**, and any changed `Pri` or `Status` cell, must be **named in a dated fence**.
+
+**Which fence, is where the second baseline comes back in.** Split the since-lock delta against this
+amendment's delta, with the `comm` in the Applicability section's worked verification. A line in
+both is this amendment's, and the fence that carries it is dated in this amendment. A line in the
+since-lock delta only landed on the trunk between the lock and this branch point, and **it is not
+this amendment's to fence**: the fence that carries it is whatever authorized it there, this check
+asserts that such a fence exists, and the lock record names the line and the fence it found. A line
+of the residue that no fence anywhere carries is a MISS against the document — pre-existing drift,
+recorded as such, not as this amendment's unratified WHAT.
+
+The expected result for a conversion is an empty diff apart from the fenced lines: an amendment is
+not an implementation completion. Record both pairs — `(lockbase, head)` and `(changebase, head)` —
+with the result, since this check reads both.
 
 **Failure looks like.** A renumbered ID (never legal); a status flipped to `done` because the
 rewrite describes behavior that has since been built; a priority quietly raised to match a sibling;
@@ -531,7 +681,9 @@ cite or a fence cite — all of which belong outside the cell.
 ### 11. Relative link and anchor resolution
 
 **Method.** Over the **whole product-docs tree**, not just this PRD. Collect every
-`[label](target)`; an empty collection is NOT-RUN. For a target with a path part, resolve it
+`[label](target)`; the collection is non-empty by construction — the PRD's Companions line alone
+carries four — so an empty one is an extraction failure and is NOT-RUN. For a target with a path
+part, resolve it
 relative to the containing file and assert the file exists. For a `#anchor` part, compute the
 anchor set of the target file by **GitHub's slug rules**, applied to the heading's **rendered
 text**: first resolve inline markdown to its text content — `**bold**`, `_emphasis_`, `` `code` ``
@@ -581,7 +733,7 @@ cell, line or bullet.
 Scan only each companion's **content** section — everything from its first content heading onward
 (`## States`, `## Journeys`, `## Fences`, or the OQ-results companion's first `## OQ <id>`, which is
 that file's first content heading by construction). What precedes that heading is the format
-describing itself: the entry grammar, the quote rule, the phase-mark grammar, the harness statement.
+describing itself: the render-semantics paragraph, the phase-mark grammar, the harness statement.
 Those sentences carry modals by their nature ("`Headline:` — the headline as it renders") and cite
 no row because they are not product rules, so scanning them reports the template's own prose as a
 migrated rule on every conforming document — a false alarm that would train an orchestrator to
@@ -592,7 +744,15 @@ for f in "$journeys" "$copy" "$fences" "$oq"; do
   [ -s "$f" ] || { echo "NOT-RUN: $f is absent or empty"; continue; }
   content=$(mktemp)
   awk '/^## (States|Journeys|Fences|Results|OQ)([^A-Za-z0-9]|$)/ {c=1} c' "$f" > "$content"
-  [ -s "$content" ] || { echo "NOT-RUN: no content section extracted from $f"; rm -f "$content"; continue; }
+  if [ ! -s "$content" ]; then
+    if grep -qE '^## ' -- "$f"; then
+      echo "NOT-RUN: $f carries ## sections the content marker did not match"
+      grep -nE '^## ' -- "$f"
+    else
+      echo "PASS: $f parses and carries no content section — empty applicable set"
+    fi
+    rm -f "$content"; continue
+  fi
   printf '\n== %s\n' "$f"
   grep -nE 'must|may not|is shown|renders' "$content" \
     | grep -vE '(R[0-9]+\.[0-9]+[a-z]?|E[0-9]+|M[0-9]+)' || echo '   (none uncited)'
@@ -600,14 +760,35 @@ for f in "$journeys" "$copy" "$fences" "$oq"; do
 done
 ```
 
+**The empty content section is a real state, and only one of its two causes is a NOT-RUN.** The
+OQ-results companion carries one `## OQ <id>` section per **answered** open question, so a PRD with
+no answered open question has a companion that is complete and correct and has no `## OQ` heading at
+all — and that is the normal state of a PRD whose questions are all still open, or of one that has
+none. Making it NOT-RUN prices a fully specified feature at an owner fence, which is the same defect
+as check 7's old zero-row rule. So the guard splits on whether the file carries **any** `##` heading:
+none at all means a complete file describing an empty set, and this check passes over it with
+nothing to scan; `##` headings the extraction marker did not match means the marker missed the
+content, which is the exact false green the materialised `$content` was added for, and that stays
+NOT-RUN — now naming the headings it found, so the reason is diagnosable rather than a shrug.
+
+**Worked verification — the no-answered-OQ state.** Three versions of one results companion. As
+shipped, with `## OQ 1`, it extracts 18 lines and the modal scan runs. Truncated to its preamble,
+with the `## OQ 1` section removed, it reports
+`PASS: … parses and carries no content section — empty applicable set`. With `## OQ 1` renamed to
+`## Answer 1` — an answered question the marker cannot see — it reports
+`NOT-RUN: … carries ## sections the content marker did not match` and prints `7:## Answer 1`. The
+middle state is the one this check used to block lock on. The third is the one it must never stop
+blocking on, and the two are told apart by the `##` grep and nothing else.
+
 Three things in that command are load-bearing, and each was a live false green before it was fixed.
 **`awk` takes no `--`**: it reads the marker as a filename and dies (`awk: can't open file --`) on
 both BSD and GNU awk. **`\b` is not a word boundary in an awk ERE**: BSD awk has no such escape and
 GNU awk spells it `\y`, so `\b` matches a backspace, the heading never matches, and the extraction
 is empty. **An empty extraction is indistinguishable from a clean one** once it reaches the grep,
 which prints `(none uncited)` and reads as PASS over a file nothing was searched in. Hence the
-materialised `$content` and the `[ -s ]` guard: a companion whose content section did not extract is
-NOT-RUN, not PASS — a companion with no content section is a companion nothing was checked in.
+materialised `$content` and the `[ -s ]` guard: a companion whose content section **failed to**
+extract is NOT-RUN, not PASS. What the guard must not do is conflate that with a companion that has
+no content section to extract, which the branch above separates.
 
 A modal sentence in a companion's content with no owning-row cite is a rule that has left its home,
 which process rule 11 forbids: a rule lives in an ID-carrying row and everything else restates and
@@ -620,9 +801,10 @@ that companion to say where the rule went.
 
 ### 13. The standing label check, run
 
-**Method.** The copy index's Labels rule declares a runnable search over the whole product-docs
-tree. **Run that command, this round, and record its output** — the check is the run, not the
-existence of the command. Both directions run; each is what finds one of the two failures below.
+**Method.** The copy index's Labels rule makes the copy companion the one home for a user-facing
+label. **This check is the run that enforces it** — the locked document states the rule and this
+file carries the search, so the check is the run, not the existence of a command anywhere. Both
+directions run; each is what finds one of the two failures below.
 
 *Direction 1 — every label, out into the tree.* The copy companion's quote marks identify a
 checkable label: the `- Actions:` and `- Variant:` lines carry them and the prose fields do not.
@@ -633,9 +815,10 @@ for f in "$copy" "$prd" "$journeys"; do
   [ -s "$f" ] || { echo "NOT-RUN: $f is absent or empty"; exit 3; }
 done
 labels="$(mktemp)"
-grep -hE '^- (Actions|Variant):' -- "$copy" | grep -o '"[^"]*"' \
+fields="$(grep -cE '^- (Actions|Variant):' -- "$copy" || true)"
+[ "$fields" -gt 0 ] || { echo "NOT-RUN: no Actions/Variant fields parsed from $copy"; exit 3; }
+{ grep -hE '^- (Actions|Variant):' -- "$copy" | grep -o '"[^"]*"' || true; } \
   | sed 's/^"//; s/"$//' | sort -u > "$labels"
-[ -s "$labels" ] || { echo "NOT-RUN: no quoted labels extracted from $copy"; exit 3; }
 while IFS= read -r label; do
   printf '\n== %s\n' "$label"
   grep -rn --fixed-strings --include='*.md' -e "$label" -- "$docs" || echo '   (no other mention)'
@@ -644,18 +827,40 @@ done < "$labels"
 
 Every label must be written once in the copy companion and only **quoted** elsewhere.
 
+The guard is on the **fields**, not on the labels, because the copy template makes `- Actions: none`
+and an absent `- Variant:` line legal: a state that offers no action and has no variant contributes
+no label, and a companion in which no state does contributes none at all. Fields present with zero
+quoted labels is a parsed subject with a legitimately empty applicable set — direction 1 is a PASS
+over it, and direction 2 then carries the whole check, since with no label on offer *any* quoted
+string in a row or a case is a string no copy state provides. Zero `- Actions:`/`- Variant:` lines
+is the different thing: the field names moved or the sections did not parse, and that is NOT-RUN.
+
+The braces around the extraction pipeline are not decoration. Written bare, its `grep -o` returns
+`1` on the zero-label companion and `set -o pipefail` aborts the whole script there — silently,
+before direction 2 runs at all — so the one state this guard exists to admit was the one state the
+command could not survive. Direction 2's extraction is braced for the same reason.
+Verified on three versions of one copy companion — as shipped, 5 fields and 4 labels; every
+`Actions:` set to `none` and the `Variant:` lines removed, 3 fields and 0 labels, PASS; the fields
+renamed to `Buttons:`/`Variants:`, 0 fields, NOT-RUN.
+
 *Direction 2 — every quoted string in a row or a case, back into the copy companion.* Extract every
 quoted string from the requirement rows and from the journeys companion's `When` and `Assert`
 cells, and assert each resolves character-for-character to a label the copy companion provides:
 
 ```bash
-quoted="$(mktemp)"
+quoted="$(mktemp)"; bodies="$(mktemp)"
 { awk '/^\| *R[0-9]+\.[0-9]+[a-z]? *\|/' "$prd"
-  awk -F'|' '/^\| *(T[0-9]+|UJ[0-9]+\.[0-9]+-[a-z]) *\|/ {print $4 $5}' "$journeys"; } \
-  | grep -o '"[^"]*"' | sed 's/^"//; s/"$//' | sort -u > "$quoted"
-[ -s "$quoted" ] || { echo "NOT-RUN: no quoted strings extracted from rows or cases"; exit 3; }
+  awk -F'|' '/^\| *(T[0-9]+|UJ[0-9]+\.[0-9]+-[a-z]) *\|/ {print $4 $5}' "$journeys"; } > "$bodies"
+[ -s "$bodies" ] || { echo "NOT-RUN: no rows or case cells extracted from $prd / $journeys"; exit 3; }
+{ grep -o '"[^"]*"' -- "$bodies" || true; } | sed 's/^"//; s/"$//' | sort -u > "$quoted"
 comm -23 "$quoted" "$labels"   # quoted in a row or a case; provided by no copy state
 ```
+
+The guard is on `$bodies` — rows and cases exist by construction, so an empty extraction there is a
+parse failure — and not on `$quoted`, which is legitimately empty when no row and no case quotes
+anything. An empty `$quoted` against a parsed `$bodies` is a PASS, and `comm` over it prints
+nothing, which is the same output a clean run gives; the guard above is what makes the two
+distinguishable in the record.
 
 Direction 1 alone cannot find this: it seeds only from the copy companion, so an action a row names
 that no copy state provides produces no seed and is structurally invisible to it.
@@ -666,20 +871,30 @@ which is a builder inventing user-facing text at build time.
 
 ### 14. Post-lock ticks true and attributed to a change record
 
-**Method.** A diff check (see Applicability). For every checkbox this change flips to ticked, do
+**Method.** A diff check (see Applicability). **This check runs against the change baseline**,
+`$changebase`, because a tick may only be attributed to the change record that actually made it: the
+question is which ticks are *this amendment's*. Against the preservation baseline it also collects
+every tick the trunk flipped since the lock and files them in this amendment's lock record, which is
+a claim this amendment cannot support. For every checkbox this change flips to ticked, do
 both: read the text it claims and assert the claim is true of the document as it now stands; and
 assert the tick's attribution names **a change record that survives a squash-merge** — a pull
 request, a merge request, or an equivalent changeset reference with a stable identifier. A bare
 commit SHA is not one.
 
 ```bash
-git diff "$base"...HEAD -- "$docs" | grep -E '^\+.*\[[xX]\]' || true
+diff_out="$(mktemp)"
+git diff "$changebase"...HEAD -- "$docs" > "$diff_out"
+[ -s "$diff_out" ] \
+  || { echo "NOT-RUN: empty diff against $changebase — wrong baseline, or nothing changed"; exit 3; }
+grep -E '^\+.*\[[xX]\]' -- "$diff_out" || true
 ```
 
 The tick pattern is case-insensitive on the mark: `- [X]` renders as ticked, so a `\[x\]` pattern
 misses every capitalized tick and reports a clean run over a document it never looked at. An empty
-result is a PASS only when the diff itself was non-empty; otherwise it is NOT-RUN. Record the
-`(base, head)` pair with the result.
+result against a non-empty diff is a **PASS** — this amendment ticked nothing, which is a legitimate
+empty applicable set and the common case — and the `[ -s "$diff_out" ]` guard above is what
+separates it from a diff that did not resolve. Record the `(changebase, head)` pair with the result,
+naming the baseline.
 
 **Failure looks like.** A tick whose claim the text does not support — the item was ticked because
 it was discussed. Or a tick attributed to a SHA, which stops resolving the moment the branch is
@@ -750,25 +965,129 @@ tested it; this is four words and one grep.
 **Failure looks like.** An `Assert` reading "the counts are correct" or "the list is unchanged" — a
 builder cannot write that test, and a reviewer reading the row sees an oracle where there is none.
 
-### 18. Test-controls map reconciliation
+### 18. Test-controls map reconciliation, and every asserted value traced to its source
 
-**What.** Every surface a case drives is declared, in the journeys companion's test-controls map or
-in its Named defaults table.
+**What.** Two halves. Every surface a case drives is declared, in the journeys companion's
+test-controls map or in its Named defaults table — and every value a case **asserts** is supplied,
+by that case's `Given`, by a named default, or by a case the journey's declared continuity carries
+it from.
 
-**Method.** Parse the declared set: the map's `Surface` column plus the Named defaults table's
-`Seam input` column. Parse the case set: every `When` cell of the transition index and the `UJ`
-tables. Then produce two lists — for each declared surface, the cases that drive it (a declared
-surface no case drives), and each `When` cell that matches no declared surface. Both parses are
-guarded; an empty map or an empty case set is NOT-RUN. The second list is read by a human, because
-a `When` cell is prose; the enumeration is what is mechanical.
+**Method, direction 1 — surfaces.** Parse two declared sets, because they answer different
+questions: the **map's `Surface` column** is what a case can DRIVE, and the Named defaults table's
+`Seam input` column is what a case may leave UNDECLARED. Parse the case set: every `When` cell of
+the transition index and the `UJ` tables. Then produce two lists — for each surface in the map, the
+cases that drive it (a declared surface no case drives), and each `When` cell that matches neither
+declared set. **The undriven-surface limb ranges over the map only.** A named default is supplied,
+not driven, so including it there reports every unmentioned default as undriven on a conforming
+document — two standing false alarms on this skill's own example, and a check whose output is
+mostly false alarms stops being read. Both
+parses are guarded, and both sets are non-empty **by construction**: the journeys template makes the
+map and the case tables unconditional, so an empty parse of either is an extraction failure and is
+NOT-RUN. The second list is read by a human, because a `When` cell is prose; the enumeration is what
+is mechanical.
 
 The journeys template says this map is what makes the harness statement's "declare every exercised
 seam input" checkable, and nothing reconciled cases against it — so the map could be complete,
 empty or stale and every other check still passed.
 
+**Method, direction 2 — asserted values.** Declaring the surface is not the same as supplying the
+datum that comes back through it. A case can drive a fully declared surface and still assert a
+value that nothing in this document gives a builder any way to produce, and direction 1 cannot see
+it: it reads `When` cells and this defect lives in `Assert` cells. So trace each asserted datum back
+to a declared source.
+
+The **datum classes** are the values a fixture supplies and a requirement row cannot: destinations
+and other URLs, identifiers (short codes, account ids, tokens), and instants. Those three are what
+the `$datum` pattern below implements, and the prose claims no more than the pattern does. A bare
+**quantity** — a count, a numerator, a denominator — is the fourth class by rights, and is
+deliberately NOT matched: a pattern loose enough to catch `4` catches every number in every cell,
+and the resulting noise would bury the hits that matter. Trace quantities by reading the case, and
+say in the lock record that you did. A value the rows *state* — an HTTP status, a state name, a
+copy-state `E<n>`, a variant label — is out of scope here and is owned elsewhere: check 7 owns
+constants, check 6 owns copy states, check 13 owns quoted labels, check 17 owns the adjective case.
+Keeping the classes narrow is what keeps this check's output short enough to read.
+
+The **source set** for a case is its own `Given` and `When` cells, plus the whole `Default` column
+of the Named defaults table, plus — only where the journey's preamble line declares continuity for
+that scenario — the `Given`, `When` and `Assert` cells of the earlier cases in the same scenario.
+Continuity is prose, so the orchestrator reads each journey preamble once and writes the scenario
+prefixes that carry it into `$continuity`, one per line; that is the one hand step, and it is
+recorded. Where no preamble declares continuity the file is empty and the harness's reset rule
+applies unmodified.
+
+```bash
+[ -s "$journeys" ] || { echo "NOT-RUN: $journeys is absent or empty"; exit 3; }
+defaults="$(mktemp)"; cases="$(mktemp)"; src="$(mktemp)"
+continuity="$(mktemp)"   # one scenario prefix per line, e.g. UJ1.1 — read off the journey preambles
+datum='[a-z][a-z0-9+.-]*://[^ ,)]+|[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]+Z|[A-Za-z]+-[0-9]{3,}|[a-z]+[0-9]{3,}'
+awk -F'|' '/^\| *Seam input *\| *Default *\|/ {h=1; next} h && /^\| *-+/ {next}
+           h && /^\|/ {print $3; next} h {exit}' "$journeys" > "$defaults"
+[ -s "$defaults" ] || { echo "NOT-RUN: Named defaults table parsed empty"; exit 3; }
+awk -F'|' '/^\| *(T[0-9]+|UJ[0-9]+\.[0-9]+-[a-z]) *\|/ {gsub(/^ +| +$/,"",$2);
+           print $2 "\t" $3 "\t" $4 "\t" $5}' "$journeys" > "$cases"
+[ -s "$cases" ] || { echo "NOT-RUN: no case rows parsed from $journeys"; exit 3; }
+while IFS=$'\t' read -r id given when assert; do
+  { printf '%s\n%s\n' "$given" "$when"; cat "$defaults"; } > "$src"
+  scen="${id%-*}"
+  if grep -qxF -e "$scen" -- "$continuity"; then
+    awk -F'\t' -v s="$scen" -v me="$id" \
+      '$1 ~ "^" s "-" && $1 < me {print $2; print $3; print $4}' "$cases" >> "$src"
+  fi
+  { printf '%s\n' "$assert" | grep -oE "$datum" || true; } | sort -u | while IFS= read -r v; do
+    grep -qF -e "$v" -- "$src" \
+      || printf 'MISS  %s asserts %s — supplied by no Given and no named default\n' "$id" "$v"
+  done
+done < "$cases"
+```
+
+A hit is a **MISS**, not a list to read: the case names a value and the document says nowhere where
+it comes from, so a builder writing that test has to invent it. The fix is the same either way — put
+the value in the case's `Given`, or define a named fixture the case uses explicitly.
+
+An empty result against a parsed `$cases` is a **PASS**: every asserted datum traced. The guards on
+`$defaults` and `$cases` are what make that PASS mean something, since both are non-empty by
+construction and an empty one means the parse missed the table rather than that the document is
+clean.
+
+The braces around the `grep -oE "$datum"` are load-bearing for the same reason as check 13's. An
+`Assert` cell carrying no datum-class token — "The response status is HTTP 410" — makes that `grep`
+return `1`, and under `set -o pipefail` the bare pipeline aborts the whole loop at that case.
+Observed: with T2's `Assert` reduced to exactly that, the unbraced form exited `1` after printing
+nothing at all, so a document with one status-only assert silently skipped every case after it and
+its empty stdout read as clean. Braced, the same run reports T4 and completes.
+
+**Worked verification.** Run against this skill's own example journeys companion as it ships, the
+trace is **silent**: every asserted datum traces to a `Given`, to a named default, or to a case the
+declared continuity carries it from. The demonstration therefore runs against a stated **mutation**
+of that fixture — remove the destination from T4's `Given` — which returns exactly one line:
+
+```
+MISS  T4 asserts https://example.com/a-very-long-article-slug — supplied by no Given and no named default
+```
+
+Anchoring it to a mutation rather than to the shipped file is deliberate, and it is a correction: an
+earlier draft of this check quoted that line as the example's own output, which pinned the check's
+evidence to a **defect in the conformance fixture**. A fixture exists to demonstrate conformance, so
+repairing it silently invalidated the check's demonstration. A worked verification that only
+reproduces while something is broken is evidence with an expiry date.
+
+That mutation is the real defect a reviewer found by eye and direction 1 could not: with the
+destination removed, T4's `Given` supplies the short code, the disabled state, the expiry and the
+clock; the Named defaults supply a clock, a generator and an owner account; none supplies a
+destination, and the T-cases declare no continuity, so the reset rule applies and T1's destination
+cannot carry. Three further controls on the same fixture:
+adding the destination to T4's `Given` clears the line and the run is silent; adding a value to one
+case's `Assert` that only an **earlier case in the same scenario** supplies is clean with that
+scenario listed in `$continuity` and a MISS without it, which is what proves the continuity limb
+fires rather than passing everything; and `abc1235` in `UJ1.1-b`'s `Assert` is silent throughout
+because the Named defaults' generator seed names it — a datum traced to a default rather than to a
+`Given`.
+
 **Failure looks like.** A case driving a surface the map does not declare — asserting through a
 seam nobody declared, which is exactly what the harness statement forbids. Or a map line for a
-surface no case drives, which is a control nothing exercises.
+surface no case drives, which is a control nothing exercises. Or a case asserting an exact URL, id
+or instant that no `Given` and no named default supplies, which is a builder inventing fixture data
+at build time — the same defect as check 13's uncovered label, one column over.
 
 ### 19. Exactly one priority semantic
 
@@ -791,6 +1110,52 @@ reports that the two documents agree.
 
 ---
 
+### 20. Every success metric reads an observable its source row states
+
+**What.** A metric row's `Method` names where the number comes from. That source must exist as a
+row, and that row must actually state the observable the `Method` reads.
+
+**Method.** For each `M<n>` row, extract the row IDs its `Method` cell cites. Assert each resolves
+to a live row, and then — the half that matters — assert that row's text names the thing the
+`Method` says it reads. This is check 7's reverse assertion, one table over: check 7 asks whether a
+declared constant is named in an owning row; this asks whether a metric's declared source actually
+supplies what the metric counts.
+
+```bash
+set -euo pipefail
+rows=$(mktemp); metrics=$(mktemp)
+awk -F'|' '/^\| *(R[0-9]+\.[0-9]+[a-z]?) *\|/ {gsub(/^ +| +$/,"",$2); print $2 "\t" $0}' "$prd" > "$rows"
+awk -F'|' '/^\| *M[0-9]+ *\|/ {gsub(/^ +| +$/,"",$2); print $2 "\t" $6}' "$prd" > "$metrics"
+[ -s "$metrics" ] || { echo "NOT-RUN: no metric rows parsed from $prd"; exit 3; }
+while IFS=$'\t' read -r id method; do
+  cited=$({ printf '%s\n' "$method" | grep -oE 'R[0-9]+\.[0-9]+[a-z]?' || true; } | sort -u)
+  [ -n "$cited" ] || { echo "MISS  $id: Method cites no source row"; continue; }
+  for r in $cited; do
+    line=$(grep -F "$r	" "$rows" | head -1 || true)
+    [ -n "$line" ] || { echo "MISS  $id: Method cites $r, which resolves to no row"; continue; }
+    printf '  %s -> %s : %s\n' "$id" "$r" "$(printf '%s' "$line" | cut -c1-120)"
+  done
+done < "$metrics"
+rm -f "$rows" "$metrics"
+```
+
+The resolution half is mechanical; the **does the row state that observable** half is read, one
+printed line per pair, and its verdict is recorded. That split is deliberate: whether "the
+status-class counter R2.3 bounds" is actually bounded by R2.3 is a reading, and a regex that claimed
+to decide it would be the kind of check this file spends its length warning about.
+
+**Failure looks like.** A metric counting something its source row forbids retaining — the source
+row bounds a log to three fields and the metric counts a fourth, so an agent must either break the
+stated contract or invent an observation mechanism. A `Method` citing a row that does not exist, or
+citing none at all, which leaves the number with no stated origin.
+
+**Why this check exists.** It was added because a reviewer found exactly that defect in this skill's
+own worked example — a metric computed from an access log "counted by status code" whose source row
+permitted retaining no status — and **no check in this file would have caught it**. Checks 18 and 6
+range over acceptance cases, check 7 over constants; the metrics table's `Method` column had no
+reader at all. The format's whole claim is that a builder never has to guess, and a metric with an
+unobservable source is a guess with a number attached.
+
 ## When the checks run
 
 **The clean result must belong to the document that locks.** The checks run **before the pre-lock
@@ -801,7 +1166,8 @@ that actually locks.
 the fence-to-row map, the transition index, a companion file — and an editorial edit is still an
 edit for this purpose. **A result recorded for an earlier state does not carry forward**, and the
 review log records which revision each run covered so that a later reader can tell. A diff check
-also records the `(base, head)` pair it ran against; without that pair its result is not a result.
+also records which baseline it used and the `(baseline, head)` pair it ran against; without that
+pair its result is not a result.
 
 **Clean means PASS, not silence.** The lock record lists every check by number with its PASS, MISS
 or NOT-RUN, and lock requires zero MISSes and zero NOT-RUNs — except the diff checks the

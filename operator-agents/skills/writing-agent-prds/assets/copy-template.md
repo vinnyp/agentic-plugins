@@ -5,8 +5,10 @@
      Two fill families are placeholders: `{{...}}`, substituted at scaffold time, and `_(prompt)_`,
      filled during authoring; an unresolved instance of EITHER is a lock-blocking defect. Every
      guidance comment in this file is deleted at lock, so a rule a BUILDER needs after lock lives
-     in body text and never in a comment — the entry grammar and the phase marks below are body
-     text for exactly that reason. -->
+     in body text and never in a comment — the phase marks and the render-token rule below are
+     body text for exactly that reason. The converse holds too: how an entry is WRITTEN and how it
+     is CHECKED are an author's business, so they stay in these comments and out of the locked
+     document. -->
 
 # Copy: {{product-area}}
 <!-- guidance: {{product-area}} matches the PRD's title exactly, so the set reads as one document;
@@ -20,41 +22,49 @@ appears in and the rows that cause them, and every action a row or an acceptance
 quoted from here character for character.
 
 ## Entry grammar
+<!-- guidance: how an entry is written — authoring mechanics, deleted at lock. Each state's
+     section is a list of fields, one field per line, each written as `- <Field>: <value>` with the
+     field name unemphasized, so an extraction keys on the literal `<Field>: ` prefix. The fields,
+     in this order:
+     - `Status:` — one of the six status values the PRD's Legend defines. It must equal the
+       `Status` cell this `E<n>` carries in the PRD's copy index; the two are reconciled at every
+       lock.
+     - `Phase:` — this state's phase mark, or `none`.
+     - `Variants enumerated by:` — the ID of the requirement row that enumerates this state's
+       variant set, or `none` where the state has no variants. A variant set no row enumerates is
+       untestable without matching on wording.
+     - `Headline:` — the headline as it renders.
+     - `Body:` — the body as it renders when no variant applies.
+     - `Actions:` — the action labels this state offers, in render order, each in double quotes
+       and separated by commas, or `none`.
+     - `Variant:` — one line per variant, and none where the state has none, written
+       `- Variant: "<name>" — <the condition it renders under>. <the body it renders.>`
+     Quote marks are load-bearing for the checks as well as for the reader: a double-quoted string
+     in this file is a checkable label — an action label, or a variant's enumerated name — and
+     nothing else in this file is quoted, so the mechanical checks' label search cannot collide
+     with the prose around it. `Headline:`, `Body:` and the condition and body text on a
+     `Variant:` line are prose and carry no quote marks. -->
 
 One `### E<n> — <state>` section per copy state, in the PRD copy index's order. Those headings are
 stable anchors — the PRD, the acceptance cases and the fences cite them — so a state is never
 renumbered or retitled once cited, and a retired state keeps its number rather than freeing it.
 
-Each section is a list of fields, one field per line, each written as `- <Field>: <value>` with the
-field name unemphasized, so an extraction keys on the literal `<Field>: ` prefix. The fields, in
-this order:
-
-- `Status:` — one of the six status values the PRD's Legend defines. It must equal the `Status`
-  cell this `E<n>` carries in the PRD's copy index; the two are reconciled at every lock.
-- `Phase:` — this state's phase mark, or `none`.
-- `Variants enumerated by:` — the ID of the requirement row that enumerates this state's variant
-  set, or `none` where the state has no variants. A variant set no row enumerates is untestable
-  without matching on wording.
-- `Headline:` — the headline as it renders.
-- `Body:` — the body as it renders when no variant applies.
-- `Actions:` — the action labels this state offers, in render order, each in double quotes and
-  separated by commas, or `none`.
-- `Variant:` — one line per variant, and none where the state has none, written
-  `- Variant: "<name>" — <the condition it renders under>. <the body it renders.>`
-
-**Quote marks carry meaning in this file.** A double-quoted string is a checkable label — an action
-label, or a variant's enumerated name — and nothing else in this file is quoted. `Headline:`,
-`Body:` and the condition and body text on a `Variant:` line are prose and carry no quote marks, so
-a search for a label cannot collide with the prose around it. A variant is asserted on by its
-quoted name, never by its wording.
+Each state's `Headline:` and `Body:` render as written, the `Body:` being what renders when no
+variant applies; its `Actions:` are the action labels the state offers, in render order; each
+`Variant:` line gives the name of one variant, the condition it renders under, and the body it
+renders instead. `Variants enumerated by:` names the requirement row that enumerates this state's
+variant set. A label in double quotes renders without those quote marks — they mark it as a label
+rather than prose — and a variant is identified by its quoted name, never by its wording.
 
 **Render tokens are not placeholders.** A token the product substitutes at render time — a count, a
 ⟨code⟩ — is named in the PRD copy index's Placeholders rule, is written inside the string it
 renders in, and survives lock. It never takes the form of either fill family — the doubled-brace
 scaffold parameters or the underscore-parenthesis authoring prompts — so the unresolved-fill sweep
-cannot confuse the two. Those two families are written out in this template's head comment, which
-is deleted at lock; this sentence names them without reproducing them, because a locked document
-that spelled either one would fail that sweep on the line explaining it.
+cannot confuse the two.
+<!-- guidance: the two fill families are written out in this template's head comment, which is
+     deleted at lock; the sentence above names them without reproducing them, because a locked
+     document that spelled either one out would fail the unresolved-fill sweep on the very line
+     explaining it. -->
 
 ## Phase marks
 

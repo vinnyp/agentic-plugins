@@ -55,7 +55,13 @@ rules. They travel verbatim in every fill dispatch and every gate brief.
     approval, but every WHAT choice inside it (new row, changed rule, moved rule, retired text,
     priority or status change, OQ answer, interim, sibling amendment) is listed for the owner and
     recorded as its own dated fence citing the owner's decision before re-lock. Fence language is
-    not settlement.
+    not settlement. **An approval settles exactly the scope it approved.** Approval that only lets
+    the work start — a bare "proceed", or approval of a purely structural audit — settles no WHAT
+    at all. Approval of numbered recommendations that themselves state product choices settles
+    those named choices, and the approved recommendation, cited by number, is the fence's
+    Authority; re-asking for a choice the owner's approved list already states misrecords their
+    decision. A choice the list did not state, or that was expanded or newly surfaced during the
+    work, is unratified either way and goes back to the owner.
 14. **Budget and count.** The PRD body has a project-supplied word budget (default **12,000**).
     Count method: strip HTML comments, link targets, code fences and table pipes. Trim rule-free
     prose to fit; never raise the budget; a document that cannot fit is two PRDs.

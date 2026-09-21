@@ -43,14 +43,16 @@ Format: agent-prd v1
 <!-- guidance: the format version this document is authored to, and the version whose checks a
      re-lock runs. A change to the format that would make a conforming document non-conforming — a
      renamed section, a changed column set, an added lock condition — is a new major version;
-     re-locking under a newer version is a deliberate migration, recorded as its own fence. -->
-
-**Format contract.** Every section heading in this document, and the column set of the
-row-transitions, constants-and-closure-gates, build-dependencies, requirement, obligations,
-copy-index, metrics and open-questions tables, is fixed: the mechanical checks parse them by name.
-A project may add a requirement section, add a trailing column to a requirement table, or delete a
-section this format marks conditional. Any other reshaping is a fork of this format, not an
-instance of it.
+     re-locking under a newer version is a deliberate migration, recorded as its own fence.
+     What v1 fixes, and what an author may therefore change: every section heading in this
+     document, and the column set of the row-transitions, constants-and-closure-gates,
+     build-dependencies, requirement, obligations, copy-index, metrics and open-questions tables,
+     is fixed — the mechanical checks parse them by name. A project may add a requirement section,
+     add a trailing column to a requirement table, or delete a section this format marks
+     conditional. Any other reshaping is a fork of this format, not an instance of it. This
+     version line is the locked document's one citation of that contract; the contract itself is
+     not restated in body text, because it is a rule for authoring and checking this document and
+     not for building the product. -->
 
 ---
 
@@ -127,8 +129,7 @@ row-transitions table uses only terms marked that way.
      the two bullets survives to lock — delete the other), the phase rule, the status vocabulary,
      then the two tables and the two bullets below. Not conditional. -->
 
-**Priority — choose exactly one semantic for this release and delete the other bullet before
-lock:**
+**Priority — the semantic the `Pri` column carries in this release:**
 
 - **Build order within the release — nothing droppable.** Every P0/P1/P2 row ships in this
   release; priority only orders the sequence work happens in.
@@ -204,13 +205,18 @@ rule named there, and re-checked when its open question closes.
 
 **Interim stated:**
 
-- _(row ID — the open question — the fence that set the interim.)_
+- _(row or metric ID — the open question — the fence that set the interim.)_
+<!-- guidance: any ID family may appear here, including an `M<n>` metric row, which carries no
+     `Pri` column at all — this list is not priority-filtered, unlike the one above it. A row runs
+     under the named interim whatever its priority, and is re-checked when the question closes. -->
 
 ### Traceability
 <!-- guidance: the ID contract. Three families, one per dispositionable table; lettered sub-rows
      where a lead row carries a table of its own (`R8.1a`); assigned once at first draft and never
      renumbered, so a cut or deferred row keeps its ID rather than freeing it for reuse; retired
-     IDs listed by ID so a reader who finds a cite can resolve it. Not conditional. -->
+     IDs listed by ID so a reader who finds a cite can resolve it. Not conditional.
+     Fill the **Commit PR** column with the pull (or merge) request that landed the row, never with
+     a bare commit SHA: a SHA stops resolving the moment the branch is squashed on merge. -->
 
 - Every requirement row gets an ID of the form `R<section>.<n>` (e.g. `R7.4`), where `<section>`
   is the number of its requirement section below.
@@ -218,8 +224,7 @@ rule named there, and re-checked when its open question closes.
 - Every success-metric row gets an ID of the form `M<n>` (e.g. `M2`).
 - A lead row that carries a table of its own numbers those sub-rows with letters (`R8.1a`).
 - IDs are assigned once and never renumbered. **Retired IDs:** _(list them; never reuse them.)_
-- The **Commit PR** column on a requirement row names the PR that landed it — attributed to the
-  PR, not to a bare commit SHA.
+- The **Commit PR** column on a requirement row names the PR that landed it.
 - Owner decisions F1–F<n> are in the fence file; a row names one for provenance only.
 
 ### Surfaces
@@ -310,7 +315,12 @@ across PRDs. An ID written bare is this document's own.
      action a row names is quoted from it.
      Placeholders rule: name the tokens in use, the zero-count rule (what a count token renders as
      at zero), and which row a ⟨code⟩ token names.
-     Standing label check: the command below, run on every copy or row amendment. -->
+     Variant enumeration rule: the row that enumerates a state's variants lists the variant names
+     verbatim.
+     The Labels rule is enforced by a runnable search over the whole product-docs tree, run on
+     every copy or row amendment. The command lives with the mechanical checks (check 13, "The
+     standing label check, run") and is not carried in this document: it is how the document is
+     checked, not something a builder reads. -->
 
 | ID | State | Surface | Owning rows | Status |
 |---|---|---|---|---|
@@ -326,31 +336,6 @@ which row each ⟨code⟩ token names.)_
 the requirement row that enumerates its variant set, and that row lists the variant names verbatim.
 A variant no row enumerates is untestable without matching on wording; an enumerated variant with
 no copy is text the builder would have to invent.
-
-**Standing label check.** Run on every copy or row amendment, over the whole product-docs tree:
-
-```bash
-# Every quoted label in the copy companion, with every place in the tree that mentions it.
-# Each hit must be either the copy companion's owning entry or a row/case quoting it verbatim.
-set -o pipefail
-rg -o --no-filename -r '$1' '"([^"]+)"' "{{product-docs-dir}}/<prd-slug>-copy.md" \
-  | sort -u \
-  | while IFS= read -r label; do
-      printf '\n== %s\n' "$label"
-      rg -n --fixed-strings -- "$label" "{{product-docs-dir}}" || echo '   (no other mention)'
-    done
-# Without ripgrep, the two substitutions are:
-#   rg -o --no-filename -r '$1' '"([^"]+)"' F   ->   grep -oh '"[^"]*"' F | sed 's/^"//; s/"$//'
-#   rg -n --fixed-strings --                    ->   grep -rnF --include='*.md' --
-# The `sed` is load-bearing: `rg -r '$1'` yields the label WITHOUT its quote marks, `grep -oh`
-# keeps them, and a search for a quoted string can never find the defect this check exists for —
-# a row that states a label instead of quoting it.
-```
-
-Each label is read into a shell variable and passed quoted, with `--fixed-strings` and a `--`
-end-of-options guard: text taken out of a document is never interpolated into a command string.
-The substituted `{{product-docs-dir}}` is a literal path, quoted wherever it appears, so a path
-containing a space cannot word-split a search into a false clean result.
 
 ## Success metrics
 <!-- guidance: precise enough that two people computing the same metric from the same data get the

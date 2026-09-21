@@ -87,11 +87,13 @@ _(Phase/preamble: which phase these cases run in; any continuity that holds acro
 
 ## Test-controls map
 <!-- guidance: the last section, always. One line per surface: the input a test controls to drive
-     that surface, the result it can observe, and the rows that grant both. Not conditional. -->
+     that surface, the result it can observe, and the rows that grant both. Not conditional.
+     This map is also what makes the harness statement's "declare every exercised seam input"
+     checkable: the mechanical checks reconcile every case's `When` cell against it. -->
 
 Every surface a case in this file drives appears in this map, or in the Harness's **Named
 defaults** table. A case that drives a surface named in neither is asserting through a seam nobody
-declared, and this map is what makes "declare every exercised seam input" checkable.
+declared.
 
 | Surface | Controlled input | Observable result | Rows |
 |---|---|---|---|

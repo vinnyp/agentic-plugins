@@ -8,9 +8,10 @@ to at least one row of `docs/product/link-shortener.md`.
 
 The cases drive a simulated HTTP client against the link manager and against the short-code
 endpoint; nothing real is served. A case asserts through the copy state and variant the link
-manager displays, the short code it shows, and the status line and Location header of the response
-to a redirect request. Declare every exercised seam input; only named defaults are exempt. Fixture
-values are declared, never copied from the implementation.
+manager displays, the short code it shows, the status line and Location header of the response to a
+redirect request, the day's status-class counter R2.3 bounds, and the events the link manager emits
+to the client event stream R2.4 requires. Declare every exercised seam input; only named defaults
+are exempt. Fixture values are declared, never copied from the implementation.
 
 **Fixture continuity.** Every case runs against a fixture reset to this harness's declared state,
 unless the journey's preamble line declares continuity across that journey's cases; where it does,
@@ -33,7 +34,7 @@ builder reading a case table needs no other source to know which of the two appl
 | T1 | abc1234 unallocated | In the link manager, acct-0001 submits https://example.com/a-very-long-article-slug | The link manager renders E1 showing short code abc1234, and abc1234 is active | R1.1, R1.2 |
 | T2 | abc1234 active with an expiry instant of 2026-03-02T09:00:00Z | The clock advances to 2026-03-02T09:00:01Z, then a redirect request arrives for abc1234 | The response status is HTTP 410, and abc1234 is expired | R1.4 |
 | T3 | abc1234 active with no expiry instant | In the link manager, acct-0001 switches abc1234 off | The link manager renders E3 with variant "owner-disabled", and abc1234 is disabled | R1.5 |
-| T4 | abc1234 disabled with an expiry instant of 2026-03-09T09:00:00Z, the clock at 2026-03-01T09:05:00Z | In the link manager, acct-0001 switches abc1234 on, then a redirect request arrives for abc1234 | The response status is HTTP 301 with Location https://example.com/a-very-long-article-slug, and abc1234 is active | R1.3, R1.5 |
+| T4 | abc1234 disabled for destination https://example.com/a-very-long-article-slug, with an expiry instant of 2026-03-09T09:00:00Z, the clock at 2026-03-01T09:05:00Z | In the link manager, acct-0001 switches abc1234 on, then a redirect request arrives for abc1234 | The response status is HTTP 301 with Location https://example.com/a-very-long-article-slug, and abc1234 is active | R1.3, R1.5 |
 
 ## Journeys
 
@@ -49,7 +50,11 @@ renumbered.
 
 Scenario 1 runs in the first build phase, under continuity: each of its cases runs against the
 state the previous case left. Scenario 2 runs in the phase that lands R1.4 and the "time-expired"
-variant, from the harness's declared state.
+variant, from the harness's declared state. Scenario 3 runs in the phase that lands the
+status-class counter R2.3 bounds, from the harness's declared state; it is M2's oracle. Scenario 4
+runs in the phase that lands R2.4, from the harness's declared state; it is M1's oracle. Scenario 5
+runs in the same phase as scenario 4, from the harness's declared state; it exercises the
+interim rule OQ 3 carries.
 
 | Case | Given | When | Assert | Rows |
 |---|---|---|---|---|
@@ -57,14 +62,17 @@ variant, from the harness's declared state.
 | UJ1.1-b | The state UJ1.1-a left | In the link manager, acct-0001 submits ftp://example.com/archive.zip | The link manager renders E2, no short code beyond abc1234 exists, and the generator's next value abc1235 stays unallocated | R1.1 |
 | UJ1.1-c | The state UJ1.1-b left: abc1234 active for https://example.com/a-very-long-article-slug, abc1235 unallocated | The clock advances 40 seconds, then in the link manager acct-0001 submits https://example.com/a-very-long-article-slug a second time | The link manager renders E1 showing short code abc1234, and abc1235 stays unallocated | R1.2, R2.2 |
 | UJ1.2-a | A fixture reset to the harness state, then abc1234 active with an expiry instant of 2026-03-02T09:00:00Z | The clock advances to 2026-03-02T09:00:01Z, then acct-0001 opens abc1234 in the link manager | The link manager renders E3 with variant "time-expired", and a redirect request for abc1234 returns HTTP 410 | R1.3, R1.4 |
+| UJ1.3-a | A fixture reset to the harness state, then abc1234 active for destination https://example.com/a-very-long-article-slug with no expiry instant, abc1235 active for destination https://example.com/a-second-article with an expiry instant of 2026-03-02T09:00:00Z, and the day's status-class counter at zero in every class | The clock advances to 2026-03-02T09:00:01Z, then five redirect requests arrive in this order — abc1234, abc1234, abc1235, abc9999, and abc1234 while the store R2.1 names is unreachable | The day's status-class counter reads 3xx 2, 4xx 2 and 5xx 1, so M2's numerator is 4 over a denominator of 5 and the day's redirect answer rate is 80% | R1.3, R2.1, R2.3, M2 |
+| UJ1.4-a | A fixture reset to the harness state, with the client event stream empty | In the link manager, acct-0001 submits https://example.com/a-very-long-article-slug, then submits ftp://example.com/archive.zip, then fires the "Copy link" action on abc1234 | The client event stream holds two submitted events and one copied event, the copied event carrying short code abc1234 in the session that submitted it, so M1's numerator is 1 over a denominator of 2 | R1.1, R1.2, R2.4, M1 |
+| UJ1.5-a | A fixture reset to the harness state, with the client event stream empty | In the link manager, acct-0001 submits https://example.com/a-very-long-article-slug, the clock advances 40 seconds, acct-0001 submits that same destination a second time, then fires the "Copy link" action on abc1234 | The client event stream holds two submitted events and one copied event; under OQ 3's interim rule that copied event is attributed to the first submission, so M1's numerator is 1 over a denominator of 2 | R1.2, R2.2, R2.4, M1 |
 
 ## Test-controls map
 
 Every surface a case in this file drives appears in this map, or in the Harness's **Named
 defaults** table. A case that drives a surface named in neither is asserting through a seam nobody
-declared, and this map is what makes "declare every exercised seam input" checkable.
+declared.
 
 | Surface | Controlled input | Observable result | Rows |
 |---|---|---|---|
-| link manager | The destination an owner submits, the off/on switch an owner operates on a short code, and the instant of a resubmission as the Named defaults table's Clock holds it | The copy state and variant the link manager renders, the short code it shows, and whether the generator's next value stays unallocated | R1.1, R1.2, R1.5, R2.2 |
-| redirect request | The short code requested, at the instant the Named defaults table's Clock holds | The response status line and its Location header | R1.3, R1.4 |
+| link manager | The destination an owner submits, the off/on switch an owner operates on a short code, the "Copy link" action an owner fires, and the instant of a resubmission as the Named defaults table's Clock holds it | The copy state and variant the link manager renders, the short code it shows, whether the generator's next value stays unallocated, and the events it emits to the client event stream | R1.1, R1.2, R1.5, R2.2, R2.4, M1 |
+| redirect request | The short code requested, whether the store R2.1 names is reachable, and the instant the Named defaults table's Clock holds | The response status line, its Location header, and the day's status-class counter | R1.3, R1.4, R2.1, R2.3, M2 |

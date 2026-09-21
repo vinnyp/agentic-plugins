@@ -26,10 +26,18 @@
         that amendment's review rounds run and cleared by the bookkeeping close — absent from a
         document with no amendment open, which is why the rule below, and not a scaffolded line,
         is what this template carries.
-     5. The resolved base: the commit SHA the amendment's diff checks compare against, recorded
-        once at round 1 — present only where an amendment or a re-lock is open, for the same
-        reason as item 4. A diff check whose base is not recorded here is NOT-RUN, because two
-        runs that resolved the base differently are not comparable.
+     5. The resolved baselines: the two commit SHAs the amendment's diff checks compare against,
+        both recorded once at round 1 — present only where an amendment or a re-lock is open, for
+        the same reason as item 4. The PRESERVATION baseline is the commit at which the document
+        was most recently locked; the CHANGE baseline is the merge-base of this amendment's branch
+        with the trunk it targets. One cannot serve both: where the trunk moved after the lock,
+        diffing from the lock reports changes this amendment did not make, and asking it to fence
+        them is asking it to answer for work already authorized elsewhere. A diff check whose
+        baseline is not recorded here is NOT-RUN, because two runs that resolved a baseline
+        differently are not comparable. Every run records the `(baseline, head)` pair it used
+        beside its result, and names which baseline it read; a branch name resolves differently on
+        two days and a SHA does not, which is why these lines carry SHAs rather than branch names.
+        `references/mechanical-checks.md` carries the per-check mapping.
      Fence language is not settlement: a fence records a decision the OWNER made, by link. An
      agent-authored amendment may proceed under one blanket approval, but every WHAT choice inside
      it is still listed for the owner and recorded as its own dated fence before re-lock. -->
@@ -52,12 +60,12 @@ range that authorises that amendment. Its presence says that the fences in that 
 closed and the rows they touch are not yet re-ratified. The bookkeeping close clears it here and in
 every other place the document carries it, in the one push that closes the amendment.
 
-**Resolved base.** While that amendment is open, the preamble also records the commit the diff
-checks compare against — the commit at which this document was most recently locked, resolved once
-at round 1 and written here as a SHA rather than as a branch name or a description. The diff checks
-read it from here, and every run of one records the `(base, head)` pair it used beside its result.
-A branch name resolves differently on two days; a SHA does not, which is the whole reason this line
-exists rather than each run resolving the base for itself.
+**Resolved baselines.** While that amendment is open, the preamble also records the two commits the
+diff checks compare against, each resolved once at round 1 and written here as a SHA: the
+**preservation baseline**, the commit at which this document was most recently locked, and the
+**change baseline**, the merge-base of this amendment's branch with the trunk it targets. A check
+that asks what has been preserved since the lock reads the first; a check that asks what this
+amendment changed reads the second.
 
 ## Fences
 <!-- guidance: one `### F<n> — <title> (<date>)` per decision, in ascending order, numbered per
@@ -76,12 +84,16 @@ exists rather than each run resolving the base for itself.
 (the owner decision that made it, by link), **Decision** (what the owner decided, in the owner's
 terms), **Why** (optional) and **Carried by**, in that order.
 
-**Carried by grammar.** A **Carried by** value is a comma-separated list of IDs and nothing else —
-row IDs, case IDs, copy-state IDs, metric IDs and sibling fence numbers. Each item is a bare ID,
-optionally preceded by the name of the document that owns it for a cross-document reference ("the
-device PRD R6.27"), so the ID is the last whitespace-separated token of the item. No prose, no
-ranges, no "see above": the mechanical checks build the fence → row map from this line rather than
-trusting the map section, and rationale belongs in **Why**.
+<!-- guidance: how a **Carried by** line is written, because the mechanical checks build the
+     fence → row map from it rather than trusting the map section: a comma-separated list of IDs
+     and nothing else — no prose, no ranges, no "see above" — each item a bare ID optionally
+     preceded by the owning document's name, so the ID is the last whitespace-separated token of
+     the item. Rationale belongs in **Why**, never here. -->
+
+**Carried by grammar.** A **Carried by** value is a comma-separated list of the IDs the decision
+now lives in — row IDs, case IDs, copy-state IDs, metric IDs and sibling fence numbers. A
+cross-document reference is preceded by the name of the document that owns it ("the device PRD
+R6.27"); an ID written bare is this PRD's own.
 
 **A fence's original text is never rewritten.** A later clarification, narrowing, demotion or close
 is appended under the fence as its own dated line, `**Clarified <date> (<authority>):** …`; where
@@ -102,11 +114,13 @@ rewritten.)_
 ## Fence → row map
 <!-- guidance: one line per fence. This is the index the mechanical checks reconcile against the
      fence bodies: no map entry may point at deleted text, and every changed row must appear in
-     some fence's Carried-by. -->
+     some fence's Carried-by.
+     Each line is written `- **F<n>** — <IDs>`, with `<IDs>` following the **Carried by** grammar
+     above. No map line reads "see the lists above". -->
 
-Each line of this map is `- **F<n>** — <IDs>`, where `<IDs>` follows the **Carried by** grammar
-above, or the single clause `governs no rows` where a blanket amendment fence authorises a rewrite
-rather than deciding a WHAT. No map line reads "see the lists above".
+Each line of this map names the IDs one fence governs, by the **Carried by** grammar above — or
+the single clause `governs no rows`, where a blanket amendment fence authorises a rewrite rather
+than deciding a WHAT.
 
 - **F1** — _(the row IDs this fence governs.)_
 

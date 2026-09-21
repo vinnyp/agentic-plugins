@@ -9,13 +9,6 @@ Companions: `docs/product/link-shortener-journeys.md` (acceptance scenarios) ·
 
 Format: agent-prd v1
 
-**Format contract.** Every section heading in this document, and the column set of the
-row-transitions, constants-and-closure-gates, build-dependencies, requirement, obligations,
-copy-index, metrics and open-questions tables, is fixed: the mechanical checks parse them by name.
-A project may add a requirement section, add a trailing column to a requirement table, or delete a
-section this format marks conditional. Any other reshaping is a fork of this format, not an
-instance of it.
-
 ---
 
 ## Build contract
@@ -69,8 +62,13 @@ row-transitions table uses only terms marked that way.
 - **redirect request** — an HTTP GET for a short code.
 - **link manager** — the one surface this product area ships: the page on which an owner creates,
   inspects and switches short links.
-- **access log** — the per-redirect-request record R2.3 bounds; it is the raw form from which the
-  M2 rate is computed, and no other stored form of a redirect request exists.
+- **access log** — the per-redirect-request record R2.3 bounds; it retains no response status, and
+  no other per-request stored form of a redirect request exists.
+- **status-class counter** — the per-day count of responses in one HTTP status class (3xx, 4xx,
+  5xx) that R2.3 bounds alongside the access log; it holds no per-request field, and it is the one
+  stored form from which the M2 rate is computed.
+- **client event stream** — the per-session record of link-manager events R2.4 requires; it is the
+  one stored form from which the M1 completion rate is computed.
 - **max-destination-length** — the named constant bounding a destination's length in characters;
   the constants table below carries its interim value and the evidence that closes it.
 - **unallocated** (state) — the short code is assigned to no short link.
@@ -80,8 +78,7 @@ row-transitions table uses only terms marked that way.
 
 ### Legend
 
-**Priority — choose exactly one semantic for this release and delete the other bullet before
-lock:**
+**Priority — the semantic the `Pri` column carries in this release:**
 
 - **Build order within the release — nothing droppable.** Every P0/P1/P2 row ships in this
   release; priority only orders the sequence work happens in.
@@ -128,9 +125,9 @@ is the constant's home. Where the two disagree, the row governs.
 
 | Work | Available contract | What must remain open |
 |---|---|---|
-| Link manager and create flow | R1.1, R1.2 and R1.5, and copy states E1, E2 and E3 | OQ 1's closure evidence — the interim length F2 set holds until the dogfood sample closes it |
+| Link manager and create flow | R1.1, R1.2, R1.5 and R2.4, and copy states E1, E2 and E3 | OQ 1's closure evidence — the interim length F2 set holds until the dogfood sample closes it |
 | Redirect handler and expiry | R1.3 and R1.4, and the envelope R2.1 and R2.2 state | nothing |
-| Security and privacy posture | none | OQ 2 — whether this product area or the Edge Delivery PRD owns destination screening and redirect-log retention |
+| Security and privacy posture, and the status-class counter M2 reads | none | OQ 2 — whether this product area or the Edge Delivery PRD owns destination screening, redirect-log retention and the counter |
 
 A builder builds against the **Available contract** column only. Anything under **What must remain
 open** is a stop rather than a guess: that work waits for the ADR, the open question, the hardware
@@ -147,6 +144,7 @@ rule named there, and re-checked when its open question closes.
 **Interim stated:**
 
 - R1.1 — OQ 1 — F2.
+- M1 — OQ 3 — F4.
 
 ### Traceability
 
@@ -157,9 +155,8 @@ rule named there, and re-checked when its open question closes.
 - A lead row that carries a table of its own numbers those sub-rows with letters (`R8.1a`).
 - IDs are assigned once and never renumbered. **Retired IDs:** none — no ID in this document has
   been retired.
-- The **Commit PR** column on a requirement row names the PR that landed it — attributed to the
-  PR, not to a bare commit SHA.
-- Owner decisions F1–F3 are in the fence file; a row names one for provenance only.
+- The **Commit PR** column on a requirement row names the PR that landed it.
+- Owner decisions F1–F4 are in the fence file; a row names one for provenance only.
 
 ### Surfaces
 
@@ -198,7 +195,8 @@ latent decision, not a silent "no requirement".
 |---|---|---|---|---|---|
 | R2.1 | v1 | P0 | A redirect request is answered within 150 ms at the 99th percentile at up to 500 requests per second, against a store holding up to 10 million short links and growing by at most 1 million a year. A redirect request that cannot reach that store is answered with HTTP 503 rather than a redirect, and an acknowledged create survives the loss of any single storage node. | aligned | |
 | R2.2 | v1 | P0 | Creating a short link is idempotent under retry: the same destination resubmitted by the same owner within one minute returns the short code already assigned, and two concurrent submissions of it resolve to exactly one short code. The link manager supports the current and one prior major release of each evergreen browser and has no offline requirement, because a short link has no value without the network that resolves it. | aligned | |
-| R2.3 | v1 | P0 | Short codes are served over HTTPS only, and the product refuses to create a short link whose destination host resolves to a private-network or loopback address. For each redirect request the access log retains only the short code, the request timestamp truncated to the hour and the two-letter country, for 30 days. | aligned | |
+| R2.3 | v1 | P0 | Short codes are served over HTTPS only, and the product refuses to create a short link whose destination host resolves to a private-network or loopback address. For each redirect request the access log retains only the short code, the request timestamp truncated to the hour and the two-letter country, for 30 days, and the only other record the product keeps of a redirect request is the **status-class counter**: one count per HTTP status class per calendar day, carrying no per-request field, retained for 13 months, and the only aggregate M2 reads. | aligned | |
+| R2.4 | v1 | P1 | The link manager emits to the client event stream exactly one submitted event when an owner submits a destination, accepted or rejected, and exactly one copied event when the owner fires the "Copy link" action, each carrying the session it occurred in and, where the submission produced one, the short code. The stream carries no destination and no owner account, and is retained for 90 days. | aligned | |
 
 ## Inherited obligations
 
@@ -232,37 +230,12 @@ the requirement row that enumerates its variant set, and that row lists the vari
 A variant no row enumerates is untestable without matching on wording; an enumerated variant with
 no copy is text the builder would have to invent.
 
-**Standing label check.** Run on every copy or row amendment, over the whole product-docs tree:
-
-```bash
-# Every quoted label in the copy companion, with every place in the tree that mentions it.
-# Each hit must be either the copy companion's owning entry or a row/case quoting it verbatim.
-set -o pipefail
-rg -o --no-filename -r '$1' '"([^"]+)"' "docs/product/link-shortener-copy.md" \
-  | sort -u \
-  | while IFS= read -r label; do
-      printf '\n== %s\n' "$label"
-      rg -n --fixed-strings -- "$label" "docs/product" || echo '   (no other mention)'
-    done
-# Without ripgrep, the two substitutions are:
-#   rg -o --no-filename -r '$1' '"([^"]+)"' F   ->   grep -oh '"[^"]*"' F | sed 's/^"//; s/"$//'
-#   rg -n --fixed-strings --                    ->   grep -rnF --include='*.md' --
-# The `sed` is load-bearing: `rg -r '$1'` yields the label WITHOUT its quote marks, `grep -oh`
-# keeps them, and a search for a quoted string can never find the defect this check exists for —
-# a row that states a label instead of quoting it.
-```
-
-Each label is read into a shell variable and passed quoted, with `--fixed-strings` and a `--`
-end-of-options guard: text taken out of a document is never interpolated into a command string.
-The substituted `docs/product` is a literal path, quoted wherever it appears, so a path
-containing a space cannot word-split a search into a false clean result.
-
 ## Success metrics
 
 | ID | Metric | Definition (start event, end event, statistic, population) | Candidate target | Method | Status |
 |---|---|---|---|---|---|
-| M1 | Create-to-copy completion | Start: a destination is submitted in the link manager; end: the "Copy link" action fires for the short code that submission produced, in the same session; statistic: the share of submissions reaching that end event; population: every submission in a calendar week. | 80%, illustrative — this example carries no measured baseline and no benchmark | The link manager's client event stream, which records one submitted event and one copied event per short code | aligned |
-| M2 | Redirect answer rate | Start: a redirect request arrives; end: its response is sent; statistic: the share of responses carrying HTTP 301, 410 or 404 rather than 5xx; population: every redirect request in a calendar day. | 99.9%, illustrative — this example carries no measured baseline and no benchmark | The access log R2.3 bounds, counted by status code | aligned |
+| M1 | Create-to-copy completion | Start: a destination is submitted in the link manager; end: the "Copy link" action fires for the short code that submission produced, in the same session, attributed under OQ 3's interim rule where one short code serves two submissions; statistic: the share of submissions reaching that end event; population: every submission in a calendar week. | 80%, illustrative — this example carries no measured baseline and no benchmark | The client event stream R2.4 requires, counting the submitted events and the copied events that follow them in the same session. UJ1.4-a is its worked oracle. | aligned |
+| M2 | Redirect answer rate | Start: a redirect request arrives; end: its response is sent; statistic: the 3xx and 4xx counts over the sum of the 3xx, 4xx and 5xx counts — the classes R1.3's 301, 410 and 404 answers and R2.1's 503 answer fall in; population: every redirect request in a calendar day. | 99.9%, illustrative — this example carries no measured baseline and no benchmark | The status-class counter R2.3 bounds, read per calendar day; the counter is not built while R2.3 waits on OQ 2, so this metric is unread until that question closes. UJ1.3-a is its worked oracle. | aligned |
 
 ## Open questions
 
@@ -270,6 +243,7 @@ containing a space cannot word-split a search into a false clean result.
 |---|---|---|---|---|---|---|
 | 1 | How long a destination does the product have to accept? | Answered on an interim basis at 2,048 characters, from the shortest limit documented across the browsers R2.2 supports; the results file carries the finding. | Accept a destination of at most 2,048 characters and reject a longer one; the copy that states the number waits for closure. | The example owner, on the length distribution of destinations submitted during the first dogfood week. | R1.1 | aligned |
 | 2 | Does this product area own destination screening and redirect-log retention, or does the Edge Delivery PRD own both at the edge? | None. | | The example owner, once the Edge Delivery PRD exists. | R2.3 | needs-discussion |
+| 3 | When an idempotent resubmission returns a short code already issued in the same session, which submission does a copy event count for? | None. R2.2 makes the resubmission return the short code already assigned, so one copied event can answer either submission; F4 set an interim rather than deciding it. | Attribute the copy event to the earliest unmatched submission of that short code in the session. | The example owner, on the first dogfood week's client event stream. | M1 | needs-discussion |
 
 Every open question carries an interim rule, or its P0 rows are listed in the Legend's no-interim
 bullet — there is no third option, and which of the two applies is what tells a builder whether it
