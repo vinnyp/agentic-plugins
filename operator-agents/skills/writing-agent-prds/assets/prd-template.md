@@ -36,7 +36,14 @@ Companions: `{{product-docs-dir}}/<prd-slug>-journeys.md` (acceptance scenarios)
 <!-- guidance: name all four companions by path, on one line, so an agent handed only this file
      can find every other place a rule of this product lives. Not conditional: all four exist from
      scaffold time, even while empty.
-     {{product-docs-dir}}: the project's product-docs directory, where this PRD and its four
+     The four SUFFIXES are a contract, not a convention: `-journeys.md`, `-copy.md`, `-fences.md`
+     and `-oq-results.md`. The mechanical checks parse this line to resolve the companions and
+     assert that all four are declared, so renaming one is a breaking format change that must be
+     made here and in the checks together.
+     {{product-docs-dir}}: the project's product-docs directory, written REPO-ROOT-RELATIVE (e.g.
+     `docs/product`), not as an absolute path and not relative to this file. The mechanical checks
+     resolve companion paths against the repository root, so a path written any other way makes
+     them resolve against the wrong base. Where this PRD and its four
      companions live — never `/tmp`, always in the project repo. -->
 
 Format: agent-prd v1
@@ -252,7 +259,12 @@ _(Preamble: name any copy state deliberately shared across surfaces, and the sur
      cites and fence cites live outside the cell. Every constant a row uses is NAMED IN THAT ROW,
      not only in the Legend's constants table.
      {{requirement-section-name}}: the name of this requirement section — one per group of rows
-     this PRD's product area divides into. -->
+     this PRD's product area divides into.
+     Three COLUMN NAMES are a contract, here and in the copy index and the metrics table: `ID`,
+     `Pri` and `Status`. The mechanical checks locate them by header name rather than by position,
+     precisely because the three tables put `Status` in three different columns — so adding a
+     column or reordering one is safe, and RENAMING any of those three is a breaking format change
+     that silently empties a check's field. Rename one only as a deliberate format version. -->
 
 Traces UJ_(n)_, UJ_(n)_; serves the vision use case _(name)_.
 

@@ -60,9 +60,16 @@ test does not get the PASS.** NOT-RUN exists so that "I did not look" cannot be 
 a PASS over a skipped subject is that same defect wearing the better word.
 
 Where a set is non-empty **by construction** — this document's cites of its own rows, the case
-tables, the dispositionable cells, the links across the tree, the test-controls map — an empty
+tables, the dispositionable cells, the declared companion paths, the test-controls map — an empty
 result is an extraction failure and stays NOT-RUN. Each such check says so in its own guard, and
 the reason it gives is the construction, not the emptiness.
+
+**"By construction" is a claim about the format, and it has to be checked against the format rather
+than assumed.** Check 11 asserted that Markdown links were non-empty by construction "because the
+Companions line carries four"; the Companions line uses backticked paths and carries none, so the
+guard was NOT-RUN on every conforming document and, where an unrelated linked file happened to sit
+in the tree, passed on that file instead of on the companions. Before writing that a set cannot be
+empty, instantiate the documents and count it.
 
 Mechanically, that is three habits. Every throwaway script opens with
 
@@ -198,10 +205,14 @@ from a single SHA which of the two jobs it did.
   direction: it collects ticks another change flipped and files them in this amendment's lock
   record, so what it reports is not a fact about this amendment at all.
 
-**Worked verification — the A/B/C ancestry case.** Three commits. `A` locks the document with
-`R1.1 | P0 | open` and `R2.1 | P1 | open`. `B` lands on the trunk and flips `R1.1` to `done`. The
-amendment branches from `B`, and `C` moves `R2.1` to `P2`. `main` stays at `B`, so
-`git merge-base main HEAD` resolves to `B`. Run against that fixture:
+**Worked verification — the A/B/C ancestry case.** Three commits, over **the real six-column
+requirement schema** `| ID | Release | Pri | Requirement | Status | Commit PR |`, plus a copy index
+and a metrics table, because a fixture whose columns differ from the schema the check runs against
+verifies nothing — see check 9, where exactly that let a wrong recipe pass its own verification.
+`A` locks the document with `R1.1` at `P0`/`aligned` and `R2.1` at `P1`/`aligned`. `B` lands on the
+trunk and flips **`R1.1`'s Status only**, `aligned` → `done`, leaving every other cell of that row
+untouched. The amendment branches from `B`, and `C` moves `R2.1` from `P1` to `P2`. `main` stays at
+`B`, so `git merge-base main HEAD` resolves to `B`. Run against that fixture:
 
 | Run | What it reports |
 |---|---|
@@ -215,22 +226,36 @@ dot excludes nothing. Three dots are still the form to write, because a baseline
 ancestor; what they cannot do is the job the preceding paragraphs give to the second SHA. What
 separates `R1.1` from `R2.1` above is not the dot count. It is which commit is on the left.
 
-Check 9 wants the first row of that table: `R1.1` went from `open` to `done` since the lock, and the
-lock record has to account for it. Check 8 wants the third: `R2.1` is what this amendment changed
-and what its fences must carry. Read across both and `R1.1` is the residue — inside the since-lock
-delta, outside this amendment's delta — and that residue is **not a MISS against this amendment's
-fences**:
+Check 9 wants the first row of that table: `R1.1`'s Status went from `aligned` to `done` since the
+lock, and the lock record has to account for it. Check 8 wants the third: `R2.1` is what this
+amendment changed and what its fences must carry. Read across both and `R1.1` is the residue —
+inside the since-lock delta, outside this amendment's delta — and that residue is **not a MISS
+against this amendment's fences**. `trip()` is check 9's parse, which reads its columns **by header
+name**:
 
 ```bash
-trip() { git show "$1:$prd" \
-  | awk -F'|' '/^\| *R[0-9]+\.[0-9]+[a-z]? *\|/ {gsub(/ /,""); print $2"|"$3"|"$4}' | sort; }
+trip() { git show "$1:$prd" | awk -F'|' -f bycolumn.awk | sort; }
 comm -23 <(diff <(trip "$lockbase")   <(trip HEAD) | grep -E '^[<>]' | sort -u) \
          <(diff <(trip "$changebase") <(trip HEAD) | grep -E '^[<>]' | sort -u)
 ```
 
-On the fixture that prints `< R1.1|P0|open` and `> R1.1|P0|done` and nothing else: the trunk's
-change, named, and separated from the amendment's own. Check 9 asserts a fence carries each line of
-that residue; it does not require that fence to be dated in this amendment.
+On the fixture that prints
+
+```
+< R1.1|P0|aligned
+> R1.1|P0|done
+```
+
+and nothing else: the trunk's status-only change, named, and separated from the amendment's own.
+Check 9 asserts a fence carries each line of that residue; it does not require that fence to be
+dated in this amendment.
+
+**The status-only mutation is in this fixture deliberately, and it is the regression guard.** Run
+the same two commands with a *positional* parse of the requirement rows — `$2"|"$3"|"$4`, which on
+the six-column schema reads ID, **Release** and Pri and never touches Status — and both `trip(A)`
+and `trip(HEAD)` contain `R1.1|v1|P0`. The residue is then **empty and the recipe exits 0**: a
+silent PASS over precisely the class check 9 exists to catch. If this verification is ever re-run
+and the residue comes back empty, the parse has regressed.
 
 ---
 
@@ -617,6 +642,64 @@ the triple's shape is **per family**, because only the requirement tables have a
 For the families with no priority column, write the `Pri` field as a literal `—`. Do not synthesize
 one and do not let a missing column read as a changed value.
 
+**Read those columns by header NAME, never by position.** The three tables put `Status` in three
+different places — the requirement tables' header is
+`| ID | Release | Pri | Requirement | Status | Commit PR |`, so with `awk -F'|'` the cells are
+`ID=$2, Release=$3, Pri=$4, Status=$6`; the copy index is
+`| ID | State | Surface | Owning rows | Status |`, `Status=$6`; and the metrics table is
+`| ID | Metric | Definition … | Candidate target | Method | Status |`, `Status=$7`. A positional
+recipe cannot be right for all three, and the failure is silent: an earlier form of this check
+printed `$2"|"$3"|"$4`, which on the requirement schema is `(ID, Release, Pri)` — **Status was never
+read at all**, so every status-only change produced identical triples on both sides and the check
+reported clean. Parse the header row, map names to indices, and pull `ID`, `Pri` and `Status` out of
+that map:
+
+```awk
+# bycolumn.awk — run as: awk -F'|' -f bycolumn.awk <file>
+function trim(s){ gsub(/^[ \t]+|[ \t]+$/,"",s); return s }
+{ line = $0 }
+!/^\|/ { split("", H); HNF = 0; prev = line; next }     # a table ended: the map dies with it
+/^\|[ \t]*:?-+[-|: \t]*\|[ \t]*$/ {                     # separator: the line above was the header
+  split("", H); HNF = split(prev, C, "|")
+  for (i = 2; i < HNF; i++) H[trim(C[i])] = i
+  prev = line; next
+}
+{
+  if (("ID" in H) && ("Status" in H)) {
+    if (NF != HNF)
+      printf "PARSE-MISS: row %s has %d cells, header has %d\n", trim($2), NF-2, HNF-2 > "/dev/stderr"
+    else {
+      id = trim($H["ID"])
+      if (id ~ /^(R[0-9]+\.[0-9]+[a-z]?|E[0-9]+|M[0-9]+)$/)
+        print id "|" (("Pri" in H) ? trim($H["Pri"]) : "—") "|" trim($H["Status"])
+    }
+  }
+  prev = line
+}
+```
+
+Four things in that script are load-bearing. A header row is identified by **the separator row
+underneath it**, not by its content, which is what lets one pass handle every table in the file. The
+map is **cleared when a table ends** (the first non-`|` line), so the next table's header is not
+read as a data row against the previous table's width. `Pri` is emitted as `—` when the header has
+no such column, which is the per-family shape above, produced rather than remembered. And a row
+whose cell count does not match its header's is a **PARSE-MISS on stderr**, not a silently
+mis-indexed triple — that is the guard against an unescaped `|` inside a `Requirement` cell, which
+would otherwise shift every column after it. `split("", H)` is used rather than `delete H` because
+both BSD and GNU awk accept it; the script was run under both and the output was identical.
+
+**`bycolumn.awk` is this file's shared table parse.** Any check that needs a named column out of a
+PRD table should read it through this map rather than counting pipes, because the column sets differ
+per table today and a table that grows a column silently re-indexes every positional recipe that
+reads it. Where a check does read positionally — check 20 takes the metrics `Method` cell as `$6`,
+which is correct for `| ID | Metric | Definition … | Candidate target | Method | Status |` — the
+header it assumes is written down beside it, so the assumption is checkable.
+
+Verified against this skill's own example PRD: 14 triples, `E1|—|aligned` through `R2.4|P1|aligned`,
+with the copy-index and metrics families carrying the literal `—` and the requirement rows carrying
+real priorities, and **stderr silent**. An unescaped pipe injected into `R1.2`'s `Requirement` cell
+produces `PARSE-MISS: row R1.2 has 7 cells, header has 6` and no triple for that row.
+
 `E<n>` carries a status in **two** files, so the copy companion is an input to this check as well
 as the PRD: assert the PRD copy index's `Status` and the copy companion's `- Status:` agree per
 `E<n>`, at base and at HEAD. A disagreement is a MISS whether or not either side changed.
@@ -628,8 +711,10 @@ git show "$lockbase:$docs/$slug.md" > "$basefile" \
 [ -s "$basefile" ] || { echo "NOT-RUN: $slug.md at $lockbase is empty"; exit 3; }
 ```
 
-Then parse both files' tables into `ID|Pri|Status` lines, sort, and `diff`. Any ID **added, removed
-or renumbered**, and any changed `Pri` or `Status` cell, must be **named in a dated fence**.
+Then parse both files' tables into `ID|Pri|Status` lines with `bycolumn.awk`, sort, and `diff`. Any
+ID **added, removed or renumbered**, and any changed `Pri` or `Status` cell, must be **named in a
+dated fence**. A PARSE-MISS on either side is a NOT-RUN for this check, not a clean diff: a row that
+did not parse is a row neither side compared.
 
 **Which fence, is where the second baseline comes back in.** Split the since-lock delta against this
 amendment's delta, with the `comm` in the Applicability section's worked verification. A line in
@@ -678,13 +763,71 @@ process rule 7 and a human confirms each hit.
 **Failure looks like.** A three-sentence row where the third sentence carries rationale, an evidence
 cite or a fence cite — all of which belong outside the cell.
 
-### 11. Relative link and anchor resolution
+### 11. Companion paths and link/anchor resolution
 
-**Method.** Over the **whole product-docs tree**, not just this PRD. Collect every
-`[label](target)`; the collection is non-empty by construction — the PRD's Companions line alone
-carries four — so an empty one is an extraction failure and is NOT-RUN. For a target with a path
-part, resolve it
-relative to the containing file and assert the file exists. For a `#anchor` part, compute the
+**Two sets, and only the first is non-empty by construction.** This format does not link its
+companions — the PRD's Companions line writes them as **backticked paths**, not as
+`[label](target)` — so the Markdown-link set over a conforming document tree is legitimately
+**empty**, while the declared-companion set always exists. An earlier form of this check collected
+only Markdown links and called that set non-empty by construction, citing the Companions line as
+the four it carries. It carries none. Instantiated in isolation, a conforming PRD and its four
+companions yield **zero** Markdown links in all five files, so the check was NOT-RUN on every
+conforming document — and where some unrelated linked file happened to sit in the tree, the
+non-empty guard was satisfied by that file while the four companion paths went unvalidated. That is
+the guard passing on the wrong subject, which is the defect this whole file is written against.
+
+**Method, part 1 — the declared companion paths.** Parse the Companions line's paragraph for its
+backticked `.md` paths, assert each resolves, assert each sits in `"$docs"`, and assert all four
+companions are declared. The paths are written relative to the repository root, as the template
+writes them, so resolve them from there:
+
+```bash
+[ -s "$prd" ] || { echo "NOT-RUN: $prd is absent or empty"; exit 3; }
+# The template writes these paths as {{product-docs-dir}}/<prd-slug>-*.md, and the shipped
+# convention substitutes a repo-root-relative directory. Where a project substitutes something
+# else, set the base to match — and record in the lock record which base the run resolved against.
+root="${COMPANION_BASE:-$(git rev-parse --show-toplevel)}"
+echo "resolving companion paths against: $root"
+companions="$(mktemp)"
+{ awk '/^Companions:/ {c=1} c && /^[[:space:]]*$/ {exit} c' "$prd" \
+    | grep -oE '`[^`]+\.md`' || true; } | tr -d '`' | sort -u > "$companions"
+[ -s "$companions" ] \
+  || { echo "NOT-RUN: no companion paths parsed from the Companions line in $prd"; exit 3; }
+while IFS= read -r c; do
+  [ -f "$root/$c" ] \
+    || printf 'MISS  companion %s is declared on the Companions line and does not exist\n' "$c"
+  case "$c" in "$docs"/*) ;;
+    *) printf 'MISS  companion %s is declared outside %s\n' "$c" "$docs" ;;
+  esac
+done < "$companions"
+for suffix in -journeys.md -copy.md -fences.md -oq-results.md; do
+  grep -qF -e "$slug$suffix" -- "$companions" \
+    || printf 'MISS  the Companions line declares no %s companion\n' "$suffix"
+done
+```
+
+**Worked verification — the five files in isolation.** A scratch repository containing only
+`docs/product/` and the five generated documents: no `README.md`, no other linked file, nothing the
+guard could pass on by accident.
+
+| State | Result |
+|---|---|
+| all five present and declared | `companions declared: 4`, no MISS — **PASS** |
+| the copy companion deleted from disk | `MISS companion …-copy.md … does not exist` |
+| the fences companion dropped from the line, file present | `MISS … declares no -fences.md` |
+| a companion declared outside `$docs` | both the does-not-exist MISS and the outside-`$docs` MISS |
+| the Companions line removed entirely | `NOT-RUN: no companion paths parsed`, exit 3 |
+
+The second and third rows are the two ways a companion can go missing — the file, or its
+declaration — and the check reaches a verdict on both. The fourth is the subject genuinely failing
+to parse, which stays NOT-RUN.
+
+**Method, part 2 — Markdown links and anchors.** Over the **whole product-docs tree**, not just this
+PRD. Collect every `[label](target)`. This set is **legitimately empty on a conforming document**,
+and an empty collection over a `$docs` that parsed is a **PASS** with nothing to resolve, not a
+NOT-RUN — the subject here is the tree, and the tree was read. Where the set is non-empty: for a
+target with a path part, resolve it relative to the containing file and assert the file exists.
+For a `#anchor` part, compute the
 anchor set of the target file by **GitHub's slug rules**, applied to the heading's **rendered
 text**: first resolve inline markdown to its text content — `**bold**`, `_emphasis_`, `` `code` ``
 and `[label](target)` all reduce to the label or the inner text — then lowercase what remains; drop
@@ -693,8 +836,12 @@ everything that is not a letter, a digit, a space, a hyphen or an underscore (so
 hyphens; and where two headings slug identically, the second and later get `-1`, `-2` … in document
 order. Assert the anchor is in that set.
 
-**Failure looks like.** A link to a file the rewrite renamed; an anchor that renders to nothing on
-GitHub because the heading it names carries a code span or trailing punctuation the slug drops; an
+**Failure looks like.** A Companions line naming a companion the rewrite renamed or never created,
+which is four paths a reader follows to nothing — the state check 15's `<prd-slug>` sweep catches
+only when the token was left unsubstituted, and nothing caught when it was substituted wrongly. A
+companion declared outside the product-docs directory. A link to a file the rewrite renamed; an
+anchor that renders to nothing on GitHub because the heading it names carries a code span or
+trailing punctuation the slug drops; an
 anchor computed from the raw heading source, which keeps the asterisks a reader never sees. The
 stable `### UJ n. <name>` headings in the journeys companion exist so this check keeps passing
 across amendments — a heading reworded is a broken anchor in every sibling.
