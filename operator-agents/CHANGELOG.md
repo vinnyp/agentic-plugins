@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.0](https://github.com/vinnyp/agentic-plugins/compare/operator-agents-v1.6.0...operator-agents-v1.7.0) (2026-09-21)
+
+
+### Features
+
+* **operator-agents:** add writing-agent-prds skill ([#36](https://github.com/vinnyp/agentic-plugins/issues/36)) ([8905b74](https://github.com/vinnyp/agentic-plugins/commit/8905b7494ccc1bec5112a2656709f85ad7980c08))
+
 ## [1.6.0](https://github.com/vinnyp/agentic-plugins/compare/operator-agents-v1.5.0...operator-agents-v1.6.0) (2026-09-10)
 
 
