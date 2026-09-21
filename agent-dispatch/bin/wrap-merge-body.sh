@@ -140,7 +140,21 @@ is_trailer() {
 
 wrap_line() {
   local line="$1" w out=""
-  if is_trailer "$line" || [ "${#line}" -le "$LIMIT" ]; then
+  if is_trailer "$line"; then
+    # A trailer over the limit is still passed through: folding it is the one
+    # thing that must not happen. commitlint will then reject the message on
+    # footer-max-line-length, which is correct and not something this tool may
+    # paper over — so say what the remedy is rather than leaving the operator to
+    # infer it from a rule name.
+    if [ "${#line}" -gt "$LIMIT" ]; then
+      printf 'wrap-merge-body: a trailer line is %s characters, over %s: %s...\n' \
+        "${#line}" "$LIMIT" "${line:0:40}" >&2
+      printf 'wrap-merge-body: trailers are never folded (it would break `Refs:` parsing) — split it across several trailer lines instead\n' >&2
+    fi
+    printf '%s\n' "$line"
+    return 0
+  fi
+  if [ "${#line}" -le "$LIMIT" ]; then
     printf '%s\n' "$line"
     return 0
   fi

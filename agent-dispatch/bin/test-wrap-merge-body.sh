@@ -114,7 +114,15 @@ else
   ok "the Refs fixture is ${#LONG_REFS} characters, over the $LIMIT limit, so only passthrough can preserve it"
 fi
 TRAILER_OUT="$TMP_DIR/trailers-out.txt"
-if "$WRAP" --subject "fix: keep trailers intact" --body-file "$TRAILER_BODY" --wrap-only --out "$TRAILER_OUT" >/dev/null 2>&1; then
+if "$WRAP" --subject "fix: keep trailers intact" --body-file "$TRAILER_BODY" --wrap-only --out "$TRAILER_OUT" >/dev/null 2>"$TMP_DIR/trailer-err"; then
+  # An over-long trailer survives, and commitlint will then reject the message
+  # on footer-max-line-length. The wrapper must say what the remedy is rather
+  # than leaving the operator to guess — or, worse, folding the line.
+  if grep -q "split it across several trailer lines" "$TMP_DIR/trailer-err"; then
+    ok "an over-long trailer is reported with its remedy instead of being folded"
+  else
+    bad "an over-long trailer passed silently (stderr: $(cat "$TMP_DIR/trailer-err"))"
+  fi
   miss=""
   while IFS= read -r want; do
     grep -qxF -- "$want" "$TRAILER_OUT" || miss="$miss [$want]"
