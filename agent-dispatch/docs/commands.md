@@ -281,6 +281,38 @@ Exit codes: launch `0` (or `2` launch failure, `4` a gate is already running for
 `--status` `0` finished (prints `GATE_EXIT=<n>`), `2` no/missing log, `3` still running; `--wait`
 the gate's own exit code, `124` on timeout, `2` without `--log`.
 
+## `wrap-merge-body.sh`
+
+```
+wrap-merge-body.sh --subject <subject> --body-file <file|-> [--out <file>]
+                   [--config <commitlint.config.cjs>] [--wrap-only]
+```
+
+Wraps and lints a merge body **before** it becomes a squash commit. A squash merge composes the
+landing commit from the PR title and body, which no per-commit lint has seen — so a violation
+surfaces only on the push run after it has landed, where the message can no longer be rewritten.
+
+The body arrives by file or stdin and is **never** a command-line word: `gh` reads a body whose
+first line begins with `-` as options, and one carrying `-R owner/repo` would retarget the merge.
+For the same reason this command accepts no repository or PR selector at all. Feed `--out` to
+`gh pr merge --squash --body-file "$OUT" -- <pr>`, never `--body "$(…)"`.
+
+Rules come from the committed `commitlint.config.cjs` — `--config`, else the invoking
+repository's, else the copy shipped with this plugin. It never carries its own copy of the limit,
+so what it wraps to and what the gate enforces cannot drift.
+
+Trailers (`Refs:`, `Co-Authored-By:`, `Claude-Session:`, `Signed-off-by:` and friends) pass
+through unfolded, because folding one breaks the `^Refs:( <repo>#N)+$` parse that closure tooling
+depends on. An over-long trailer is reported with its remedy — split it across several trailer
+lines — and still fails the lint rather than being quietly corrupted. A single token longer than
+the limit (a bare URL) is refused rather than emitted as an over-long line.
+
+Exit codes: `0` wrapped and clean; `1` a commitlint violation or an unwrappable token; `2` a
+usage error, or commitlint/its config unavailable — an absent linter is a refusal, never a pass.
+
+`--wrap-only` wraps and exits without linting, for the environments where commitlint is not
+installed; it never claims a lint it did not perform.
+
 ## `mutation-verify.sh`
 
 ```
@@ -513,6 +545,7 @@ FAIL. So an `--install` that skipped an entrypoint (a foreign symlink it refused
 | `CODING_DISPATCH_WORKTREE` | `coding-dispatch.sh`, `coding-build-phase.sh` | the worktree/branch slug; a worktree with that slug is reused so a multi-task phase accumulates on one branch |
 | `CODING_DISPATCH_RM_ON_FAIL` | `coding-dispatch.sh` | `1` = remove the worktree on failure instead of salvaging it; the patch still survives under the parent repo's git dir |
 | `CODING_DISPATCH_CHILD_ENV` | `coding-dispatch.sh` | whitespace-separated `KEY=VALUE` pairs exported into the dispatched agent's environment, e.g. `"MYREPO_LEDGER=off CI=1"`. Malformed entries are reported on stderr and skipped. |
+| `CODING_DISPATCH_PREAMBLE` | `coding-dispatch.sh` | path to the file holding the dispatch-preamble block (default: the plugin's `docs/dispatch-preamble.md`). A missing or empty block is a hard refusal (exit 2) before any side effect — a brief without the ground rules is the failure this exists to prevent. |
 | `CODING_BUILD_CMD` | `coding-build-phase.sh` | default for `--build-cmd` |
 | `CODING_COMMIT_SCOPE` | `coding-build-phase.sh` | conventional-commit scope (default: repo dir basename) |
 | `AGY_MODEL` | `coding-dispatch.sh` | agy model for edit dispatches (default `Gemini 3.5 Flash (Medium)`) |
