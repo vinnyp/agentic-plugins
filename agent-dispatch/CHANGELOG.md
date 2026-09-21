@@ -5,7 +5,8 @@
 
 ### Features
 
-* **operator-agents:** add writing-agent-prds skill ([#36](https://github.com/vinnyp/agentic-plugins/issues/36)) ([8905b74](https://github.com/vinnyp/agentic-plugins/commit/8905b7494ccc1bec5112a2656709f85ad7980c08))
+* **running-the-peer-review-gate:** name both requirements-mode callers ([#36](https://github.com/vinnyp/agentic-plugins/issues/36)) ([8905b74](https://github.com/vinnyp/agentic-plugins/commit/8905b7494ccc1bec5112a2656709f85ad7980c08))
+* **peer-review-tiers:** the PRD tier's test-lens carve-out names both PRD skills instead of dropping the lens for a document not authored with `writing-prds`, and `peer-interface-reviewer` joins the tier for an agent-format PRD ([#36](https://github.com/vinnyp/agentic-plugins/issues/36)) ([8905b74](https://github.com/vinnyp/agentic-plugins/commit/8905b7494ccc1bec5112a2656709f85ad7980c08))
 
 ## [1.6.1](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.6.0...agent-dispatch-v1.6.1) (2026-09-09)
 
