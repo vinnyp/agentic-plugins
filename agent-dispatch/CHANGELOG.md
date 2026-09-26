@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.1](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.7.0...agent-dispatch-v1.7.1) (2026-09-26)
+
+
+### Bug Fixes
+
+* **agent-dispatch:** default agy model to Gemini 3.8 Flash (Medium) ([#41](https://github.com/vinnyp/agentic-plugins/issues/41)) ([dd73c9a](https://github.com/vinnyp/agentic-plugins/commit/dd73c9a8f9516894d9aebb34cd45634d023e973a))
+
 ## [1.7.0](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.6.1...agent-dispatch-v1.7.0) (2026-09-21)
 
 
