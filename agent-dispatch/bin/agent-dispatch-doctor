@@ -260,7 +260,7 @@ if [ "$AGY_PRESENT" -eq 1 ]; then
     # as defaults. If agy renames them, --model silently fails at dispatch time; catch it here.
     DEFAULT_MODELS=(
       "Gemini 3.1 Pro (High)"
-      "Gemini 3.5 Flash (Medium)"
+      "Gemini 3.8 Flash (Medium)"
     )
     for model_name in "${DEFAULT_MODELS[@]}"; do
       if echo "$agy_models_out" | grep -qF "$model_name"; then

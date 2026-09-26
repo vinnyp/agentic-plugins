@@ -536,7 +536,7 @@ export TIMEOUT_ARGS_FILE="$TMP/timeout-args"
 PATH="$TMP/timeoutbin:$TMP/bin:$PATH" bash "$CD" agy "$P_to" "$TMP/prompt" "true" >"$TMP/out_to_agy" 2>&1; rc=$?
 [ "$rc" -eq 1 ] || fail "#20 agy timeout/no-op path should fail empty diff with rc 1, got $rc"
 grep -q -- '-k 30s 25m agy' "$TIMEOUT_ARGS_FILE" || { cat "$TIMEOUT_ARGS_FILE"; fail "#20 agy default timeout should be 25m"; }
-grep -q "agy model: Gemini 3.5 Flash (Medium)" "$TMP/out_to_agy" || { cat "$TMP/out_to_agy"; fail "#20 agy model note missing"; }
+grep -q "agy model: Gemini 3.8 Flash (Medium)" "$TMP/out_to_agy" || { cat "$TMP/out_to_agy"; fail "#20 agy model note missing"; }
 grep -q "agy timed out (rc=124)" "$TMP/out_to_agy" || { cat "$TMP/out_to_agy"; fail "#20 agy timeout hint missing"; }
 : > "$TIMEOUT_ARGS_FILE"
 PATH="$TMP/timeoutbin:$TMP/bin:$PATH" CODING_DISPATCH_TIMEOUT=10m bash "$CD" agy "$P_to" "$TMP/prompt" "true" >"$TMP/out_to_agy_explicit" 2>&1; rc=$?

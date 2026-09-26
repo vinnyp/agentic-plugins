@@ -177,7 +177,7 @@ authoritative text.
 | `workflow` | emits a JSON hand-off marker on stdout | for a workflow the calling session launches itself |
 | `a2a-endpoint` | not wired yet | returns 3 |
 
-Default agy models: `Gemini 3.1 Pro (High)` under `--review`, `Gemini 3.5 Flash (Medium)` for
+Default agy models: `Gemini 3.1 Pro (High)` under `--review`, `Gemini 3.8 Flash (Medium)` for
 edits. Multi-word model names are kept intact as one argument.
 `--agent NAME` is agy-only and rejects an unknown or unavailable persona roster with exit 2 before
 the brief is dispatched. The selected persona is retained on the one permitted review-timeout retry.
@@ -526,7 +526,7 @@ PASS    3. codex on PATH (/usr/local/bin/codex)
 PASS    4. agy on PATH (/usr/local/bin/agy)
 PASS    5. agy models: OK
 PASS    5. default model present: Gemini 3.1 Pro (High)
-PASS    5. default model present: Gemini 3.5 Flash (Medium)
+PASS    5. default model present: Gemini 3.8 Flash (Medium)
 PASS    6. shellcheck clean (entrypoints, severity>=warning)
 
 Summary: 0 fail, 0 warn
@@ -548,7 +548,7 @@ FAIL. So an `--install` that skipped an entrypoint (a foreign symlink it refused
 | `CODING_DISPATCH_PREAMBLE` | `coding-dispatch.sh` | path to the file holding the dispatch-preamble block (default: the plugin's `docs/dispatch-preamble.md`). A missing or empty block is a hard refusal (exit 2) before any side effect — a brief without the ground rules is the failure this exists to prevent. |
 | `CODING_BUILD_CMD` | `coding-build-phase.sh` | default for `--build-cmd` |
 | `CODING_COMMIT_SCOPE` | `coding-build-phase.sh` | conventional-commit scope (default: repo dir basename) |
-| `AGY_MODEL` | `coding-dispatch.sh` | agy model for edit dispatches (default `Gemini 3.5 Flash (Medium)`) |
+| `AGY_MODEL` | `coding-dispatch.sh` | agy model for edit dispatches (default `Gemini 3.8 Flash (Medium)`) |
 | `DISPATCH_NO_VENV` | `gate-run.sh` via `lib/gate-env.sh` | any value = same as `--no-venv` |
 | `DISPATCH_GATE_ADVISORY_TTL_SECS` | `coding-dispatch.sh` | `3600` — how long a "your build-cmd skips gate-target X" advisory is deduplicated |
 | `DISPATCH_REVIEW_PIN_TTL_SECS` | `review-pin.sh` | `14400` — after this a pin is stale and auto-removed |

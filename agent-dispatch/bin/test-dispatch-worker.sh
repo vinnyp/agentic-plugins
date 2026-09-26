@@ -138,7 +138,7 @@ echo "test 6 (agy review model default) PASS"
 
 # 7. agy edit mode defaults to the coding model (Flash/Medium).
 TIMEOUT=0 "$DW" --runtime agy --brief "$BRIEF" --workdir /repo/x >/dev/null 2>&1
-grep -qF -- "--model Gemini 3.5 Flash (Medium)" <<<"$(agy_exec_args)" || fail "agy edit missing/!= coding model"
+grep -qF -- "--model Gemini 3.8 Flash (Medium)" <<<"$(agy_exec_args)" || fail "agy edit missing/!= coding model"
 echo "test 7 (agy edit model default) PASS"
 
 # 8. explicit --model overrides.
@@ -1121,7 +1121,7 @@ STUB
 chmod +x "$TMP/bin/agy"
 : > "$AGY_ARGS_FILE"
 TIMEOUT=0 "$DW" --runtime agy --brief "$BRIEF" --workdir /repo/x >/dev/null 2>&1
-[ "$(agy_exec_args)" = "--model Gemini 3.5 Flash (Medium)" ] \
+[ "$(agy_exec_args)" = "--model Gemini 3.8 Flash (Medium)" ] \
   || fail "non---agent argv changed; golden filters only the auth-probe 'models' line (got: $(cat "$AGY_ARGS_FILE"))"
 : > "$AGY_ARGS_FILE"
 TIMEOUT=0 "$DW" --runtime agy --agent peer-security-reviewer --brief "$BRIEF" --workdir /repo/x >/dev/null 2>&1

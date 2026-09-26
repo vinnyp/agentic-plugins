@@ -122,7 +122,7 @@ dispatch-worker — dispatch a worker brief to a runtime.
                      are kept intact as a single argument. Defaults (agy only, each its own
                      sentence so a fragment grep can't cross-attribute them): in --review
                      mode the default is "Gemini 3.1 Pro (High)" (review-grade). In
-                     edit/coding mode the default is "Gemini 3.5 Flash (Medium)" (cheaper).
+                     edit/coding mode the default is "Gemini 3.8 Flash (Medium)" (cheaper).
                      An explicit --model always overrides the default. For codex, threaded
                      as 'codex exec -m M'; unset lets codex pick its config model.
   --agent NAME       Installed agy persona to dispatch as. agy-only; the name is
@@ -678,7 +678,7 @@ dispatch_agy() {
   fi
   local agy_model="$MODEL"
   if [ -z "$agy_model" ]; then
-    if [ "$REVIEW" = "1" ]; then agy_model="Gemini 3.1 Pro (High)"; else agy_model="Gemini 3.5 Flash (Medium)"; fi
+    if [ "$REVIEW" = "1" ]; then agy_model="Gemini 3.1 Pro (High)"; else agy_model="Gemini 3.8 Flash (Medium)"; fi
   fi
   local -a model_args=()
   [ -n "$agy_model" ] && model_args=(--model "$agy_model")
