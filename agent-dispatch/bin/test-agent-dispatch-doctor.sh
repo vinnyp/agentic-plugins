@@ -182,7 +182,7 @@ cat > "$FAKE_RUNTIME_BIN/agy" <<'EOF'
 #!/usr/bin/env bash
 if [ "${1:-}" = "models" ]; then
   printf '%s\n' "Gemini 3.1 Pro (High)"
-  printf '%s\n' "Gemini 3.5 Flash (Medium)"
+  printf '%s\n' "Gemini 3.8 Flash (Medium)"
   exit 0
 fi
 exit 0

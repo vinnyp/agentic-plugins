@@ -28,7 +28,7 @@ create → boot-settle → paste → submit → settle → print-transcript, and
 inspection. Read its `--help`. Optional flags (all backward-compatible with the bare positional form):
 
 - `--model M` launches the agent on a specific model — `claude`/`agy` get `--model M`, `codex` gets
-  `-m M`; multi-word names with spaces/parens (e.g. `"Gemini 3.5 Flash (Low)"`) are kept intact.
+  `-m M`; multi-word names with spaces/parens (e.g. `"Gemini 3.8 Flash (Low)"`) are kept intact.
 - `--approve` auto-approves tool calls so an **unattended, tool-using** session doesn't stall on a
   permission prompt (`claude`/`agy`: `--dangerously-skip-permissions`; `codex`:
   `--dangerously-bypass-approvals-and-sandbox`). For `agy`, it also best-effort accepts the folder-trust

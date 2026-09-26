@@ -34,7 +34,7 @@
 #     dispatched agent's environment (e.g. CODING_DISPATCH_CHILD_ENV="MYREPO_LEDGER=off").
 #     Values cannot contain whitespace (the format is whitespace-separated); malformed
 #     entries are reported on stderr and skipped.
-#   env AGY_MODEL                  overrides agy model for agy dispatches (default "Gemini 3.5 Flash (Medium)")
+#   env AGY_MODEL                  overrides agy model for agy dispatches (default "Gemini 3.8 Flash (Medium)")
 #   env DISPATCH_NO_VENV           1 = same as --no-venv (see above; #180)
 #
 # The prompt MUST instruct the agent to:
@@ -522,8 +522,8 @@ if [ -n "${CODING_DISPATCH_CHILD_ENV:-}" ]; then
   done
 fi
 if [ "$agent" = "agy" ]; then
-  note "agy model: ${AGY_MODEL:-Gemini 3.5 Flash (Medium)}"
-  case "${AGY_MODEL:-Gemini 3.5 Flash (Medium)}" in
+  note "agy model: ${AGY_MODEL:-Gemini 3.8 Flash (Medium)}"
+  case "${AGY_MODEL:-Gemini 3.8 Flash (Medium)}" in
     *Pro*) note "⚠ a deep/slow agy model (Pro) often exceeds the default watchdog — raise CODING_DISPATCH_TIMEOUT if it times out" ;;
   esac
 fi
@@ -548,16 +548,16 @@ case "$agent" in
     # proven UNRELIABLE (observed hanging 6.5h past a 15m setting) and is tied to --print,
     # so the EXTERNAL timeout (separate process, own clock) is the real bound, as for codex.
     if [ -n "$TIMEOUT_BIN" ]; then
-      "$TIMEOUT_BIN" -k 30s "$TIMEOUT" agy --model "${AGY_MODEL:-Gemini 3.5 Flash (Medium)}" --dangerously-skip-permissions --add-dir "$target" < "$_effective_prompt"
+      "$TIMEOUT_BIN" -k 30s "$TIMEOUT" agy --model "${AGY_MODEL:-Gemini 3.8 Flash (Medium)}" --dangerously-skip-permissions --add-dir "$target" < "$_effective_prompt"
     else
       note "⚠ no timeout/gtimeout binary — agy hang cannot be externally bounded (brew install coreutils)"
-      agy --model "${AGY_MODEL:-Gemini 3.5 Flash (Medium)}" --dangerously-skip-permissions --add-dir "$target" < "$_effective_prompt"
+      agy --model "${AGY_MODEL:-Gemini 3.8 Flash (Medium)}" --dangerously-skip-permissions --add-dir "$target" < "$_effective_prompt"
     fi
     ;;
 esac
 agent_rc=$?
 if [ "$agent" = "agy" ] && { [ "$agent_rc" -eq 124 ] || [ "$agent_rc" -eq 137 ]; }; then
-  note "agy timed out (rc=$agent_rc) — switch to a faster agy model (AGY_MODEL='Gemini 3.5 Flash (Medium)') or raise CODING_DISPATCH_TIMEOUT (current $TIMEOUT); a wedged agy may need: pkill -9 -f agy"
+  note "agy timed out (rc=$agent_rc) — switch to a faster agy model (AGY_MODEL='Gemini 3.8 Flash (Medium)') or raise CODING_DISPATCH_TIMEOUT (current $TIMEOUT); a wedged agy may need: pkill -9 -f agy"
 fi
 
 # revert() is only safe when the worker left changes uncommitted (HEAD == BASE). In TDD mode
