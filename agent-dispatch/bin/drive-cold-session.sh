@@ -11,7 +11,7 @@
 #
 #   --model M      model to launch the agent with (claude/agy: --model M; codex: -m M).
 #                  Multi-word names with spaces/parens are kept intact as one arg,
-#                  e.g. --model "Gemini 3.5 Flash (Low)".
+#                  e.g. --model "Gemini 3.8 Flash (Low)".
 #   --approve      auto-approve tool calls so an unattended tool-using session does not
 #                  stall on permission prompts (claude/agy: --dangerously-skip-permissions;
 #                  codex: --dangerously-bypass-approvals-and-sandbox).
