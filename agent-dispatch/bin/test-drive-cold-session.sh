@@ -10,12 +10,12 @@ if ! command -v tmux >/dev/null 2>&1; then
   exit 0
 fi
 
-TMP="$(mktemp -d)"
-TMUX_TMPDIR="$(mktemp -d)"
-export TMUX_TMPDIR
+TMP="$(mktemp -d /tmp/dcs.XXXX)"
+TMUX_TMPDIR="$(mktemp -d /tmp/dcs.XXXX)"
+export TMUX_TMPDIR HOME="$TMP" XDG_CONFIG_HOME="$TMP/config"
 unset TMUX
 trap 'tmux kill-server 2>/dev/null || true; rm -rf "$TMP" "$TMUX_TMPDIR"' EXIT
-mkdir -p "$TMP/bin"
+mkdir -p "$TMP/bin" "$XDG_CONFIG_HOME"
 export PATH="$TMP/bin:$PATH"
 printf 'the prompt\n' > "$TMP/prompt"
 export MARK="$TMP/marker"
@@ -32,15 +32,15 @@ run_case() {
   rc=$?
 }
 stop_session() { tmux kill-session -t "=$1" 2>/dev/null || true; }
-write_alt() {
+write_inline() {
   local lines="$1"
   cat > "$TMP/bin/claude" <<'STUB'
 #!/usr/bin/env bash
-printf '\033[?1049h\033[H\033[2J> '
+if [[ "${CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN:-}" != "1" ]]; then printf '\033[?1049h'; fi
+printf '> '
 read -r _
-printf '\033[H\033[2J'
-for i in $(seq -w 1 "$LINES_TO_PRINT"); do printf 'REPLY-%s\r\n' "$i"; done
-printf END-OF-REPLY
+for i in $(seq -w 1 "$LINES_TO_PRINT"); do printf 'REPLY-%s\n' "$i"; done
+printf 'END-OF-REPLY\n'
 sleep 300
 STUB
   chmod +x "$TMP/bin/claude"
@@ -58,22 +58,52 @@ STUB
   export TITLE="$title"
 }
 
-write_alt 60
-DCS_KILL=0 run_case claude dcs_alt60
-assert_rc 0 "$rc" '60-line alternate screen'
-[[ "$(grep -c '^REPLY-' "$TMP/out")" -eq 60 ]] || fail '60-line reply was cut'
-grep -q 'REPLY-01' "$TMP/out" || fail 'missing first reply row'
+write_inline 300
+DCS_KILL=0 run_case claude dcs_inline300
+assert_rc 0 "$rc" '300-line inline screen'
+[[ "$(grep -c '^REPLY-' "$TMP/out")" -eq 300 ]] || fail '300-line reply was cut'
+grep -q 'REPLY-001' "$TMP/out" || fail 'missing first reply row'
 grep -q 'END-OF-REPLY' "$TMP/out" || fail 'missing reply end'
-[[ "$(tmux display -p -t '=dcs_alt60:' '#{pane_width}x#{pane_height}')" == '200x200' ]] || fail 'default pane size'
-stop_session dcs_alt60
-echo 'PASS: alternate screen and default pane size'
+[[ "$(tmux display -p -t '=dcs_inline300:' '#{pane_width}x#{pane_height}')" == '200x200' ]] || fail 'default pane size'
+[[ "$(tmux show-option -w -v -t '=dcs_inline300:' history-limit)" == '50000' ]] || fail 'history limit'
+stop_session dcs_inline300
+echo 'PASS: 300-line inline transcript and default pane size'
 
-write_alt 10
+write_inline 10
 DCS_KILL=0 DCS_COLS=120 DCS_ROWS=50 run_case claude dcs_size
 assert_rc 0 "$rc" 'custom pane size'
 [[ "$(tmux display -p -t '=dcs_size:' '#{pane_width}x#{pane_height}')" == '120x50' ]] || fail 'custom pane size'
 stop_session dcs_size
 echo 'PASS: custom pane size'
+
+cat > "$TMP/bin/claude" <<'STUB'
+#!/usr/bin/env bash
+printf '\033[?1049h\033[H\033[2JHEADER\033[50;1HFOOTER\033[25;1H> '
+read -r _
+printf '\033[25;1HONE-LINE-REPLY'
+sleep 300
+STUB
+chmod +x "$TMP/bin/claude"
+DCS_ROWS=50 run_case claude dcs_alternate
+assert_rc 6 "$rc" 'alternate screen'
+grep -q 'transcript completeness cannot be verified: agent is in alternate-screen mode' "$TMP/err" || fail 'missing alternate-screen warning'
+stop_session dcs_alternate
+echo 'PASS: alternate-screen transcript unverified'
+
+cat > "$TMP/bin/claude" <<'STUB'
+#!/usr/bin/env bash
+printf 'HEADER\n> '
+read -r _
+printf 'SHORT-REPLY\n'
+printf '\033[50;1HFOOTER'
+sleep 300
+STUB
+chmod +x "$TMP/bin/claude"
+DCS_ROWS=50 run_case claude dcs_header_footer
+assert_rc 0 "$rc" 'inline header and footer'
+grep -q 'SHORT-REPLY' "$TMP/out" || fail 'inline short reply absent'
+stop_session dcs_header_footer
+echo 'PASS: inline header and footer'
 
 for title in 'Background server has incompatible feature settings' 'Cannot use the background server'; do
   write_codex_interstitial "$title"
@@ -103,6 +133,35 @@ echo 'PASS: update interstitial'
 
 cat > "$TMP/bin/codex" <<'STUB'
 #!/usr/bin/env bash
+printf 'Update available! See https://example.invalid/install for installation options.\n> '
+read -r l
+printf 'BANNER-GOT: %s\n' "$l"
+sleep 300
+STUB
+chmod +x "$TMP/bin/codex"
+run_case codex dcs_banner
+assert_rc 0 "$rc" 'banner-only update notice'
+grep -q 'BANNER-GOT: the prompt' "$TMP/out" || fail 'banner-only agent did not receive prompt'
+stop_session dcs_banner
+echo 'PASS: update banner ignored'
+
+cat > "$TMP/bin/codex" <<'STUB'
+#!/usr/bin/env bash
+printf 'Choose a model\n1. Use existing model\n2. Try new model\n'
+read -r _
+touch "$MARK"
+STUB
+chmod +x "$TMP/bin/codex"
+run_case codex dcs_model_offer
+assert_rc 4 "$rc" 'model offer'
+grep -q 'model-offer boot interstitial' "$TMP/err" || fail 'model offer unnamed'
+[[ ! -e "$MARK" ]] || fail 'model offer received input'
+stop_session dcs_model_offer
+echo 'PASS: model-offer interstitial'
+
+cat > "$TMP/bin/codex" <<'STUB'
+#!/usr/bin/env bash
+[[ " $* " == *' --no-alt-screen '* ]] || exit 8
 printf '> '
 read -r l
 printf 'CODEX-GOT: %s\n' "$l"
@@ -117,16 +176,39 @@ echo 'PASS: codex happy path'
 
 cat > "$TMP/bin/claude" <<'STUB'
 #!/usr/bin/env bash
-printf '> '
-read -r _
 exit 7
 STUB
 chmod +x "$TMP/bin/claude"
-run_case claude dcs_dead
-assert_rc 5 "$rc" 'agent exit'
-grep -q 'agent exited (status 7)' "$TMP/err" || fail 'missing dead-agent status'
-stop_session dcs_dead
-echo 'PASS: dead agent'
+for i in 1 2 3; do
+  DCS_KILL=1 run_case claude dcs_dead
+  assert_rc 5 "$rc" 'agent exit'
+  grep -q 'agent exited (status 7) before replying' "$TMP/err" || fail 'missing dead-agent status'
+  ! tmux has-session -t '=dcs_dead' 2>/dev/null || fail 'dead session leaked'
+  ! grep -qi 'duplicate session' "$TMP/err" || fail 'duplicate session error'
+done
+echo 'PASS: dead agent cleanup across repeated names'
+
+tmux new-session -d -s dcs_foreign 'sleep 300'
+DCS_KILL=1 run_case claude dcs_foreign
+[[ "$rc" -ne 0 ]] || fail 'duplicate session unexpectedly launched'
+tmux has-session -t '=dcs_foreign' || fail 'cleanup killed a session it did not create'
+stop_session dcs_foreign
+echo 'PASS: duplicate name preserves foreign session'
+
+cat > "$TMP/bin/claude" <<'STUB'
+#!/usr/bin/env bash
+printf '> '
+read -r _
+printf 'FINAL-REPLY\n'
+exit 7
+STUB
+chmod +x "$TMP/bin/claude"
+run_case claude dcs_exit_after_reply
+assert_rc 5 "$rc" 'exit after reply'
+grep -q 'FINAL-REPLY' "$TMP/out" || fail 'post-reply exit lost transcript'
+grep -q 'agent exited after replying (status 7)' "$TMP/err" || fail 'post-reply exit status missing'
+! tmux has-session -t '=dcs_exit_after_reply' 2>/dev/null || fail 'post-reply dead session leaked'
+echo 'PASS: post-reply exit transcript and cleanup'
 
 cat > "$TMP/bin/claude" <<'STUB'
 #!/usr/bin/env bash
@@ -142,16 +224,21 @@ assert_rc 3 "$rc" 'settle timeout'
 stop_session dcs_timeout
 echo 'PASS: settle timeout'
 
-write_alt 80
-DCS_ROWS=30 run_case claude dcs_overflow
-assert_rc 6 "$rc" 'overflow'
-grep -q 'WARNING.*DCS_ROWS=30' "$TMP/err" || fail 'missing overflow warning'
-stop_session dcs_overflow
-echo 'PASS: possible overflow'
+cat > "$TMP/bin/claude" <<'STUB'
+#!/usr/bin/env bash
+i=0
+while :; do printf 'BOOT-COUNTER %s\n' "$i"; i=$((i + 1)); sleep 1; done
+STUB
+chmod +x "$TMP/bin/claude"
+DCS_BOOT_MAX=4 DCS_KILL=1 run_case claude dcs_boot_timeout
+assert_rc 3 "$rc" 'boot-settle timeout'
+grep -q 'BOOT-COUNTER' "$TMP/out" || fail 'boot timeout did not print screen'
+echo 'PASS: boot timeout prints screen'
 
 cat > "$TMP/bin/claude" <<'STUB'
 #!/usr/bin/env bash
-exit 7
+printf '> '
+tmux kill-session -t "=$(tmux display-message -p -t "$TMUX_PANE" '#S')"
 STUB
 chmod +x "$TMP/bin/claude"
 tmux new-session -d -s dcs_exact4 'sleep 300'

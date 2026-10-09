@@ -69,3 +69,4 @@ hard-checks this at startup.
 `drive-cmux-session.sh <agent> <workdir> <prompt-file> [name]` is the cmux sibling of
 `drive-cold-session.sh` — same flow + env knobs, plus the in-instance `cmux ping` preflight, the
 confirm-landed loop, and the watch-me-drive calls. `DCS_CLOSE=1` closes the workspace after printing.
+`DCS_COLS`/`DCS_ROWS`, inline-mode launch, and exit codes 3–6 are tmux-driver only.

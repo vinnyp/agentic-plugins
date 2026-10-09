@@ -27,12 +27,12 @@
 #   DCS_STABLE=3        consecutive stable captures that count as "settled"
 #   DCS_INTERVAL=2      seconds between captures
 #   DCS_KILL=0          set 1 to kill the session after printing (default: leave up)
+#   DCS_DEBUG=0         set 1 to print alternate-screen state after boot
 #   DCS_COLS=200        tmux pane width  (a detached session otherwise defaults to 80x24)
-#   DCS_ROWS=200        tmux pane height (Claude Code redraws in place and leaves no
-#                       scrollback, so the visible pane IS the transcript)
+#   DCS_ROWS=200        tmux pane height
 # Exit codes: 0 complete transcript; 1 unexpected error; 2 usage/prerequisite;
-#   3 settle timeout (partial transcript); 4 boot interstitial needs a human;
-#   5 agent exited; 6 possible pane overflow (transcript may be truncated).
+#   3 did not settle (stdout holds the screen); 4 boot interstitial needs a human;
+#   5 agent exited; 6 alternate-screen transcript completeness cannot be verified.
 #
 # NOTE on interstitials: codex (update/model offers) and agy (folder-trust) may sit
 # on a prompt at boot. codex prompts are still manual. agy is launched with
@@ -83,6 +83,7 @@ case "$agent" in
     (( approve )) && launch+=(--dangerously-skip-permissions)
     launch+=(--add-dir "$workdir") ;;
   codex)
+    launch+=(--no-alt-screen)
     [[ -n "$model" ]] && launch+=(-m "$model")
     (( approve )) && launch+=(--dangerously-bypass-approvals-and-sandbox) ;;
   *)
@@ -101,18 +102,51 @@ pane_rows="${DCS_ROWS:-200}"
 [[ "$pane_cols" =~ ^[1-9][0-9]*$ ]] || die "DCS_COLS must be a positive integer (usage: DCS_COLS=N drive-cold-session.sh ...)"
 [[ "$pane_rows" =~ ^[1-9][0-9]*$ ]] || die "DCS_ROWS must be a positive integer (usage: DCS_ROWS=N drive-cold-session.sh ...)"
 buffer="dcs_prompt_${sess}"
-trap 'tmux delete-buffer -b "$buffer" 2>/dev/null || true' EXIT
+dead_session=0
+session_created=0
+buffer_created=0
+cleanup() {
+  local pane_dead
+  if [[ "$buffer_created" == "1" ]]; then
+    tmux delete-buffer -b "$buffer" 2>/dev/null || true
+  fi
+  [[ "$session_created" == "1" ]] || return 0
+  pane_dead="$(tmux display-message -p -t "=$sess:" '#{pane_dead}' 2>/dev/null)" || pane_dead=""
+  if [[ "$kill_after" == "1" || "$dead_session" == "1" || "$pane_dead" == "1" ]]; then
+    tmux kill-session -t "=$sess" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
 
-snapshot() { tmux capture-pane -p -J -t "=$sess:" | cksum | awk '{print $1}'; }
-capture_text() { tmux capture-pane -p -J -t "=$sess:"; }
+session_disappeared() { printf 'drive-cold-session: tmux session %s disappeared\n' "$sess" >&2; exit 1; }
+capture_text() { tmux capture-pane -p -J -t "=$sess:" 2>/dev/null || session_disappeared; }
+full_transcript() { tmux capture-pane -p -J -t "=$sess:" -S - 2>/dev/null || session_disappeared; }
+print_transcript() {
+  local transcript
+  transcript="$(full_transcript)"
+  printf '\n===== TRANSCRIPT (session %s) =====\n' "$sess"
+  printf '%s\n' "$transcript"
+  printf '===== END TRANSCRIPT =====\n'
+}
+snapshot() {
+  local screen
+  screen="$(capture_text)" || return 1
+  printf '%s\n' "$screen" | cksum | awk '{print $1}'
+}
 check_agent_alive() {
-  local dead status
-  dead="$(tmux display-message -p -t "=$sess:" '#{pane_dead}')"
+  local dead status phase="${1:-pre}"
+  dead="$(tmux display-message -p -t "=$sess:" '#{pane_dead}' 2>/dev/null)" || session_disappeared
   if [[ "$dead" == "1" ]]; then
-    status="$(tmux display-message -p -t "=$sess:" '#{pane_dead_status}')"
-    printf 'drive-cold-session: last screen before agent exited:\n' >&2
-    capture_text >&2 || true
-    printf 'drive-cold-session: agent exited (status %s) before replying\n' "$status" >&2
+    status="$(tmux display-message -p -t "=$sess:" '#{pane_dead_status}' 2>/dev/null)" || session_disappeared
+    dead_session=1
+    if [[ "$phase" == "post" ]]; then
+      print_transcript
+      printf 'drive-cold-session: agent exited after replying (status %s)\n' "$status" >&2
+    else
+      printf 'drive-cold-session: last screen before agent exited:\n' >&2
+      capture_text >&2
+      printf 'drive-cold-session: agent exited (status %s) before replying\n' "$status" >&2
+    fi
     exit 5
   fi
 }
@@ -137,10 +171,10 @@ agy_accept_folder_trust() {
 # Wait until the visible pane stops changing for $stable_needed consecutive reads,
 # or until $1 seconds elapse. Returns 0 if it settled, 1 if it timed out (still moving).
 settle() {
-  local max="$1" last="" cur count=0 elapsed=0
+  local max="$1" phase="${2:-pre}" last="" cur count=0 elapsed=0
   while (( elapsed < max )); do
-    check_agent_alive
-    cur="$(snapshot)"
+    check_agent_alive "$phase"
+    cur="$(snapshot)" || exit 1
     if [[ -n "$cur" && "$cur" == "$last" ]]; then
       (( count++ )); (( count >= stable_needed )) && return 0
     else
@@ -152,8 +186,11 @@ settle() {
 }
 
 printf 'drive-cold-session: launching%s in %s (session %s)\n' "$launch_cmd" "$workdir" "$sess" >&2
-tmux new-session -d -x "$pane_cols" -y "$pane_rows" -s "$sess" -c "$workdir" "$launch_cmd"
-tmux set-option -w -t "=$sess:" remain-on-exit on
+tmux new-session -d -x "$pane_cols" -y "$pane_rows" -s "$sess" -c "$workdir" \
+  -e 'CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1' "$launch_cmd" \
+  \; set-option -w remain-on-exit on \
+  \; set-option history-limit 50000
+session_created=1
 
 if [[ "$agent" == "agy" ]] && (( approve )); then
   agy_accept_folder_trust "$boot_max" || true
@@ -161,27 +198,41 @@ fi
 
 printf 'drive-cold-session: waiting for boot to settle (max %ss)...\n' "$boot_max" >&2
 if ! settle "$boot_max"; then
+  print_transcript
   printf 'drive-cold-session: boot did not settle within %ss; session left up for inspection\n' "$boot_max" >&2
   exit 3
+fi
+if [[ "${DCS_DEBUG:-0}" == "1" ]]; then
+  boot_alternate="$(tmux display-message -p -t "=$sess:" '#{alternate_on}' 2>/dev/null)" || session_disappeared
+  printf 'drive-cold-session: boot alternate_on=%s\n' "$boot_alternate" >&2
 fi
 
 # codex "Background server has incompatible feature settings" defaults to Cancel: the
 # paste + Enter below would quit codex and leave no transcript. Stop and say so instead
 # (answer it by hand with "Run without daemon this time"; never the daemon restart).
-if [[ "$agent" == "codex" ]] && capture_text | grep -Eiq 'Run without daemon this time|incompatible feature settings|Cannot use the background server|Update available|Update now'; then
-  screen="daemon-settings"
-  if capture_text | grep -Eiq 'Update available|Update now'; then screen="update"; fi
-  if [[ "$kill_after" == "1" ]]; then
-    tmux kill-session -t "=$sess"
-    printf 'drive-cold-session: codex %s boot interstitial; session %s killed (DCS_KILL=1). No prompt sent.\n' "$screen" "$sess" >&2
-  else
-    printf 'drive-cold-session: codex %s boot interstitial; session %s left up for a human to answer. No prompt sent.\n' "$screen" "$sess" >&2
+if [[ "$agent" == "codex" ]]; then
+  boot_screen="$(capture_text)"
+  screen=""
+  if grep -Eiq 'Run without daemon this time|incompatible feature settings|Cannot use the background server' <<<"$boot_screen"; then
+    screen="daemon-settings"
+  elif grep -Eiq 'Update now' <<<"$boot_screen" && grep -Eiq 'Skip' <<<"$boot_screen"; then
+    screen="update"
+  elif grep -Eiq 'Use existing model' <<<"$boot_screen"; then
+    screen="model-offer"
   fi
-  exit 4
+  if [[ -n "$screen" ]]; then
+    if [[ "$kill_after" == "1" ]]; then
+      printf 'drive-cold-session: codex %s boot interstitial; session %s killed (DCS_KILL=1). No prompt sent.\n' "$screen" "$sess" >&2
+    else
+      printf 'drive-cold-session: codex %s boot interstitial; session %s left up for a human to answer. No prompt sent.\n' "$screen" "$sess" >&2
+    fi
+    exit 4
+  fi
 fi
 
 # Bracketed paste so multi-line prompts land as text (each newline would otherwise submit).
 tmux set-buffer -b "$buffer" -- "$(cat "$prompt_file")"
+buffer_created=1
 tmux paste-buffer -p -b "$buffer" -t "=$sess:"
 
 # Let the paste render before submitting; re-capture discipline.
@@ -191,30 +242,22 @@ tmux send-keys -t "=$sess:" Enter
 
 printf 'drive-cold-session: prompt submitted, waiting for reply to settle (max %ss)...\n' "$settle_max" >&2
 reply_rc=0
-if settle "$settle_max"; then
+if settle "$settle_max" post; then
   printf 'drive-cold-session: settled.\n' >&2
 else
   printf 'drive-cold-session: reply did not settle within %ss; transcript is partial.\n' "$settle_max" >&2
   reply_rc=3
 fi
 
-check_agent_alive
-transcript="$(tmux capture-pane -p -J -t "=$sess:" -S -)"
-visible="$(capture_text)"
-bottom_row="$(capture_text | tail -n 1)"
-printf '\n===== TRANSCRIPT (session %s) =====\n' "$sess"
-printf '%s\n' "$transcript"
-printf '===== END TRANSCRIPT =====\n'
-
-if [[ "$(tmux display-message -p -t "=$sess:" '#{alternate_on}')" == "1" &&
-      "$(printf '%s\n' "$visible" | head -n 1)" =~ [^[:space:]] &&
-      "$bottom_row" =~ [^[:space:]] ]]; then
-  printf 'drive-cold-session: WARNING reply may exceed pane height (DCS_ROWS=%s); transcript may be truncated.\n' "$pane_rows" >&2
+check_agent_alive post
+print_transcript
+alternate_on="$(tmux display-message -p -t "=$sess:" '#{alternate_on}' 2>/dev/null)" || session_disappeared
+if [[ "$alternate_on" == "1" ]]; then
+  printf 'drive-cold-session: transcript completeness cannot be verified: agent is in alternate-screen mode\n' >&2
   if [[ "$reply_rc" == "0" ]]; then reply_rc=6; fi
 fi
 
 if [[ "$kill_after" == "1" ]]; then
-  tmux kill-session -t "=$sess" 2>/dev/null || true
   printf 'drive-cold-session: session %s killed.\n' "$sess" >&2
 else
   printf 'drive-cold-session: session %s left running (attach: tmux attach -t =%s).\n' "$sess" "$sess" >&2

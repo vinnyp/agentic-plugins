@@ -462,18 +462,21 @@ drive-cold-session.sh [--model M] [--approve] [--timeout S] <claude|codex|agy> <
 
 Creates a **detached tmux session** running the agent in `<workdir>`, waits for boot to settle,
 pastes the prompt as one bracketed-paste block, submits it with a single Enter, polls until the
-screen stops changing, prints the transcript, and **leaves the session running** for you to
-inspect or continue. `--approve` auto-approves tool calls so an unattended run doesn't stall on a
+screen stops changing, prints the transcript, and **leaves a live session running** for you to
+inspect or continue. Dead sessions are removed after their last screen is printed. `--approve` auto-approves tool calls so an unattended run doesn't stall on a
 permission prompt (claude/agy: `--dangerously-skip-permissions`; codex:
 `--dangerously-bypass-approvals-and-sandbox`) and best-effort accepts agy's folder-trust prompt.
 Env: `DCS_BOOT_MAX` (60), `DCS_SETTLE_MAX` (240), `DCS_STABLE` (3), `DCS_INTERVAL` (2),
-`DCS_COLS` (200), `DCS_ROWS` (200), `DCS_KILL=1` to kill the session after printing.
-Codex daemon-settings and update screens stop before the prompt is pasted; the session stays up
+`DCS_COLS` (200), `DCS_ROWS` (200), `DCS_KILL=1` to kill the session after printing,
+`DCS_DEBUG=1` to print the alternate-screen state after boot. The session history limit is 50000 lines;
+codex launches with `--no-alt-screen` and Claude Code with `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1`.
+Codex daemon-settings, update-choice, and model-offer screens stop before the prompt is pasted; the session stays up
 for a human to answer unless `DCS_KILL=1`.
 
 Exit codes: `0` complete transcript; `1` unexpected error; `2` usage or missing prerequisite;
-`3` settle timeout (partial transcript); `4` boot interstitial needs a human; `5` agent exited;
-`6` possible pane overflow (transcript may be truncated). Only `0` confirms completeness.
+`3` did not settle (stdout holds the screen at timeout); `4` boot interstitial needs a human;
+`5` agent exited (stdout holds the full transcript if it exited after replying);
+`6` alternate-screen mode prevents transcript completeness verification. Only `0` confirms completeness.
 
 ```bash
 # headless, over tmux — leaves the session running for you to inspect
