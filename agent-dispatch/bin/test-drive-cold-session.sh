@@ -65,7 +65,8 @@ assert_rc 0 "$rc" '300-line inline screen'
 grep -q 'REPLY-001' "$TMP/out" || fail 'missing first reply row'
 grep -q 'END-OF-REPLY' "$TMP/out" || fail 'missing reply end'
 [[ "$(tmux display -p -t '=dcs_inline300:' '#{pane_width}x#{pane_height}')" == '200x200' ]] || fail 'default pane size'
-[[ "$(tmux show-option -w -v -t '=dcs_inline300:' history-limit)" == '50000' ]] || fail 'history limit'
+agent_pane="$(tmux display -p -t '=dcs_inline300:' '#{pane_id}')"
+[[ "$(tmux display -p -t "$agent_pane" '#{history_limit}')" == '50000' ]] || fail 'agent pane history limit'
 stop_session dcs_inline300
 echo 'PASS: 300-line inline transcript and default pane size'
 
@@ -93,6 +94,19 @@ assert_rc 0 "$rc" 'custom pane size'
 stop_session dcs_size
 echo 'PASS: custom pane size'
 
+# Give the new session a larger local value before the driver reads it.
+tmux new-session -d -s dcs_high_limit_host cat
+tmux set-hook -g after-new-session 'set-option -t =dcs_high_limit: history-limit 60000'
+write_inline 10
+run_case claude dcs_high_limit
+assert_rc 0 "$rc" 'larger session history limit'
+agent_pane="$(tmux display -p -t '=dcs_high_limit:' '#{pane_id}')"
+[[ "$(tmux display -p -t "$agent_pane" '#{history_limit}')" == '60000' ]] || fail 'larger agent pane history limit was lowered'
+stop_session dcs_high_limit
+tmux set-hook -gu after-new-session
+stop_session dcs_high_limit_host
+echo 'PASS: larger session history limit preserved'
+
 for title in 'Is this a project you created or one you trust?' 'Do you trust the files in this folder?'; do
   cat > "$TMP/bin/claude" <<'STUB'
 #!/usr/bin/env bash
@@ -111,6 +125,20 @@ STUB
   ! tmux has-session -t "=$sess" 2>/dev/null || fail 'Claude trust session leaked'
 done
 echo 'PASS: Claude folder-trust interstitials'
+
+cat > "$TMP/bin/claude" <<'STUB'
+#!/usr/bin/env bash
+printf 'WARNING: Claude Code running in Bypass Permissions mode\n1. Exit\n2. Continue\n'
+read -r _
+touch "$MARK"
+STUB
+chmod +x "$TMP/bin/claude"
+DCS_KILL=1 run_case claude dcs_claude_bypass
+assert_rc 4 "$rc" 'Claude bypass-permissions warning'
+grep -q 'accept it once interactively' "$TMP/err" || fail 'missing bypass-permissions guidance'
+[[ ! -e "$MARK" ]] || fail 'Claude bypass-permissions warning received input'
+! tmux has-session -t '=dcs_claude_bypass' 2>/dev/null || fail 'Claude bypass-permissions session leaked'
+echo 'PASS: Claude bypass-permissions warning'
 
 cat > "$TMP/bin/claude" <<'STUB'
 #!/usr/bin/env bash
@@ -195,6 +223,24 @@ grep -q 'model-offer boot interstitial' "$TMP/err" || fail 'model offer unnamed'
 stop_session dcs_model_offer
 echo 'PASS: model-offer interstitial'
 
+for title in 'Trust this folder?' 'Trust and continue' 'Do you trust the contents of this directory'; do
+  cat > "$TMP/bin/codex" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$TITLE"
+read -r _
+touch "$MARK"
+STUB
+  chmod +x "$TMP/bin/codex"
+  export TITLE="$title"
+  sess="dcs_codex_trust_${title%% *}"
+  DCS_KILL=1 run_case codex "$sess"
+  assert_rc 4 "$rc" "$title"
+  grep -q 'folder-trust boot interstitial' "$TMP/err" || fail 'codex folder-trust screen unnamed'
+  [[ ! -e "$MARK" ]] || fail 'codex folder-trust interstitial received input'
+  ! tmux has-session -t "=$sess" 2>/dev/null || fail 'codex folder-trust session leaked'
+done
+echo 'PASS: codex folder-trust interstitials'
+
 cat > "$TMP/bin/codex" <<'STUB'
 #!/usr/bin/env bash
 [[ " $* " == *' --no-alt-screen '* ]] || exit 8
@@ -242,9 +288,15 @@ chmod +x "$TMP/bin/claude"
 run_case claude dcs_exit_after_reply
 assert_rc 5 "$rc" 'exit after reply'
 grep -q 'FINAL-REPLY' "$TMP/out" || fail 'post-reply exit lost transcript'
-grep -q 'agent exited after replying (status 7)' "$TMP/err" || fail 'post-reply exit status missing'
+grep -q 'agent exited after the prompt was submitted (status 7)' "$TMP/err" || fail 'post-submit exit status missing'
 ! tmux has-session -t '=dcs_exit_after_reply' 2>/dev/null || fail 'post-reply dead session leaked'
 echo 'PASS: post-reply exit transcript and cleanup'
+
+write_inline 10
+DCS_KILL=0 DCS_TEST_FAIL_LAUNCH=1 run_case claude dcs_launch_failure
+assert_rc 1 "$rc" 'mid-launch failure'
+! tmux ls -F '#S' 2>/dev/null | grep -qx 'dcs_launch_failure' || fail 'mid-launch failure leaked session'
+echo 'PASS: mid-launch failure cleanup'
 
 cat > "$TMP/bin/claude" <<'STUB'
 #!/usr/bin/env bash

@@ -468,13 +468,14 @@ permission prompt (claude/agy: `--dangerously-skip-permissions`; codex:
 `--dangerously-bypass-approvals-and-sandbox`) and best-effort accepts agy's folder-trust prompt.
 Env: `DCS_BOOT_MAX` (60), `DCS_SETTLE_MAX` (240), `DCS_STABLE` (3), `DCS_INTERVAL` (2),
 `DCS_COLS` (200), `DCS_ROWS` (200), `DCS_KILL=1` to kill the session after printing,
-`DCS_DEBUG=1` to print the alternate-screen state after boot. The session history limit is 50000 lines;
+`DCS_DEBUG=1` to print the alternate-screen state after boot. The agent pane history limit is at least 50000 lines;
 codex launches with `--no-alt-screen` and Claude Code with `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1`.
-Claude folder-trust and codex daemon-settings, update-choice, and model-offer screens stop before the prompt is pasted; the session stays up
+Codex daemon-settings, update-choice, model-offer, and folder-trust screens, plus Claude folder-trust and bypass-permissions screens, stop before the prompt is pasted; the session stays up
 for a human to answer unless `DCS_KILL=1`.
+agy has a user-selectable altscreen display mode; the driver cannot switch it, so agy must be in inline mode or runs end with exit 6.
 
 Exit codes: `0` complete transcript; `1` unexpected error; `2` usage or missing prerequisite;
-`3` did not settle (stdout holds the screen at timeout); `4` boot interstitial needs a human;
+`3` did not settle (stdout holds the transcript so far); `4` boot interstitial needs a human;
 `5` agent exited (stdout holds the full transcript if it exited after replying);
 `6` alternate-screen mode prevents transcript completeness verification. Only `0` confirms completeness.
 

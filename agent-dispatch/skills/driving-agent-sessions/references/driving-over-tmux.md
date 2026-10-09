@@ -39,13 +39,14 @@ inspection. Read its `--help`. Optional flags (all backward-compatible with the 
 Environment: `DCS_BOOT_MAX=60`, `DCS_SETTLE_MAX=240`, `DCS_STABLE=3`,
 `DCS_INTERVAL=2`, `DCS_COLS=200`, `DCS_ROWS=200`, `DCS_KILL=1` to kill the
 session after capture, and `DCS_DEBUG=1` to report alternate-screen state after boot.
-Pane width and height must be positive integers. The history limit is 50000 lines;
+Pane width and height must be positive integers. The agent pane history limit is at least 50000 lines;
 codex uses `--no-alt-screen` and Claude Code uses `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1`.
-Codex daemon-settings, update-choice, and model-offer interstitials stop before any prompt is pasted. The
+agy has a user-selectable altscreen display mode; the driver cannot switch it, so agy must be in inline mode or runs end with exit 6.
+Codex daemon-settings, update-choice, model-offer, and folder-trust interstitials, plus Claude folder-trust and bypass-permissions warnings, stop before any prompt is pasted. The
 screen stays up for a human to answer unless `DCS_KILL=1`.
 
 Exit codes: `0` complete transcript; `1` unexpected error; `2` usage or missing
-prerequisite; `3` did not settle (stdout holds the screen at timeout); `4` boot interstitial
+prerequisite; `3` did not settle (stdout holds the transcript so far); `4` boot interstitial
 needs a human; `5` agent exited (stdout holds the full transcript if it exited after replying);
 `6` alternate-screen mode prevents transcript completeness verification. Dead sessions are
 removed after their last screen is printed. Callers should accept only `0` as complete.

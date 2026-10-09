@@ -31,10 +31,11 @@
 #   DCS_COLS=200        tmux pane width  (a detached session otherwise defaults to 80x24)
 #   DCS_ROWS=200        tmux pane height
 # Exit codes: 0 complete transcript; 1 unexpected error; 2 usage/prerequisite;
-#   3 did not settle (stdout holds the screen); 4 boot interstitial needs a human;
+#   3 did not settle (stdout holds the transcript so far); 4 boot interstitial needs a human;
 #   5 agent exited; 6 alternate-screen transcript completeness cannot be verified.
 #
-# NOTE on interstitials: codex (update/model offers), claude (folder-trust), and
+# NOTE on interstitials: codex (daemon/update/model/folder-trust), claude
+# (folder-trust/bypass-permissions), and
 # agy (folder-trust) may sit on a prompt at boot. codex and claude prompts are
 # manual. agy is launched with
 # --add-dir <workdir> so the TUI scopes the repo as a workspace; when --approve is
@@ -105,6 +106,7 @@ pane_rows="${DCS_ROWS:-200}"
 buffer="dcs_prompt_${sess}"
 dead_session=0
 session_created=0
+launched=0
 buffer_created=0
 cleanup() {
   local pane_dead
@@ -113,7 +115,7 @@ cleanup() {
   fi
   [[ "$session_created" == "1" ]] || return 0
   pane_dead="$(tmux display-message -p -t "=$sess:" '#{pane_dead}' 2>/dev/null)" || pane_dead=""
-  if [[ "$kill_after" == "1" || "$dead_session" == "1" || "$pane_dead" == "1" ]]; then
+  if [[ "$launched" != "1" || "$kill_after" == "1" || "$dead_session" == "1" || "$pane_dead" == "1" ]]; then
     tmux kill-session -t "=$sess" 2>/dev/null || true
   fi
 }
@@ -142,7 +144,7 @@ check_agent_alive() {
     dead_session=1
     if [[ "$phase" == "post" ]]; then
       print_transcript
-      printf 'drive-cold-session: agent exited after replying (status %s)\n' "$status" >&2
+      printf 'drive-cold-session: agent exited after the prompt was submitted (status %s)\n' "$status" >&2
     else
       printf 'drive-cold-session: last screen before agent exited:\n' >&2
       capture_text >&2
@@ -187,17 +189,25 @@ settle() {
 }
 
 printf 'drive-cold-session: launching%s in %s (session %s)\n' "$launch_cmd" "$workdir" "$sess" >&2
-# tmux fixes a pane's history limit when the pane is created. Create the session
-# with a disposable window, set the session option, then create the agent pane.
+# Older tmux applies history-limit only to panes created after it is set. Create
+# the session with a disposable window, raise the limit, then create the agent pane.
 placeholder_window="$(tmux new-session -d -P -F '#{window_id}' -x "$pane_cols" -y "$pane_rows" \
   -s "$sess" -c "$workdir" 'cat')"
 session_created=1
-tmux set-option -t "=$sess:" history-limit 50000
+history_limit="$(tmux show-option -v -t "=$sess:" history-limit)"
+if (( history_limit < 50000 )); then
+  tmux set-option -t "=$sess:" history-limit 50000
+fi
 agent_pane="$(tmux new-window -P -F '#{pane_id}' -t "=$sess:" -c "$workdir" \
   -e 'CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1' 'cat')"
+if [[ "${DCS_TEST_FAIL_LAUNCH:-0}" == "1" ]]; then
+  printf 'drive-cold-session: simulated mid-launch failure\n' >&2
+  exit 1
+fi
 tmux set-option -w -t "$agent_pane" remain-on-exit on
 tmux respawn-pane -k -t "$agent_pane" -e 'CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1' "$launch_cmd"
 tmux kill-window -t "$placeholder_window"
+launched=1
 
 if [[ "$agent" == "agy" ]] && (( approve )); then
   agy_accept_folder_trust "$boot_max" || true
@@ -218,7 +228,10 @@ fi
 # because accepting it writes to the user's Claude configuration.
 if [[ "$agent" == "claude" ]]; then
   boot_screen="$(capture_text)"
-  if grep -Eiq 'Is this a project you created or one you trust|Do you trust the files in this folder' <<<"$boot_screen"; then
+  if grep -Eiq 'Bypass Permissions mode' <<<"$boot_screen"; then
+    printf 'drive-cold-session: claude bypass-permissions boot interstitial; accept it once interactively in session %s. No prompt sent.\n' "$sess" >&2
+    exit 4
+  elif grep -Eiq 'Is this a project you created or one you trust|Do you trust the files in this folder' <<<"$boot_screen"; then
     if [[ "$kill_after" == "1" ]]; then
       printf 'drive-cold-session: claude folder-trust boot interstitial; trust the folder or run Claude once interactively. Session %s killed (DCS_KILL=1). No prompt sent.\n' "$sess" >&2
     else
@@ -240,6 +253,8 @@ if [[ "$agent" == "codex" ]]; then
     screen="update"
   elif grep -Eiq 'Use existing model' <<<"$boot_screen"; then
     screen="model-offer"
+  elif grep -Eiq 'Trust this folder\?|Trust and continue|Do you trust the contents of this directory' <<<"$boot_screen"; then
+    screen="folder-trust"
   fi
   if [[ -n "$screen" ]]; then
     if [[ "$kill_after" == "1" ]]; then
