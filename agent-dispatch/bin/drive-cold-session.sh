@@ -27,6 +27,9 @@
 #   DCS_STABLE=3        consecutive stable captures that count as "settled"
 #   DCS_INTERVAL=2      seconds between captures
 #   DCS_KILL=0          set 1 to kill the session after printing (default: leave up)
+#   DCS_COLS=200        tmux pane width  (a detached session otherwise defaults to 80x24)
+#   DCS_ROWS=200        tmux pane height (Claude Code redraws in place and leaves no
+#                       scrollback, so the visible pane IS the transcript)
 #
 # NOTE on interstitials: codex (update/model offers) and agy (folder-trust) may sit
 # on a prompt at boot. codex prompts are still manual. agy is launched with
@@ -90,6 +93,8 @@ settle_max="${timeout_override:-${DCS_SETTLE_MAX:-240}}"
 stable_needed="${DCS_STABLE:-3}"
 interval="${DCS_INTERVAL:-2}"
 kill_after="${DCS_KILL:-0}"
+pane_cols="${DCS_COLS:-200}"
+pane_rows="${DCS_ROWS:-200}"
 
 snapshot() { tmux capture-pane -p -t "$sess" 2>/dev/null | cksum | awk '{print $1}'; }
 capture_text() { tmux capture-pane -p -t "$sess" 2>/dev/null || true; }
@@ -128,7 +133,7 @@ settle() {
 }
 
 printf 'drive-cold-session: launching%s in %s (session %s)\n' "$launch_cmd" "$workdir" "$sess" >&2
-tmux new-session -d -s "$sess" -c "$workdir" "$launch_cmd"
+tmux new-session -d -x "$pane_cols" -y "$pane_rows" -s "$sess" -c "$workdir" "$launch_cmd"
 
 if [[ "$agent" == "agy" ]] && (( approve )); then
   agy_accept_folder_trust "$boot_max" || true
@@ -136,6 +141,13 @@ fi
 
 printf 'drive-cold-session: waiting for boot to settle (max %ss)...\n' "$boot_max" >&2
 settle "$boot_max" || printf 'drive-cold-session: WARNING boot still moving after %ss (interstitial? check transcript)\n' "$boot_max" >&2
+
+# codex "Background server has incompatible feature settings" defaults to Cancel: the
+# paste + Enter below would quit codex and leave no transcript. Stop and say so instead
+# (answer it by hand with "Run without daemon this time"; never the daemon restart).
+if [[ "$agent" == "codex" ]] && capture_text | grep -q "incompatible feature settings"; then
+  die "codex is on the daemon-settings interstitial (default: Cancel). Answer it by hand in tmux session $sess with \"Run without daemon this time\" (it applies to this launch only), then paste the prompt there yourself. See references/agent-boot-interstitials.md."
+fi
 
 # Bracketed paste so multi-line prompts land as text (each newline would otherwise submit).
 tmux set-buffer -b dcs_prompt -- "$(cat "$prompt_file")"
