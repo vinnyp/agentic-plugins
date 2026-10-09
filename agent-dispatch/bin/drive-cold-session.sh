@@ -34,8 +34,9 @@
 #   3 did not settle (stdout holds the screen); 4 boot interstitial needs a human;
 #   5 agent exited; 6 alternate-screen transcript completeness cannot be verified.
 #
-# NOTE on interstitials: codex (update/model offers) and agy (folder-trust) may sit
-# on a prompt at boot. codex prompts are still manual. agy is launched with
+# NOTE on interstitials: codex (update/model offers), claude (folder-trust), and
+# agy (folder-trust) may sit on a prompt at boot. codex and claude prompts are
+# manual. agy is launched with
 # --add-dir <workdir> so the TUI scopes the repo as a workspace; when --approve is
 # set, this script also best-effort accepts agy's folder-trust interstitial by
 # sending the documented Enter keystroke. Without --approve, trust remains manual.
@@ -186,11 +187,17 @@ settle() {
 }
 
 printf 'drive-cold-session: launching%s in %s (session %s)\n' "$launch_cmd" "$workdir" "$sess" >&2
-tmux new-session -d -x "$pane_cols" -y "$pane_rows" -s "$sess" -c "$workdir" \
-  -e 'CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1' "$launch_cmd" \
-  \; set-option -w remain-on-exit on \
-  \; set-option history-limit 50000
+# tmux fixes a pane's history limit when the pane is created. Create the session
+# with a disposable window, set the session option, then create the agent pane.
+placeholder_window="$(tmux new-session -d -P -F '#{window_id}' -x "$pane_cols" -y "$pane_rows" \
+  -s "$sess" -c "$workdir" 'cat')"
 session_created=1
+tmux set-option -t "=$sess:" history-limit 50000
+agent_pane="$(tmux new-window -P -F '#{pane_id}' -t "=$sess:" -c "$workdir" \
+  -e 'CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1' 'cat')"
+tmux set-option -w -t "$agent_pane" remain-on-exit on
+tmux respawn-pane -k -t "$agent_pane" -e 'CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1' "$launch_cmd"
+tmux kill-window -t "$placeholder_window"
 
 if [[ "$agent" == "agy" ]] && (( approve )); then
   agy_accept_folder_trust "$boot_max" || true
@@ -205,6 +212,20 @@ fi
 if [[ "${DCS_DEBUG:-0}" == "1" ]]; then
   boot_alternate="$(tmux display-message -p -t "=$sess:" '#{alternate_on}' 2>/dev/null)" || session_disappeared
   printf 'drive-cold-session: boot alternate_on=%s\n' "$boot_alternate" >&2
+fi
+
+# Claude's folder-trust dialog defaults to exiting. Trust must be granted by a human
+# because accepting it writes to the user's Claude configuration.
+if [[ "$agent" == "claude" ]]; then
+  boot_screen="$(capture_text)"
+  if grep -Eiq 'Is this a project you created or one you trust|Do you trust the files in this folder' <<<"$boot_screen"; then
+    if [[ "$kill_after" == "1" ]]; then
+      printf 'drive-cold-session: claude folder-trust boot interstitial; trust the folder or run Claude once interactively. Session %s killed (DCS_KILL=1). No prompt sent.\n' "$sess" >&2
+    else
+      printf 'drive-cold-session: claude folder-trust boot interstitial; trust the folder or run Claude once interactively in session %s. No prompt sent.\n' "$sess" >&2
+    fi
+    exit 4
+  fi
 fi
 
 # codex "Background server has incompatible feature settings" defaults to Cancel: the

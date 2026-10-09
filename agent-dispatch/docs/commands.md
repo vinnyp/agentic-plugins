@@ -470,7 +470,7 @@ Env: `DCS_BOOT_MAX` (60), `DCS_SETTLE_MAX` (240), `DCS_STABLE` (3), `DCS_INTERVA
 `DCS_COLS` (200), `DCS_ROWS` (200), `DCS_KILL=1` to kill the session after printing,
 `DCS_DEBUG=1` to print the alternate-screen state after boot. The session history limit is 50000 lines;
 codex launches with `--no-alt-screen` and Claude Code with `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1`.
-Codex daemon-settings, update-choice, and model-offer screens stop before the prompt is pasted; the session stays up
+Claude folder-trust and codex daemon-settings, update-choice, and model-offer screens stop before the prompt is pasted; the session stays up
 for a human to answer unless `DCS_KILL=1`.
 
 Exit codes: `0` complete transcript; `1` unexpected error; `2` usage or missing prerequisite;

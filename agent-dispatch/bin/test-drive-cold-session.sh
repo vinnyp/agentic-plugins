@@ -69,12 +69,48 @@ grep -q 'END-OF-REPLY' "$TMP/out" || fail 'missing reply end'
 stop_session dcs_inline300
 echo 'PASS: 300-line inline transcript and default pane size'
 
+write_inline 2500
+tmux new-session -d -s dcs_hook_host cat
+# Record the history limit when tmux creates the agent window, before a later
+# set-option could mask the pane's original limit in show-option output.
+tmux set-hook -g after-new-window 'if-shell -F "#{==:#{history_limit},50000}" "set-environment -g DCS_CREATED_LIMIT 50000" "set-environment -g DCS_CREATED_LIMIT other"'
+DCS_KILL=1 run_case claude dcs_inline2500
+assert_rc 0 "$rc" '2500-line inline screen'
+[[ "$(tmux show-environment -g DCS_CREATED_LIMIT 2>/dev/null)" == 'DCS_CREATED_LIMIT=50000' ]] || fail 'agent pane was created before history-limit was raised'
+[[ "$(grep -c '^REPLY-' "$TMP/out")" -eq 2500 ]] || fail '2500-line reply was cut'
+grep -q '^REPLY-0001$' "$TMP/out" || fail 'missing first long-reply row'
+grep -q '^REPLY-2500$' "$TMP/out" || fail 'missing last long-reply row'
+grep -q '^END-OF-REPLY$' "$TMP/out" || fail 'missing long-reply end'
+! tmux has-session -t '=dcs_inline2500' 2>/dev/null || fail 'long-reply session leaked'
+tmux set-hook -gu after-new-window
+stop_session dcs_hook_host
+echo 'PASS: 2500-line inline transcript'
+
 write_inline 10
 DCS_KILL=0 DCS_COLS=120 DCS_ROWS=50 run_case claude dcs_size
 assert_rc 0 "$rc" 'custom pane size'
 [[ "$(tmux display -p -t '=dcs_size:' '#{pane_width}x#{pane_height}')" == '120x50' ]] || fail 'custom pane size'
 stop_session dcs_size
 echo 'PASS: custom pane size'
+
+for title in 'Is this a project you created or one you trust?' 'Do you trust the files in this folder?'; do
+  cat > "$TMP/bin/claude" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$TITLE"
+read -r _
+touch "$MARK"
+exit 1
+STUB
+  chmod +x "$TMP/bin/claude"
+  export TITLE="$title"
+  sess="dcs_claude_trust_${title%% *}"
+  DCS_KILL=1 run_case claude "$sess"
+  assert_rc 4 "$rc" "$title"
+  grep -qi 'trust the folder or run Claude once interactively' "$TMP/err" || fail 'missing Claude trust guidance'
+  [[ ! -e "$MARK" ]] || fail 'Claude trust interstitial received input'
+  ! tmux has-session -t "=$sess" 2>/dev/null || fail 'Claude trust session leaked'
+done
+echo 'PASS: Claude folder-trust interstitials'
 
 cat > "$TMP/bin/claude" <<'STUB'
 #!/usr/bin/env bash
