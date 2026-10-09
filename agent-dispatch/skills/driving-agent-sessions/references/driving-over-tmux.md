@@ -36,6 +36,17 @@ inspection. Read its `--help`. Optional flags (all backward-compatible with the 
   should remain manual.
 - `--timeout S` overrides the reply-settle bound (`DCS_SETTLE_MAX`).
 
+Environment: `DCS_BOOT_MAX=60`, `DCS_SETTLE_MAX=240`, `DCS_STABLE=3`,
+`DCS_INTERVAL=2`, `DCS_COLS=200`, `DCS_ROWS=200`, and `DCS_KILL=1` to kill the
+session after capture. Pane width and height must be positive integers. Codex
+daemon-settings and update interstitials stop before any prompt is pasted. The
+screen stays up for a human to answer unless `DCS_KILL=1`.
+
+Exit codes: `0` complete transcript; `1` unexpected error; `2` usage or missing
+prerequisite; `3` settle timeout (partial transcript); `4` boot interstitial
+needs a human; `5` agent exited; `6` possible overflow (transcript may be
+truncated). Callers should accept only `0` as complete.
+
 > A cold TUI is the *high-fidelity* surface (real session, memory auto-injects, skills auto-load as
 > for a human) but is **fragile for an unattended batch** (codex boot interstitials aren't auto-answered;
 > agy's folder-trust prompt is only best-effort under `--approve`; settle-polling a long tool-using run is approximate). For a reliable headless **batch**, prefer the

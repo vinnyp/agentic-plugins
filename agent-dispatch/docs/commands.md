@@ -467,7 +467,13 @@ inspect or continue. `--approve` auto-approves tool calls so an unattended run d
 permission prompt (claude/agy: `--dangerously-skip-permissions`; codex:
 `--dangerously-bypass-approvals-and-sandbox`) and best-effort accepts agy's folder-trust prompt.
 Env: `DCS_BOOT_MAX` (60), `DCS_SETTLE_MAX` (240), `DCS_STABLE` (3), `DCS_INTERVAL` (2),
-`DCS_KILL=1` to kill the session after printing. Exit `2` on usage or a missing prerequisite.
+`DCS_COLS` (200), `DCS_ROWS` (200), `DCS_KILL=1` to kill the session after printing.
+Codex daemon-settings and update screens stop before the prompt is pasted; the session stays up
+for a human to answer unless `DCS_KILL=1`.
+
+Exit codes: `0` complete transcript; `1` unexpected error; `2` usage or missing prerequisite;
+`3` settle timeout (partial transcript); `4` boot interstitial needs a human; `5` agent exited;
+`6` possible pane overflow (transcript may be truncated). Only `0` confirms completeness.
 
 ```bash
 # headless, over tmux — leaves the session running for you to inspect
@@ -562,5 +568,5 @@ FAIL. So an `--install` that skipped an entrypoint (a foreign symlink it refused
 | `DISPATCH_ALLOW_DIRTY` | `dispatch-worker` | `1` = warn instead of refusing when a review brief names an uncommitted path |
 | `DISPATCH_LIMIT_NOOP_BYTES` | `dispatch-worker` | `200` — stdout below this, plus a rate-limit signature, is read as a limit no-op (exit 6) |
 | `AGY_FORM_PROBE_TIMEOUT`, `AGY_BIN` | `coding-preflight.sh` probes | `30s`; the agy binary to probe |
-| `DCS_BOOT_MAX`, `DCS_SETTLE_MAX`, `DCS_STABLE`, `DCS_INTERVAL`, `DCS_KILL`, `DCS_CLOSE` | the drive scripts | see above |
+| `DCS_BOOT_MAX`, `DCS_SETTLE_MAX`, `DCS_STABLE`, `DCS_INTERVAL`, `DCS_COLS`, `DCS_ROWS`, `DCS_KILL`, `DCS_CLOSE` | the drive scripts | see above |
 | `TMPDIR`, `XDG_CACHE_HOME` | several | honoured for temp files, gate logs, and review-worktree fallbacks |
