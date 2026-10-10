@@ -512,6 +512,23 @@ Use the drive scripts when you need a *real, persistent, context-loaded* session
 a cold session auto-loads, watching an agent work, steering something interactive. For batch code
 you will review from a diff, use the dispatch commands instead.
 
+## `review-log-status`
+
+```bash
+review-log-status [--archive] <path>
+```
+
+Checks a review log from any current directory, resolving its Git work tree from the path's
+directory. Prints one state word: `tracked` (exit 0; in the index, staged or committed),
+`untracked` (exit 3; stage it), `ignored` (exit 4; stderr names the matching ignore rule and
+local-only guidance), or `missing` (exit 5). Bad usage or a path outside a Git work tree exits 2
+with a usage message. A clean `git status` is not evidence that an ignored log was included.
+
+With `--archive`, an ignored log is copied into the existing directory named by
+`PEER_REVIEW_LOG_ARCHIVE`. The command prints `archived <dest-path>` on a second stdout line and
+still exits 4. A different file at the destination is preserved; the new copy gets a short hash
+suffix. If the variable is unset or not a directory, stderr says so and the log stays local-only.
+
 ## `agent-dispatch-doctor`
 
 ```
@@ -530,7 +547,7 @@ Verify prints a per-check report:
 ```
 agent-dispatch-doctor: verify
 
-PASS    1. all 11 entrypoints on PATH + executable
+PASS    1. all 13 entrypoints on PATH + executable
 PASS    2. lib/ is not on PATH (…/agent-dispatch/bin/../lib)
 PASS    3. codex on PATH (/usr/local/bin/codex)
 PASS    4. agy on PATH (/usr/local/bin/agy)

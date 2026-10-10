@@ -13,9 +13,9 @@ The mechanical parts — brief assembly, the different-model run, the log scaffo
 disposition table — are handled by the `review-gate` helper CLI. The **judgment** — which tiers
 fire, verify-the-reviewer, commit-then-review — stays here.
 
-This skill runs in **whatever repo you are in** and writes the review log into **that repo's**
-`docs/agent-reviews/`. A peer-review log is a first-class artifact *of the reviewed repo*, auditable
-in its own PR and git history. See [references/review-log-convention.md](references/review-log-convention.md).
+This skill writes the review log into the reviewed repo's `docs/agent-reviews/` as a working
+record. Some repos ignore that directory; verify its state before claiming it is in a PR. See
+[references/review-log-convention.md](references/review-log-convention.md).
 
 **The single source of *who* reviews is the tier reference, not this file.**
 [references/peer-review-tiers.md](references/peer-review-tiers.md) defines the tiers (Tier 1 always;
@@ -294,7 +294,13 @@ Scaffold the log in the caller repo, then fill it:
 
 Fill the scaffold with each reviewer's findings, the **verify-the-reviewer disposition table**
 (`# | finding | raised-by | verify | disposition`), and the recorded tier rationale from Phase 2.
-Commit it to the caller repo's `docs/agent-reviews/`.
+After writing the log, and again after staging it if the caller commits, run
+`review-log-status [--archive] <log-path>`. Use `--archive` when
+`PEER_REVIEW_LOG_ARCHIVE` names an existing directory. Quote the CLI's first stdout word in the
+completion report. `tracked` permits a repo link; `untracked` requires `git add` and a recheck;
+`ignored` requires the archive or local-only PR wording in the convention. `missing` or usage
+errors require correction before completion. A clean `git status` or successful `git add` does not
+prove the log was included.
 
 **PII redaction is a hard precondition.** Record the *finding*, not the raw personal data — if a
 review quotes real personal data (a privacy review citing real names, say), redact it in the log.
@@ -334,6 +340,9 @@ to them, it does not restate them.
 Resolve every **Blocker/Critical** before proceeding and every **Major/High** before merge;
 Minor/Low can be resolved or explicitly deferred. "The build passes" is **not** a substitute — a
 green suite has shipped a non-functional layer behind it, which is why the Tier-1 test lens exists.
+
+Completion checklist: verify the final log state with `review-log-status`, quote its word, and use
+the matching PR-body wording from the review-log convention.
 
 ## Out of scope (deliberate)
 

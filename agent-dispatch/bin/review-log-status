@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  echo 'Usage: review-log-status [--archive] <path>' >&2
+}
+
+archive=0
+if [ "${1:-}" = '--archive' ]; then
+  archive=1
+  shift
+fi
+if [ "$#" -ne 1 ] || [ -z "$1" ] || [ "$1" = '--archive' ]; then
+  usage
+  exit 2
+fi
+
+path=$1
+dir=$(dirname "$path")
+if ! repo=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null); then
+  usage
+  echo "Not in a git work tree: $path" >&2
+  exit 2
+fi
+if ! absolute_dir=$(cd "$dir" && pwd -P); then
+  usage
+  exit 2
+fi
+absolute_path=$absolute_dir/$(basename "$path")
+case "$absolute_path" in
+  "$repo"/*) relative_path=${absolute_path#"$repo"/} ;;
+  *) usage; echo "Path is outside the git work tree: $path" >&2; exit 2 ;;
+esac
+
+if [ ! -f "$absolute_path" ]; then
+  echo missing
+  exit 5
+fi
+if git -C "$repo" ls-files --error-unmatch -- "$relative_path" >/dev/null 2>&1; then
+  echo tracked
+  exit 0
+fi
+if ! git -C "$repo" check-ignore -q -- "$relative_path"; then
+  echo untracked
+  exit 3
+fi
+
+echo ignored
+echo "Ignore rule: $(git -C "$repo" check-ignore -v -- "$relative_path")" >&2
+echo 'The log is local-only unless archived. Summarize rounds, reviewers, and disposition counts in the PR body; do not claim the log is in the repo.' >&2
+
+if [ "$archive" -eq 1 ]; then
+  if [ -z "${PEER_REVIEW_LOG_ARCHIVE:-}" ] || [ ! -d "$PEER_REVIEW_LOG_ARCHIVE" ]; then
+    echo 'PEER_REVIEW_LOG_ARCHIVE is unset or is not an existing directory; log remains local-only.' >&2
+  else
+    archive_dir=$(cd "$PEER_REVIEW_LOG_ARCHIVE" && pwd -P)
+    destination=$archive_dir/$(basename "$absolute_path")
+    if [ -e "$destination" ] || [ -L "$destination" ]; then
+      if cmp -s "$absolute_path" "$destination"; then
+        echo "archived $destination"
+        exit 4
+      fi
+      hash=$(git hash-object -- "$absolute_path" | cut -c 1-8)
+      stem=$(basename "$absolute_path")
+      stem=${stem%.md}
+      destination=$archive_dir/$stem-$hash.md
+      counter=2
+      while [ -e "$destination" ] || [ -L "$destination" ]; do
+        if cmp -s "$absolute_path" "$destination"; then
+          echo "archived $destination"
+          exit 4
+        fi
+        destination=$archive_dir/$stem-$hash-$counter.md
+        counter=$((counter + 1))
+      done
+    fi
+    if cp "$absolute_path" "$destination"; then
+      echo "archived $destination"
+    else
+      echo "Could not archive the log at $destination; log remains local-only." >&2
+    fi
+  fi
+fi
+exit 4

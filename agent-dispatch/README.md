@@ -104,7 +104,7 @@ driving a live tmux/cmux session — are documented per command in the
 - **[Command reference](docs/commands.md)** — every entrypoint (`coding-dispatch.sh`,
   `coding-build-phase.sh`, `coding-preflight.sh`, `dispatch-worker`, `drive-cold-session.sh`,
   `drive-cmux-session.sh`, `agent-dispatch-doctor`, `run-long-gate.sh`, `gate-run.sh`,
-  `mutation-verify.sh`, `review-pin.sh`, `ensure-review-gate.sh`, `review-gate`): synopsis, flags,
+  `mutation-verify.sh`, `review-pin.sh`, `review-log-status`, `ensure-review-gate.sh`, `review-gate`): synopsis, flags,
   exit codes, environment variables, artifact paths, plus the full requirements table.
 - **[Safety and data flow](docs/safety-and-data-flow.md)** — what the revert net covers and what it
   does not, the dirty-tree refusal, and exactly what leaves your machine to which provider.
