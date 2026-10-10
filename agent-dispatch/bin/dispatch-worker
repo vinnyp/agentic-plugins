@@ -296,9 +296,9 @@ dispatch_codex() {
   # makes codex reject EVERY model — e.g. "not supported when using Codex with a ChatGPT
   # account" (seen in an earlier incident) — and that failure otherwise collapses into the
   # same generic non-zero rc as a real build failure, so the orchestrator blindly retries
-  # an environment/auth problem as if the brief were at fault. We tee codex stderr to a
-  # temp file (the user still sees it live), and on failure pattern-match the distinctive
-  # rejection: a match returns the dedicated rc 5 (distinct from the dep-gate's rc 4 and
+  # an environment/auth problem as if the brief were at fault. We tee codex output to
+  # separate temp files while both streams remain live. A distinctive rejection returns
+  # the dedicated rc 5 (distinct from the dep-gate's rc 4 and
   # the timeout's 124) with an actionable message; anything else degrades to codex's own
   # rc unchanged (no behavior change for ordinary failures).
   #
@@ -307,7 +307,7 @@ dispatch_codex() {
   # (an earlier incident: codex hit the limit mid-batch, exited 0, made zero
   # edits, and only echoed the prompt). An exit-0 no-op otherwise passes as a successful
   # fix and a future session ships an un-implemented change. We detect the limit
-  # signature in codex output (stdout is teed alongside stderr for this check) and
+  # signature in either codex output stream and
   # return the dedicated rc 6 (distinct from auth rc 5, dep-gate rc 4, timeout 124)
   # with the reset hint, so the orchestrator surfaces it as a BLOCKED phase instead
   # of a green result. Belt-and-suspenders: even when the message doesn't match, an
@@ -334,36 +334,20 @@ dispatch_codex() {
   # caller already opted into danger-full-access. A read-only/in-repo run keeps the check.
   [ "$CEREMONY" = "1" ] && [ "$REVIEW" != "1" ] && codex_flags+=(--skip-git-repo-check)
   local errlog stdoutlog rc=0 produced=0
+  local -a codex_args=(exec)
+  if [ "${#codex_flags[@]}" -gt 0 ]; then codex_args+=("${codex_flags[@]}"); fi
+  [ -n "$codex_cd_dir" ] && codex_args+=(-C "$codex_cd_dir")
+  codex_args+=(--sandbox "$sandbox" -)
   errlog="$(mktemp -t dispatch-codex-out.XXXXXX)" || { echo "dispatch-worker: mktemp failed" >&2; return 1; }
   stdoutlog="$(mktemp -t dispatch-codex-stdout.XXXXXX)" || { rm -f "$errlog"; echo "dispatch-worker: mktemp failed" >&2; return 1; }
-  # Tee BOTH streams to the log: auth refusals land on stderr, but the usage-limit
-  # banner can land on stdout. The user still sees both live (tee … >&N).
-  # stdout goes through a PIPELINE (not process substitution) so bash WAITS for the tee
-  # before we measure the file below — a partially-flushed stdout would read as "codex
-  # produced nothing" and resurrect the false positive this check exists to avoid.
-  if [ "${#codex_flags[@]}" -gt 0 ]; then
-    if [ -n "$codex_cd_dir" ]; then
-      run_with_timeout codex exec "${codex_flags[@]}" -C "$codex_cd_dir" --sandbox "$sandbox" - < "$BRIEF" \
-        2> >(tee -a "$errlog" >&2) | tee -a "$stdoutlog"
-      rc=${PIPESTATUS[0]}
-    else
-      run_with_timeout codex exec "${codex_flags[@]}" --sandbox "$sandbox" - < "$BRIEF" \
-        2> >(tee -a "$errlog" >&2) | tee -a "$stdoutlog"
-      rc=${PIPESTATUS[0]}
-    fi
-  else
-    if [ -n "$codex_cd_dir" ]; then
-      run_with_timeout codex exec -C "$codex_cd_dir" --sandbox "$sandbox" - < "$BRIEF" \
-        2> >(tee -a "$errlog" >&2) | tee -a "$stdoutlog"
-      rc=${PIPESTATUS[0]}
-    else
-      run_with_timeout codex exec --sandbox "$sandbox" - < "$BRIEF" \
-        2> >(tee -a "$errlog" >&2) | tee -a "$stdoutlog"
-      rc=${PIPESTATUS[0]}
-    fi
-  fi
-  cat "$stdoutlog" >> "$errlog"
-  if [ "$rc" -ne 0 ] && grep -qiE 'not supported when using Codex|with a ChatGPT account|no (supported )?models? (are )?available|all models? (were |are )?rejected' "$errlog"; then
+  # Tee each stream through a waited pipeline: fd 3 sends stdout to its tee while
+  # stderr goes through the inner tee. Both files are complete before either grep.
+  # Keep the files separate; concatenation could split a banner while stderr is written.
+  # The inner PIPESTATUS preserves codex's rc, including run_with_timeout's timeout rc.
+  { run_with_timeout codex "${codex_args[@]}" < "$BRIEF" 2>&1 1>&3 3>&- \
+      | tee -a "$errlog" >&2; exit "${PIPESTATUS[0]}"; } 3>&1 | tee -a "$stdoutlog"
+  rc=${PIPESTATUS[0]}
+  if [ "$rc" -ne 0 ] && grep -qiE 'not supported when using Codex|with a ChatGPT account|no (supported )?models? (are )?available|all models? (were |are )?rejected' "$errlog" "$stdoutlog"; then
     echo "dispatch-worker: codex rejected the request at the auth/config layer (not a build failure) — every model was refused." >&2
     echo "dispatch-worker: fix codex auth/config, do NOT retry this as a build: run 'codex login' (ChatGPT) or set a valid OpenAI API key provider, and check ~/.codex/config.toml for a bad model_provider override or a stray Authorization header." >&2
     rm -f "$errlog" "$stdoutlog"
@@ -373,8 +357,7 @@ dispatch_codex() {
   # limit (zero-edit no-op), so an rc-gated check would miss it.
   #
   # The signature ALONE is not sufficient evidence. codex's output carries the echoed
-  # brief AND the model's own answer (both are mirrored to stderr, so there is no clean
-  # control-signal stream to grep instead), so any brief or review DISCUSSING rate limits
+  # brief AND the model's own answer, so any brief or review DISCUSSING rate limits
   # matches. Reproduced 2026-08-27: a three-sentence review about HTTP 429 handling
   # returned rc 6 while carrying a complete, correct deliverable.
   #
@@ -388,13 +371,18 @@ dispatch_codex() {
   # "only echoed the prompt" -- i.e. NOTHING on stdout, which carries only the answer.
   # A deliverable that merely discusses limits always has substantive stdout.
   #
-  # KNOWN GAP: a limit that interrupts generation AFTER substantive stdout is not caught
-  # here. Backstops: the rc 8 review byte floor, and coding-dispatch's empty-diff gate for
-  # edit briefs. Closing it properly needs a captured real banner -- do not guess a pattern.
+  # KNOWN GAPS, both accepted deliberately:
+  #  - a limit that interrupts generation AFTER substantive stdout is not caught here;
+  #  - the byte threshold cannot separate a VERBOSE banner from a SHORT deliverable. Measured
+  #    2026-08-27: a legitimate three-sentence review was 314B, and a plausible JSON 429
+  #    payload is ~316B. No threshold splits those two, so raising it only trades one error
+  #    for the other. DISPATCH_LIMIT_NOOP_BYTES exists for site-specific tuning.
+  # Backstops for both: the rc 8 review byte floor, and coding-dispatch's empty-diff gate for
+  # edit briefs. Closing them properly needs a captured real banner -- do not guess a pattern.
   produced="$(wc -c < "$stdoutlog" 2>/dev/null | tr -d ' ')"
   [ -n "$produced" ] || produced=0
   if [ "$produced" -lt "${DISPATCH_LIMIT_NOOP_BYTES:-200}" ] \
-     && grep -qiE 'usage limit|rate limit(ed)?|too many requests|you.?ve (hit|reached) your|reached (the|your) (usage|rate) limit|quota (exceeded|reached)|resets? (at|in)|try again (after|in|later)|limit will reset' "$errlog"; then
+     && grep -qiE 'usage limit|rate limit(ed)?|too many requests|you.?ve (hit|reached) your|reached (the|your) (usage|rate) limit|quota (exceeded|reached)|resets? (at|in)|try again (after|in|later)|limit will reset' "$errlog" "$stdoutlog"; then
     echo "dispatch-worker: codex appears to have hit a usage/rate limit (not a build result) — a limit signature appeared and codex produced no substantive output (${produced}B)." >&2
     echo "dispatch-worker: do NOT accept this as a completed fix (codex can exit 0 with a zero-edit no-op on a limit). Wait for the reset time shown above, then re-dispatch. Treat as a BLOCKED phase." >&2
     rm -f "$errlog" "$stdoutlog"
