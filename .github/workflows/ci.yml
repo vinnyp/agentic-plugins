@@ -229,7 +229,20 @@ jobs:
       # risk noted in the PR/commit for version-drift on runners.
       - name: Install Antigravity CLI (agy)
         run: |
-          curl -fsSL https://antigravity.google/cli/install.sh | bash
+          # Some CDN edges serve install.sh gzip-compressed (bytes 1f 8b), which `curl | bash`
+          # then fails to parse. Download to a file, decompress if needed, check it is a
+          # script, and only then run it.
+          installer="$RUNNER_TEMP/agy-install.sh"
+          curl -fsSL --compressed --retry 3 --retry-all-errors \
+            -o "$installer" https://antigravity.google/cli/install.sh
+          if [ "$(head -c 2 "$installer" | od -An -tx1 | tr -d ' \n')" = "1f8b" ]; then
+            gunzip -c "$installer" > "$installer.unpacked" && mv "$installer.unpacked" "$installer"
+          fi
+          head -c 2 "$installer" | grep -q '^#!' || {
+            echo "agy installer is not a script; first bytes: $(head -c 16 "$installer" | od -An -tx1)" >&2
+            exit 1
+          }
+          bash "$installer"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: agy --version
