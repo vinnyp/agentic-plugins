@@ -105,11 +105,16 @@ pane_rows="${DCS_ROWS:-200}"
 [[ "$pane_rows" =~ ^[1-9][0-9]*$ ]] || die "DCS_ROWS must be a positive integer (usage: DCS_ROWS=N drive-cold-session.sh ...)"
 buffer="dcs_prompt_${sess}"
 dead_session=0
+# The agent's exit status, written by the wrapper shell. tmux's #{pane_dead_status}
+# is not reliable for this: tmux 3.4 sometimes never fills it for a pane that is
+# already dead, so the driver records the status itself.
+status_file="$(mktemp "${TMPDIR:-/tmp}/dcs-status.XXXXXX")"
 session_created=0
 launched=0
 buffer_created=0
 cleanup() {
   local pane_dead
+  rm -f "$status_file" 2>/dev/null || true
   if [[ "$buffer_created" == "1" ]]; then
     tmux delete-buffer -b "$buffer" 2>/dev/null || true
   fi
@@ -140,15 +145,12 @@ check_agent_alive() {
   local dead status phase="${1:-pre}"
   dead="$(tmux display-message -p -t "=$sess:" '#{pane_dead}' 2>/dev/null)" || session_disappeared
   if [[ "$dead" == "1" ]]; then
-    status="$(tmux display-message -p -t "=$sess:" '#{pane_dead_status}' 2>/dev/null)" || session_disappeared
-    # tmux marks a pane dead when its pty closes but records the exit status only
-    # once it reaps the child, so an immediate read can be empty (seen on tmux 3.4).
-    local tries=0
-    while [[ -z "$status" ]] && (( tries < 20 )); do
-      sleep 0.1
+    # The wrapper writes the status file before its shell exits, so it exists by
+    # the time the pane reads as dead; tmux's own value is only a fallback.
+    status="$(tr -d '[:space:]' < "$status_file" 2>/dev/null)" || status=""
+    if [[ -z "$status" ]]; then
       status="$(tmux display-message -p -t "=$sess:" '#{pane_dead_status}' 2>/dev/null)" || session_disappeared
-      (( tries += 1 ))
-    done
+    fi
     [[ -n "$status" ]] || status="unknown"
     dead_session=1
     if [[ "$phase" == "post" ]]; then
@@ -214,7 +216,8 @@ if [[ "${DCS_TEST_FAIL_LAUNCH:-0}" == "1" ]]; then
   exit 1
 fi
 tmux set-option -w -t "$agent_pane" remain-on-exit on
-tmux respawn-pane -k -t "$agent_pane" -e 'CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1' "$launch_cmd"
+agent_cmd="$launch_cmd; dcs_status=\$?; printf '%s\\n' \"\$dcs_status\" > $(printf '%q' "$status_file"); exit \"\$dcs_status\""
+tmux respawn-pane -k -t "$agent_pane" -e 'CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1' "$agent_cmd"
 tmux kill-window -t "$placeholder_window"
 launched=1
 
