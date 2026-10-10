@@ -118,8 +118,8 @@ All of this lives **beside the PRD, in the project repo — never in `/tmp`**:
   - `<prd-slug>-oq-results.md` — one `## OQ <id>` section per answered Open Question.
 - **The review log** — the audit trail. Create it **once**, at round 1 via the gate's `log-new`;
   record its path in the fence-file header and append each later `## Round N` to the same file.
-  Follow the gate's [review-log convention](../../../agent-dispatch/skills/running-the-peer-review-gate/references/review-log-convention.md)
-  and verify its final state with `review-log-status` before reporting where it landed. The gate's
+  Follow the review-log convention of the `agent-dispatch:running-the-peer-review-gate` skill
+  and verify the log with `review-log-status` before reporting where it landed. The gate's
   PII-redaction precondition applies to every round: record the finding, not raw personal data.
   The copy companion contains user-facing strings and the journeys contain fixtures that
   reviewers may quote.

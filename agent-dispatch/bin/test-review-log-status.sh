@@ -1,17 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
-unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_PREFIX GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_NAMESPACE CDPATH
 export GIT_AUTHOR_NAME='Test Author' GIT_AUTHOR_EMAIL='test@example.invalid'
 export GIT_COMMITTER_NAME='Test Author' GIT_COMMITTER_EMAIL='test@example.invalid'
 
-bin_dir=$(cd "$(dirname "$0")" && pwd -P)
+bin_dir=$(cd "$(dirname -- "$0")" && pwd -P)
 cli=$bin_dir/review-log-status
 tmp=$(cd "$(mktemp -d)" && pwd -P)
 trap 'rm -rf "$tmp"' EXIT
 repo=$tmp/repo
 mkdir -p "$repo/docs/agent-reviews" "$tmp/archive" "$tmp/outside"
 git -C "$repo" init -q
-log=$repo/docs/agent-reviews/review.md
+printf 'docs/agent-reviews/\n' > "$repo/.gitignore"
+git -C "$repo" add .gitignore
+git -C "$repo" commit -qm 'Add ignore rule'
+log=$repo/plain.md
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 check() {
@@ -24,62 +28,109 @@ check() {
 }
 
 check 5 missing "$cli" "$log"
+check 5 missing "$cli" "$repo/not-here/review.md"
 check 2 '' "$cli" "$tmp/outside/absent.md"
 grep -q 'Usage:' "$tmp/err" || fail 'outside-repo usage missing'
 check 2 '' "$cli"
+grep -q 'Usage:' "$tmp/err" || fail 'no-args usage missing'
 
 printf 'review\n' > "$log"
 check 3 untracked "$cli" "$log"
-git -C "$repo" add docs/agent-reviews/review.md
-check 0 tracked "$cli" "$log"
-git -C "$repo" commit -qm 'Add log'
-check 0 tracked "$cli" "$log"
+git -C "$repo" add plain.md
+check 6 staged "$cli" "$log"
+git -C "$repo" commit -qm 'Add plain log'
+check 0 committed "$cli" "$log"
+printf 'changed\n' >> "$log"
+check 6 staged "$cli" "$log"
+git -C "$repo" add plain.md
+git -C "$repo" commit -qm 'Update plain log'
+check 0 committed "$cli" "$log"
+check 0 committed env PEER_REVIEW_LOG_ARCHIVE="$tmp/archive" "$cli" --archive "$log"
+[ "$(find "$tmp/archive" -type f | wc -l | tr -d ' ')" -eq 0 ] || fail 'committed log was archived'
 
 ignored=$repo/docs/agent-reviews/ignored.md
-printf 'docs/agent-reviews/ignored.md\n' > "$repo/.gitignore"
 printf 'first\n' > "$ignored"
 check 4 ignored "$cli" "$ignored"
-grep -qF '.gitignore:1:docs/agent-reviews/ignored.md' "$tmp/err" || fail 'ignore rule missing'
-grep -q 'local-only' "$tmp/err" || fail 'local-only guidance missing'
-
-destination=$tmp/archive/ignored.md
-check 4 "$(printf 'ignored\narchived %s' "$destination")" env PEER_REVIEW_LOG_ARCHIVE="$tmp/archive" "$cli" --archive "$ignored"
-cmp -s "$ignored" "$destination" || fail 'archive copy differs'
-
-printf 'existing\n' > "$destination"
-hash=$(git hash-object -- "$ignored" | cut -c 1-8)
-check 4 "$(printf 'ignored\narchived %s/archive/ignored-%s.md' "$tmp" "$hash")" env PEER_REVIEW_LOG_ARCHIVE="$tmp/archive" "$cli" --archive "$ignored"
-[ "$(cat "$destination")" = existing ] || fail 'collision overwrote original'
-archived_path=$(sed -n '2s/^archived //p' "$tmp/out")
-[ "$archived_path" != "$destination" ] || fail 'collision did not use suffix'
-cmp -s "$ignored" "$archived_path" || fail 'suffixed archive copy differs'
-
+grep -qF '.gitignore:1:docs/agent-reviews/' "$tmp/err" || fail 'ignore rule missing'
 check 4 ignored env -u PEER_REVIEW_LOG_ARCHIVE "$cli" --archive "$ignored"
 grep -q 'unset or is not an existing directory' "$tmp/err" || fail 'unset archive guidance missing'
 
-# Mutate a copy to classify only by porcelain status. An ignored log has empty
-# porcelain output, so the ignored assertion above must reject this mutation.
-mutant=$tmp/review-log-status-mutant
-python3 - "$cli" "$mutant" <<'PY'
-import pathlib
-import sys
-source = pathlib.Path(sys.argv[1]).read_text()
-start = source.index('if git -C "$repo" ls-files --error-unmatch')
-end = source.index('\necho ignored\n', start)
-replacement = '''if [ -n "$(git -C "$repo" status --porcelain -- "$relative_path")" ]; then
-  echo untracked
-  exit 3
-fi
-echo tracked
-exit 0
-'''
-pathlib.Path(sys.argv[2]).write_text(source[:start] + replacement + source[end:])
-PY
-chmod +x "$mutant"
-mutant_rc=0
-"$mutant" "$ignored" >"$tmp/mutant.out" 2>"$tmp/mutant.err" || mutant_rc=$?
-if [ "$mutant_rc" -eq 4 ] && [ "$(cat "$tmp/mutant.out")" = ignored ]; then
-  fail 'porcelain-only mutation survived ignored-case test'
-fi
-echo 'mutation caught: porcelain-only classification fails ignored-case assertion'
+forced=$repo/docs/agent-reviews/forced.md
+printf 'forced\n' > "$forced"
+git -C "$repo" add -f docs/agent-reviews/forced.md
+check 6 staged "$cli" "$forced"
+git -C "$repo" commit -qm 'Force add log'
+check 0 committed "$cli" "$forced"
+
+(cd "$repo" && "$cli" docs/agent-reviews/forced.md) >"$tmp/out" 2>"$tmp/err" || fail 'relative path failed'
+[ "$(cat "$tmp/out")" = committed ] || fail 'relative path state wrong'
+
+printf 'tracked\n' > "$repo/a1.md"
+git -C "$repo" add a1.md
+git -C "$repo" commit -qm 'Add glob decoy'
+printf 'literal\n' > "$repo/a?.md"
+check 3 untracked "$cli" "$repo/a?.md"
+printf 'dash\n' > "$repo/-dash.md"
+git -C "$repo" add -- ./-dash.md
+git -C "$repo" commit -qm 'Add dash path'
+check 0 committed "$cli" "$repo/-dash.md"
+(cd "$repo" && "$cli" -dash.md) >"$tmp/out" 2>"$tmp/err" || fail 'dash-leading relative path failed'
+[ "$(cat "$tmp/out")" = committed ] || fail 'dash-leading relative path state wrong'
+
+foreign=$tmp/foreign
+mkdir -p "$foreign"
+git -C "$foreign" init -q
+GIT_DIR="$foreign/.git" GIT_INDEX_FILE="$foreign/.git/index" "$cli" "$log" >"$tmp/out" 2>"$tmp/err" || fail 'foreign Git environment failed'
+[ "$(cat "$tmp/out")" = committed ] || fail 'foreign Git environment changed state'
+
+hash=$(git hash-object -- "$ignored" | cut -c 1-8)
+destination=$tmp/archive/ignored-$hash.md
+check 4 "$(printf 'ignored\narchived %s' "$destination")" env PEER_REVIEW_LOG_ARCHIVE="$tmp/archive" "$cli" --archive "$ignored"
+cmp -s "$ignored" "$destination" || fail 'archive copy differs'
+check 4 "$(printf 'ignored\narchived %s' "$destination")" env PEER_REVIEW_LOG_ARCHIVE="$tmp/archive" "$cli" --archive "$ignored"
+[ "$(find "$tmp/archive" -type f | wc -l | tr -d ' ')" -eq 1 ] || fail 'idempotent archive made another copy'
+
+printf 'existing\n' > "$destination"
+collision=$tmp/archive/ignored-$hash-2.md
+check 4 "$(printf 'ignored\narchived %s' "$collision")" env PEER_REVIEW_LOG_ARCHIVE="$tmp/archive" "$cli" --archive "$ignored"
+[ "$(cat "$destination")" = existing ] || fail 'collision overwrote original'
+cmp -s "$ignored" "$collision" || fail 'collision copy differs'
+check 4 "$(printf 'ignored\narchived %s' "$collision")" env PEER_REVIEW_LOG_ARCHIVE="$tmp/archive" "$cli" --archive "$ignored"
+[ "$(find "$tmp/archive" -type f | wc -l | tr -d ' ')" -eq 2 ] || fail 'collision reuse made another copy'
+
+regular=$tmp/regular
+printf 'untouched\n' > "$regular"
+check 4 ignored env PEER_REVIEW_LOG_ARCHIVE="$regular" "$cli" --archive "$ignored"
+grep -q 'not an existing directory' "$tmp/err" || fail 'regular-file archive notice missing'
+[ "$(cat "$regular")" = untouched ] || fail 'regular-file archive changed'
+check 4 ignored env PEER_REVIEW_LOG_ARCHIVE="$repo/docs" "$cli" --archive "$ignored"
+grep -q 'inside the log repository' "$tmp/err" || fail 'in-repo archive refusal missing'
+
+other=$repo/docs/agent-reviews/report.txt
+printf 'other\n' > "$other"
+other_hash=$(git hash-object -- "$other" | cut -c 1-8)
+check 4 "$(printf 'ignored\narchived %s/archive/report-%s.txt' "$tmp" "$other_hash")" env PEER_REVIEW_LOG_ARCHIVE="$tmp/archive" "$cli" --archive "$other"
+
+# A git configuration error in check-ignore must not become an untracked verdict.
+check 2 '' env GIT_LITERAL_PATHSPECS=1 "$cli" "$ignored"
+grep -q 'fatal:' "$tmp/err" || fail 'check-ignore Git error was hidden'
+
+# Force check-ignore itself to fail after a successful ls-files miss.
+mkdir -p "$tmp/stub"
+real_git=$(command -v git)
+cat > "$tmp/stub/git" <<STUB
+#!/usr/bin/env bash
+for arg in "\$@"; do
+  if [ "\$arg" = check-ignore ]; then
+    echo 'fatal: simulated check-ignore failure' >&2
+    exit 128
+  fi
+done
+exec "$real_git" "\$@"
+STUB
+chmod +x "$tmp/stub/git"
+printf 'free\n' > "$repo/free.md"
+check 2 '' env PATH="$tmp/stub:$PATH" "$cli" "$repo/free.md"
+grep -q 'fatal: simulated check-ignore failure' "$tmp/err" || fail 'check-ignore error was hidden'
+
 echo 'test-review-log-status.sh PASS'

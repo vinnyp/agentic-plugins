@@ -1,4 +1,4 @@
-# The durable review log
+# The review log (a working record — verify where it landed with `review-log-status`)
 
 Every peer-review round leaves an auditable record. This file defines WHERE it lives, WHAT shape it
 takes, and the GUARD on writing it. It does not restate which reviewers fire — that is
@@ -10,20 +10,25 @@ A peer-review log is a **working record of the reviewed repo**, not a planning d
 whatever hub the tooling came from. The repo may legitimately ignore `docs/agent-reviews/`.
 
 Create it at the caller repo's `docs/agent-reviews/YYYY-MM-DD-<topic>-peer-reviews.md`. After
-writing it, and after staging it if committing, run `review-log-status [--archive] <path>`.
+writing it, and after committing it, run `review-log-status --archive <path>`.
 The CLI checks the index and ignore rules directly; `git status` and `git add` alone cannot prove
-where the log landed. Use `--archive` when `PEER_REVIEW_LOG_ARCHIVE` points to an existing archive
-directory.
+where the log landed. Always pass `--archive`; the CLI handles an unset
+`PEER_REVIEW_LOG_ARCHIVE`.
 
 In the PR body, report the verified state:
 
-- `tracked`: link the repo-relative log path. This means the log is staged or committed; verify the
-  final commit before saying it is committed.
+- `committed`: link the repo-relative log path. The path exists in HEAD and the index and working
+  tree match it. This is the only state that permits a committed or shipped claim.
+- `staged`: commit the log, then re-run. The path is in the index but is absent from HEAD or has
+  uncommitted changes. Do not call it shipped.
+- `untracked`: run `git add` and re-run, unless the caller deliberately keeps the log uncommitted
+  (for example, a design-mode draft); say so explicitly in the report.
 - `ignored` with an `archived <path>` line: say the log is archived and name the archive location
-  generically in a public PR, without exposing a private local path. Do not claim it is in the repo.
-- `ignored` without an archive: say the log is local-only. Include the gate's rounds, reviewers,
-  and disposition counts in the PR body; do not link or claim a repo log.
-- `untracked`: stage the log and check again before claiming it landed. `missing` is an error to fix.
+  generically in a public PR, without exposing a private local path. Include the gate summary
+  (rounds, reviewers, disposition counts) in the PR body. Do not claim it is in the repo.
+- `ignored` without an archive: say the log is local-only. Include the gate summary (rounds,
+  reviewers, disposition counts) in the PR body; do not link or claim a repo log.
+- `missing`: fix the missing log before reporting completion.
 
 ## Shape
 
@@ -93,7 +98,7 @@ out here: if the gate ran, a log is required; if it did not, none is. There is d
 When required, preserve the log in the reviewed repo's working tree. Commit it alongside the
 change when the path is trackable. When ignored, archive it if configured; otherwise keep it
 local-only and put the gate summary in the PR body. Never claim the log was shipped without a
-`tracked` result from `review-log-status`. The briefs are reproducible from the persona and target,
+`committed` result from `review-log-status`. The briefs are reproducible from the persona and target,
 but the outputs and dispositions need an explicit record.
 
 ## Multi-round logs (requirements mode)

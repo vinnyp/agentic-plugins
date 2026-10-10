@@ -54,8 +54,8 @@ All of this lives **beside the PRD, in the project repo — never in `/tmp`**:
 
 - **The review log** — the audit trail and fresh-lens ledger. Create it **once**, at round 1;
   record its path in the fence-file header and append each later `## Round N` to the same file.
-  Follow the gate's [review-log convention](../../../agent-dispatch/skills/running-the-peer-review-gate/references/review-log-convention.md)
-  and verify its final state with `review-log-status` before reporting where it landed.
+  Follow the review-log convention of the `agent-dispatch:running-the-peer-review-gate` skill
+  and verify the log with `review-log-status` before reporting where it landed.
 - **The cumulative fence file** — `<prd-dir>/<prd-slug>-fences.md`. Records owner decisions
   **and** owner-rejected findings. The fence file's header also enumerates the currently
   owner-locked row IDs — any of the template §2's three families (`R<section>.<n>`, `E<n>`,

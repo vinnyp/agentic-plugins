@@ -519,15 +519,24 @@ review-log-status [--archive] <path>
 ```
 
 Checks a review log from any current directory, resolving its Git work tree from the path's
-directory. Prints one state word: `tracked` (exit 0; in the index, staged or committed),
-`untracked` (exit 3; stage it), `ignored` (exit 4; stderr names the matching ignore rule and
-local-only guidance), or `missing` (exit 5). Bad usage or a path outside a Git work tree exits 2
-with a usage message. A clean `git status` is not evidence that an ignored log was included.
+directory. Prints `committed` (exit 0) only when the path exists in HEAD and its index and working
+tree match HEAD; this is the state that permits a shipped claim or repo link. `staged` (exit 6)
+means the path is in the index but new or changed: commit it, then re-run. `untracked` (exit 3)
+means run `git add` and re-run, unless deliberately keeping a draft uncommitted; say so in the
+report. `ignored` (exit 4) names the matching ignore rule on stderr and gives local-only guidance.
+`missing` exits 5, including when the parent directory is absent. Bad usage, a path outside a Git
+work tree, or a Git error exits 2. A clean `git status` is not evidence that an ignored log was
+included.
 
-With `--archive`, an ignored log is copied into the existing directory named by
-`PEER_REVIEW_LOG_ARCHIVE`. The command prints `archived <dest-path>` on a second stdout line and
-still exits 4. A different file at the destination is preserved; the new copy gets a short hash
-suffix. If the variable is unset or not a directory, stderr says so and the log stays local-only.
+`--archive` must precede the path and only acts on `ignored` logs. It reads
+`PEER_REVIEW_LOG_ARCHIVE`; if that variable is unset or does not name an existing directory, the
+log stays local-only. An archive directory inside the log's repository is refused. Otherwise the
+command prints `archived <dest-path>` on a second stdout line and still exits 4. The copy is
+written without overwriting, using a short content hash before the original extension. Repeating
+an archive of identical content reuses its path. Requirements-mode logs append rounds; archiving
+after a new round creates a new hashed snapshot. File modification time identifies the newest
+snapshot. For any ignored log, include the gate's rounds, reviewers, and disposition counts in
+the PR body, whether archived or local-only.
 
 ## `agent-dispatch-doctor`
 
@@ -572,6 +581,7 @@ FAIL. So an `--install` that skipped an entrypoint (a foreign symlink it refused
 | `CODING_DISPATCH_WORKTREE` | `coding-dispatch.sh`, `coding-build-phase.sh` | the worktree/branch slug; a worktree with that slug is reused so a multi-task phase accumulates on one branch |
 | `CODING_DISPATCH_RM_ON_FAIL` | `coding-dispatch.sh` | `1` = remove the worktree on failure instead of salvaging it; the patch still survives under the parent repo's git dir |
 | `CODING_DISPATCH_CHILD_ENV` | `coding-dispatch.sh` | whitespace-separated `KEY=VALUE` pairs exported into the dispatched agent's environment, e.g. `"MYREPO_LEDGER=off CI=1"`. Malformed entries are reported on stderr and skipped. |
+| `PEER_REVIEW_LOG_ARCHIVE` | `review-log-status --archive` | existing directory outside the log repository for ignored-log snapshots; unset leaves the log local-only |
 | `CODING_DISPATCH_PREAMBLE` | `coding-dispatch.sh` | path to the file holding the dispatch-preamble block (default: the plugin's `docs/dispatch-preamble.md`). A missing or empty block is a hard refusal (exit 2) before any side effect — a brief without the ground rules is the failure this exists to prevent. |
 | `CODING_BUILD_CMD` | `coding-build-phase.sh` | default for `--build-cmd` |
 | `CODING_COMMIT_SCOPE` | `coding-build-phase.sh` | conventional-commit scope (default: repo dir basename) |
