@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.7.2](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.7.1...agent-dispatch-v1.7.2) (2026-10-10)
+
+
+### Bug Fixes
+
+* **agent-dispatch:** make drive-cold-session fail loudly instead of returning a cut transcript ([#43](https://github.com/vinnyp/agentic-plugins/issues/43)) ([45988ca](https://github.com/vinnyp/agentic-plugins/commit/45988ca280d500e47e9d0eba338f71eadd87ca31))
+* **agent-dispatch:** wait for codex stderr capture before limit/auth detection ([#45](https://github.com/vinnyp/agentic-plugins/issues/45)) ([71c5711](https://github.com/vinnyp/agentic-plugins/commit/71c571167cf7e30a7ef0d045f201a19452a4b69e))
+
 ## [1.7.1](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.7.0...agent-dispatch-v1.7.1) (2026-09-26)
 
 
