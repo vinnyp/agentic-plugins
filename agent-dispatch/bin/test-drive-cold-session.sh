@@ -267,7 +267,7 @@ cat > "$TMP/bin/claude" <<'STUB'
 exit 7
 STUB
 chmod +x "$TMP/bin/claude"
-for i in 1 2 3; do
+for _ in 1 2 3; do
   DCS_KILL=1 run_case claude dcs_dead
   assert_rc 5 "$rc" 'agent exit'
   grep -q 'agent exited (status 7) before replying' "$TMP/err" || fail 'missing dead-agent status'
