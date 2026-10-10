@@ -28,9 +28,23 @@ export TMPDIR="$TMP/platform-tmp"
 mkdir -p "$TMPDIR"
 
 # Stub runtimes on PATH. agy: cat stdin (the brief) straight through so $() can read
-# it. codex: record its argv to a file (the codex path tees through process
-# substitution, so capturing argv from stdout would be racy) and swallow the brief.
+# it. codex: record its argv to a file and swallow the brief.
+REAL_TEE="$(command -v tee)"
+export REAL_TEE
 mkdir -p "$TMP/bin"
+cat > "$TMP/bin/tee" <<'STUB'
+#!/usr/bin/env bash
+# Hold the stderr tee before its first read to expose an unwaited capture.
+if [ "${DELAY_CODEX_STDERR_TEE:-0}" = 1 ]; then
+  case "${2:-}" in
+    *dispatch-codex-out.*)
+      printf 'delayed\n' > "$CODEX_ARGS_FILE.tee-delay"
+      sleep 0.5
+      ;;
+  esac
+fi
+exec "$REAL_TEE" "$@"
+STUB
 cat > "$TMP/bin/agy" <<'STUB'
 #!/usr/bin/env bash
 # PERSONA_ROSTER_STUB
@@ -56,7 +70,7 @@ cat > "$TMP/bin/claude" <<'STUB'
 printf '%s\n' "$*" > "$CLAUDE_ARGS_FILE"
 cat > "$CLAUDE_STDIN_FILE"
 STUB
-chmod +x "$TMP/bin/agy" "$TMP/bin/codex" "$TMP/bin/claude"
+chmod +x "$TMP/bin/agy" "$TMP/bin/codex" "$TMP/bin/claude" "$TMP/bin/tee"
 export PATH="$TMP/bin:$PATH"
 export CODEX_ARGS_FILE="$TMP/codex-args"
 export AGY_ARGS_FILE="$TMP/agy-args"
@@ -316,6 +330,128 @@ chmod +x "$TMP/bin/codex"
 TIMEOUT=0 "$DW" --runtime codex --brief "$BRIEF" >/dev/null 2>&1
 [ "$?" -eq 5 ] || fail "codex auth refusal should still return rc 5"
 echo "test 13e (auth refusal rc5 unchanged) PASS"
+
+# 13f-13j. Exercise each capture path independently. A delayed stderr tee exposes
+# an unwaited process substitution when its stdout pipe is closed before capture.
+# These distinguish old from new code under bash >= 4; bash 3.2 happens to wait for
+# the process substitution. CI uses bash 5 and is the authority for the race cases.
+if [ "${BASH_VERSINFO[0]}" -lt 4 ]; then
+  echo "NOTICE: bash 3.2 may wait for process substitution; CI bash 5 decides the race cases"
+fi
+
+cat > "$TMP/bin/codex" <<'STUB'
+#!/usr/bin/env bash
+printf 'You have hit your usage' >&2
+sleep 0.15
+printf ' limit. Try again in 2h\n' >&2
+STUB
+chmod +x "$TMP/bin/codex"
+rm -f "$CODEX_ARGS_FILE.tee-delay"
+DELAY_CODEX_STDERR_TEE=1 TIMEOUT=0 "$DW" --runtime codex --brief "$BRIEF" >"$TMP/t13f.out" 2>"$TMP/t13f.err"
+rc=$?
+[ -f "$CODEX_ARGS_FILE.tee-delay" ] || fail "late stderr tee delay was not exercised"
+[ "$rc" -eq 6 ] || fail "late stderr usage limit should return rc 6, got $rc"
+echo "test 13f (late stderr limit rc6) PASS"
+
+cat > "$TMP/bin/codex" <<'STUB'
+#!/usr/bin/env bash
+printf 'You have hit your usage limit. Try again in 2h\n'
+STUB
+chmod +x "$TMP/bin/codex"
+TIMEOUT=0 "$DW" --runtime codex --brief "$BRIEF" >"$TMP/t13g.out" 2>"$TMP/t13g.err"
+rc=$?
+[ "$rc" -eq 6 ] || fail "stdout-only usage limit should return rc 6, got $rc"
+echo "test 13g (stdout-only limit rc6) PASS"
+
+cat > "$TMP/bin/codex" <<'STUB'
+#!/usr/bin/env bash
+printf 'all models were ' >&2
+sleep 0.15
+printf 'rejected by this ChatGPT account\n' >&2
+exit 1
+STUB
+chmod +x "$TMP/bin/codex"
+rm -f "$CODEX_ARGS_FILE.tee-delay"
+DELAY_CODEX_STDERR_TEE=1 TIMEOUT=0 "$DW" --runtime codex --brief "$BRIEF" >"$TMP/t13h.out" 2>"$TMP/t13h.err"
+rc=$?
+[ -f "$CODEX_ARGS_FILE.tee-delay" ] || fail "late stderr auth tee delay was not exercised"
+[ "$rc" -eq 5 ] || fail "late stderr auth refusal should return rc 5, got $rc"
+echo "test 13h (late stderr auth rc5) PASS"
+
+cat > "$TMP/bin/codex" <<'STUB'
+#!/usr/bin/env bash
+printf 'all models were rejected by this ChatGPT account\n'
+exit 1
+STUB
+chmod +x "$TMP/bin/codex"
+TIMEOUT=0 "$DW" --runtime codex --brief "$BRIEF" >"$TMP/t13i.out" 2>"$TMP/t13i.err"
+rc=$?
+[ "$rc" -eq 5 ] || fail "stdout-only auth refusal should return rc 5, got $rc"
+echo "test 13i (stdout-only auth rc5) PASS"
+
+cat > "$TMP/bin/codex" <<'STUB'
+#!/usr/bin/env bash
+printf 'OUT-MARK\n'
+for i in $(seq 1 12); do printf 'substantive output line %s\n' "$i"; done
+printf 'ERR-MARK\n' >&2
+exit 3
+STUB
+chmod +x "$TMP/bin/codex"
+TIMEOUT=0 "$DW" --runtime codex --brief "$BRIEF" >"$TMP/t13j.out" 2>"$TMP/t13j.err"
+rc=$?
+[ "$rc" -eq 3 ] || fail "codex exit 3 should propagate as rc 3, got $rc"
+grep -qFx 'OUT-MARK' "$TMP/t13j.out" || fail "codex stdout marker was lost"
+grep -qFx 'ERR-MARK' "$TMP/t13j.err" || fail "codex stderr marker was lost"
+grep -qFx 'ERR-MARK' "$TMP/t13j.out" && fail "codex stderr marker leaked to stdout"
+grep -qFx 'OUT-MARK' "$TMP/t13j.err" && fail "codex stdout marker leaked to stderr"
+echo "test 13j (stream separation and codex rc preserved) PASS"
+
+# 13k. An echoed brief can make stderr large without providing any stdout deliverable.
+cat > "$TMP/bin/codex" <<'STUB'
+#!/usr/bin/env bash
+for i in $(seq 1 40); do
+  printf 'Echoed brief line %s: inspect the implementation and report the result.\n' "$i" >&2
+done
+printf 'You have hit your usage limit. Try again in 2h\n' >&2
+STUB
+chmod +x "$TMP/bin/codex"
+TIMEOUT=0 "$DW" --runtime codex --brief "$BRIEF" >"$TMP/t13k.out" 2>"$TMP/t13k.err"
+rc=$?
+[ "$rc" -eq 6 ] || fail "echoed brief on stderr with a limit should return rc 6, got $rc"
+[ ! -s "$TMP/t13k.out" ] || fail "stderr-only echoed brief leaked to stdout"
+echo "test 13k (stderr echoed brief with usage limit rc6) PASS"
+
+# 13l. Auth phrases quoted in a substantial successful answer are not an auth refusal.
+cat > "$TMP/bin/codex" <<'STUB'
+#!/usr/bin/env bash
+for i in $(seq 1 12); do
+  printf 'Answer line %s: with a ChatGPT account, all models were rejected in the example; explain the recovery steps.\n' "$i"
+done
+STUB
+chmod +x "$TMP/bin/codex"
+TIMEOUT=0 "$DW" --runtime codex --brief "$BRIEF" >"$TMP/t13l.out" 2>"$TMP/t13l.err"
+rc=$?
+[ "$rc" -eq 0 ] || fail "successful answer quoting auth phrases should return rc 0, got $rc"
+echo "test 13l (auth phrases in successful answer rc0) PASS"
+
+# 13m. The external bound must propagate through the waited codex pipelines.
+if command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1; then
+  cat > "$TMP/bin/codex" <<'STUB'
+#!/usr/bin/env bash
+sleep 5
+STUB
+  chmod +x "$TMP/bin/codex"
+  TIMEOUT=1 KILL_AFTER=1 "$DW" --runtime codex --brief "$BRIEF" >"$TMP/t13m.out" 2>"$TMP/t13m.err"
+  rc=$?
+  [ "$rc" -eq 124 ] || fail "codex external timeout should return rc 124, got $rc"
+  grep -qF 'exceeded the external 1 bound and was killed' "$TMP/t13m.err" \
+    || fail "codex external timeout bound message was missing"
+  echo "test 13m (codex external timeout rc124) PASS"
+elif [ "${CI:-}" = true ]; then
+  fail "CI requires timeout or gtimeout for the codex external timeout case"
+else
+  echo "SKIP test 13m (timeout and gtimeout unavailable)"
+fi
 
 cat > "$TMP/bin/codex" <<'STUB'
 #!/usr/bin/env bash

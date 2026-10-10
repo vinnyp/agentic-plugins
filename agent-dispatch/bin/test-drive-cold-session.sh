@@ -34,6 +34,9 @@ assert_rc() {
 }
 run_case() {
   local agent="$1" sess="$2"; shift 2
+  # One marker file is shared by every case; clear it so a stub torn down by an
+  # earlier case cannot leave a stale "received input" mark for this one.
+  rm -f "$MARK"
   env -u TMUX TMUX_TMPDIR="$TMUX_TMPDIR" "$DRIVER" "$agent" "$TMP" "$TMP/prompt" "$sess" "$@" > "$TMP/out" 2> "$TMP/err"
   rc=$?
 }
@@ -57,8 +60,7 @@ write_codex_interstitial() {
   cat > "$TMP/bin/codex" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n1. Cancel\n2. Run without daemon this time\n' "$TITLE"
-read -r _
-touch "$MARK"
+if read -r _; then touch "$MARK"; fi
 STUB
   chmod +x "$TMP/bin/codex"
   export TITLE="$title"
@@ -117,8 +119,7 @@ for title in 'Is this a project you created or one you trust?' 'Do you trust the
   cat > "$TMP/bin/claude" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$TITLE"
-read -r _
-touch "$MARK"
+if read -r _; then touch "$MARK"; fi
 exit 1
 STUB
   chmod +x "$TMP/bin/claude"
@@ -135,8 +136,7 @@ echo 'PASS: Claude folder-trust interstitials'
 cat > "$TMP/bin/claude" <<'STUB'
 #!/usr/bin/env bash
 printf 'WARNING: Claude Code running in Bypass Permissions mode\n1. Exit\n2. Continue\n'
-read -r _
-touch "$MARK"
+if read -r _; then touch "$MARK"; fi
 STUB
 chmod +x "$TMP/bin/claude"
 DCS_KILL=1 run_case claude dcs_claude_bypass
@@ -190,8 +190,7 @@ echo 'PASS: daemon interstitial titles'
 cat > "$TMP/bin/codex" <<'STUB'
 #!/usr/bin/env bash
 printf 'Update available\n1. Update now\n2. Skip\n'
-read -r _
-touch "$MARK"
+if read -r _; then touch "$MARK"; fi
 STUB
 chmod +x "$TMP/bin/codex"
 run_case codex dcs_update
@@ -218,8 +217,7 @@ echo 'PASS: update banner ignored'
 cat > "$TMP/bin/codex" <<'STUB'
 #!/usr/bin/env bash
 printf 'Choose a model\n1. Use existing model\n2. Try new model\n'
-read -r _
-touch "$MARK"
+if read -r _; then touch "$MARK"; fi
 STUB
 chmod +x "$TMP/bin/codex"
 run_case codex dcs_model_offer
@@ -233,8 +231,7 @@ for title in 'Trust this folder?' 'Trust and continue' 'Do you trust the content
   cat > "$TMP/bin/codex" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$TITLE"
-read -r _
-touch "$MARK"
+if read -r _; then touch "$MARK"; fi
 STUB
   chmod +x "$TMP/bin/codex"
   export TITLE="$title"
