@@ -11,6 +11,7 @@ if ! command -v tmux >/dev/null 2>&1; then
 fi
 
 TMP="$(mktemp -d /tmp/dcs.XXXX)"
+echo "tmux: $(tmux -V)"
 TMUX_TMPDIR="$(mktemp -d /tmp/dcs.XXXX)"
 export TMUX_TMPDIR HOME="$TMP" XDG_CONFIG_HOME="$TMP/config"
 unset TMUX
@@ -21,7 +22,12 @@ printf 'the prompt\n' > "$TMP/prompt"
 export MARK="$TMP/marker"
 export DCS_INTERVAL=1 DCS_STABLE=2 DCS_BOOT_MAX=6 DCS_SETTLE_MAX=10
 
-fail() { echo "FAIL: $*" >&2; exit 1; }
+fail() {
+  echo "FAIL: $*" >&2
+  # Surface the driver's stderr so a CI-only failure is diagnosable from the log.
+  if [[ -s "$TMP/err" ]]; then echo '--- driver stderr ---' >&2; cat "$TMP/err" >&2; fi
+  exit 1
+}
 assert_rc() {
   local expected="$1" actual="$2" label="$3"
   [[ "$actual" -eq "$expected" ]] || fail "$label: rc $actual, expected $expected; stderr: $(cat "$TMP/err")"
