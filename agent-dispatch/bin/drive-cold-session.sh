@@ -141,6 +141,15 @@ check_agent_alive() {
   dead="$(tmux display-message -p -t "=$sess:" '#{pane_dead}' 2>/dev/null)" || session_disappeared
   if [[ "$dead" == "1" ]]; then
     status="$(tmux display-message -p -t "=$sess:" '#{pane_dead_status}' 2>/dev/null)" || session_disappeared
+    # tmux marks a pane dead when its pty closes but records the exit status only
+    # once it reaps the child, so an immediate read can be empty (seen on tmux 3.4).
+    local tries=0
+    while [[ -z "$status" ]] && (( tries < 20 )); do
+      sleep 0.1
+      status="$(tmux display-message -p -t "=$sess:" '#{pane_dead_status}' 2>/dev/null)" || session_disappeared
+      (( tries += 1 ))
+    done
+    [[ -n "$status" ]] || status="unknown"
     dead_session=1
     if [[ "$phase" == "post" ]]; then
       print_transcript
