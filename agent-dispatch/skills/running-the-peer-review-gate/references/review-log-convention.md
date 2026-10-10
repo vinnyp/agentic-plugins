@@ -1,4 +1,4 @@
-# The durable review log
+# The review log (a working record — verify where it landed with `review-log-status`)
 
 Every peer-review round leaves an auditable record. This file defines WHERE it lives, WHAT shape it
 takes, and the GUARD on writing it. It does not restate which reviewers fire — that is
@@ -6,15 +6,29 @@ takes, and the GUARD on writing it. It does not restate which reviewers fire —
 
 ## Where the log lives — the reviewed repo
 
-A peer-review log is a **first-class artifact of the reviewed repo**, not a planning doc belonging to
-whatever hub the tooling came from. It must be auditable in that repo's own PR and git history —
-that is the whole point: the record of what was reviewed, what was found, and what was done about it
-travels with the diff it reviews.
+A peer-review log is a **working record of the reviewed repo**, not a planning doc belonging to
+whatever hub the tooling came from. The repo may legitimately ignore `docs/agent-reviews/`.
 
-Write it to the caller repo's `docs/agent-reviews/YYYY-MM-DD-<topic>-peer-reviews.md`. This skill
-and its `review-gate log-new` helper are merely the *tool* that produces it — a globally installed
-compiler writing into your project. "Leave no footprint in someone else's repo" does not mean "skip
-the log"; it means the log belongs to the reviewed repo.
+Create it at the caller repo's `docs/agent-reviews/YYYY-MM-DD-<topic>-peer-reviews.md`. After
+writing it, and after committing it, run `review-log-status --archive <path>`.
+The CLI checks the index and ignore rules directly; `git status` and `git add` alone cannot prove
+where the log landed. Always pass `--archive`; the CLI handles an unset
+`PEER_REVIEW_LOG_ARCHIVE`.
+
+In the PR body, report the verified state:
+
+- `committed`: link the repo-relative log path. The path exists in HEAD and the index and working
+  tree match it. This is the only state that permits a committed or shipped claim.
+- `staged`: commit the log, then re-run. The path is in the index but is absent from HEAD or has
+  uncommitted changes. Do not call it shipped.
+- `untracked`: run `git add` and re-run, unless the caller deliberately keeps the log uncommitted
+  (for example, a design-mode draft); say so explicitly in the report.
+- `ignored` with an `archived <path>` line: say the log is archived and name the archive location
+  generically in a public PR, without exposing a private local path. Include the gate summary
+  (rounds, reviewers, disposition counts) in the PR body. Do not claim it is in the repo.
+- `ignored` without an archive: say the log is local-only. Include the gate summary (rounds,
+  reviewers, disposition counts) in the PR body; do not link or claim a repo log.
+- `missing`: fix the missing log before reporting completion.
 
 ## Shape
 
@@ -55,8 +69,8 @@ and to the scaffold that emits it.
 
 ## The guard (load-bearing)
 
-- **Git repos only.** `log-new` refuses to write outside a git repository — the log must be
-  version-controlled alongside the change it reviews.
+- **Git repos only.** `log-new` refuses to write outside a git repository so the working record
+  belongs to the reviewed repo.
 - **Repo-root-relative only.** It writes under `docs/agent-reviews/` relative to the repo root;
   never an absolute path, never `..` outside the repo.
 - **Never silently overwrite.** If a dated log for the same topic exists, `log-new` refuses — a
@@ -73,7 +87,7 @@ and to the scaffold that emits it.
   would carry **before commit**. Stating this as a flat CLI MUST would be an unenforceable
   precondition — exactly the substrate-enforceability trap the spec gate warns against.
 
-## When a log is required, and where it is committed
+## When a log is required, and where it is recorded
 
 A change **requires a log if and only if it triggered the gate** — that is, the gate ran at least one
 reviewer on it. *What* triggers the gate (Tier 1 on every code build, Tier 2 and 3 by trigger) is
@@ -81,10 +95,11 @@ defined in [peer-review-tiers.md](peer-review-tiers.md) and is deliberately not 
 out here: if the gate ran, a log is required; if it did not, none is. There is deliberately no
 "purely mechanical change" exception, which would contradict the gate's own Tier-1 ALWAYS rule.
 
-When required, the log is committed **alongside** the change it reviews — same branch, same PR — so
-the diff and its audit trail are never separated. A review that lives only in a chat transcript or
-in `/tmp` is not a record. The briefs are reproducible from the persona plus the spec or diff, but
-the **outputs and dispositions must be preserved** in the repo.
+When required, preserve the log in the reviewed repo's working tree. Commit it alongside the
+change when the path is trackable. When ignored, archive it if configured; otherwise keep it
+local-only and put the gate summary in the PR body. Never claim the log was shipped without a
+`committed` result from `review-log-status`. The briefs are reproducible from the persona and target,
+but the outputs and dispositions need an explicit record.
 
 ## Multi-round logs (requirements mode)
 

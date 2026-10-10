@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+set -euo pipefail
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_NAMESPACE CDPATH
+unset GIT_LITERAL_PATHSPECS GIT_GLOB_PATHSPECS GIT_NOGLOB_PATHSPECS GIT_ICASE_PATHSPECS
+
+usage() {
+  echo 'Usage: review-log-status [--archive] <path>' >&2
+}
+
+archive=0
+if [ "${1:-}" = '--archive' ]; then
+  archive=1
+  shift
+fi
+if [ "$#" -ne 1 ] || [ -z "$1" ] || [ "$1" = '--archive' ]; then
+  usage
+  exit 2
+fi
+
+path=$1
+dir=$(dirname -- "$path")
+if [ ! -d "$dir" ]; then
+  echo missing
+  exit 5
+fi
+if ! absolute_dir=$(cd -- "$dir" >/dev/null && pwd -P); then
+  usage
+  exit 2
+fi
+absolute_path=$absolute_dir/$(basename -- "$path")
+if ! repo=$(git -C "$absolute_dir" rev-parse --show-toplevel 2>/dev/null); then
+  usage
+  echo "Not in a git work tree: $path" >&2
+  exit 2
+fi
+case "$absolute_path" in
+  "$repo"/*) relative_path=${absolute_path#"$repo"/} ;;
+  *) usage; echo "Path is outside the git work tree: $path" >&2; exit 2 ;;
+esac
+
+if [ ! -f "$absolute_path" ]; then
+  echo missing
+  exit 5
+fi
+
+err=$(mktemp)
+trap 'rm -f "$err"' EXIT
+if git -C "$repo" ls-files --error-unmatch -- ":(literal)$relative_path" >/dev/null 2>"$err"; then
+  if git -C "$repo" cat-file -e "HEAD:$relative_path" 2>/dev/null; then
+    if git -C "$repo" diff --cached --quiet HEAD -- ":(literal)$relative_path" 2>"$err"; then
+      :
+    else
+      rc=$?
+      if [ "$rc" -ne 1 ]; then
+        cat "$err" >&2
+        exit 2
+      fi
+      echo staged
+      exit 6
+    fi
+    if git -C "$repo" diff --quiet HEAD -- ":(literal)$relative_path" 2>"$err"; then
+      echo committed
+      exit 0
+    else
+      rc=$?
+      if [ "$rc" -ne 1 ]; then
+        cat "$err" >&2
+        exit 2
+      fi
+    fi
+  fi
+  echo staged
+  exit 6
+else
+  rc=$?
+  if [ "$rc" -ne 1 ]; then
+    cat "$err" >&2
+    exit 2
+  fi
+fi
+
+if git -C "$repo" check-ignore -q -- "$relative_path" 2>"$err"; then
+  echo ignored
+else
+  rc=$?
+  if [ "$rc" -eq 1 ]; then
+    echo untracked
+    exit 3
+  fi
+  cat "$err" >&2
+  exit 2
+fi
+
+if rule=$(git -C "$repo" check-ignore -v -- "$relative_path" 2>"$err"); then
+  echo "Ignore rule: $rule" >&2
+else
+  cat "$err" >&2
+  exit 2
+fi
+echo 'The log is local-only unless archived. Summarize rounds, reviewers, and disposition counts in the PR body; do not claim the log is in the repo.' >&2
+
+if [ "$archive" -eq 1 ]; then
+  if [ -z "${PEER_REVIEW_LOG_ARCHIVE:-}" ] || [ ! -d "$PEER_REVIEW_LOG_ARCHIVE" ]; then
+    echo 'PEER_REVIEW_LOG_ARCHIVE is unset or is not an existing directory; log remains local-only.' >&2
+  else
+    archive_dir=$(cd -- "$PEER_REVIEW_LOG_ARCHIVE" >/dev/null && pwd -P)
+    case "$archive_dir" in
+      "$repo"|"$repo"/*)
+        echo 'Archive directory is inside the log repository; log remains local-only.' >&2
+        exit 4 ;;
+    esac
+    repo_common=$(git -C "$repo" rev-parse --git-common-dir)
+    repo_common=$(cd "$repo" && cd "$repo_common" && pwd -P)
+    if archive_common=$(git -C "$archive_dir" rev-parse --git-common-dir 2>/dev/null); then
+      archive_common=$(cd "$archive_dir" && cd "$archive_common" && pwd -P)
+      if [ "$archive_common" = "$repo_common" ]; then
+        echo 'Archive directory is another checkout of the log repository; log remains local-only.' >&2
+        exit 4
+      fi
+    fi
+    filename=$(basename -- "$absolute_path")
+    case "$filename" in
+      ?*.*) stem=${filename%.*}; extension=.${filename##*.} ;;
+      *) stem=$filename; extension= ;;
+    esac
+    hash=$(git hash-object -- "$absolute_path" | cut -c 1-8)
+    destination=$archive_dir/$stem-$hash$extension
+    counter=2
+    while [ -e "$destination" ] || [ -L "$destination" ]; do
+      if cmp -s "$absolute_path" "$destination"; then
+        echo "archived $destination"
+        exit 4
+      fi
+      destination=$archive_dir/$stem-$hash-$counter$extension
+      counter=$((counter + 1))
+    done
+    if (set -C; cat "$absolute_path" > "$destination"); then
+      echo "archived $destination"
+    else
+      echo "Could not archive the log at $destination; log remains local-only." >&2
+    fi
+  fi
+fi
+exit 4

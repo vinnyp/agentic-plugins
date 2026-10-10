@@ -11,7 +11,7 @@ drives, the owner decides every WHAT, and a multi-round gate runs until every ro
 the document is safe to hand to a builder that will not ask a clarifying question.
 
 The mechanical part of any one review round — brief assembly, dispatch, verify-the-reviewer, the
-durable log — is handled by `agent-dispatch:running-the-peer-review-gate` in `requirements` mode.
+review log (a working record) — is handled by `agent-dispatch:running-the-peer-review-gate` in `requirements` mode.
 **This skill is the caller of that contract**: it owns the multi-round loop, the state that
 survives between rounds (the fence file, the fix files, the OQ results), and every owner
 decision. The gate never sees more than one round at a time.
@@ -116,14 +116,13 @@ All of this lives **beside the PRD, in the project repo — never in `/tmp`**:
     Authority, Decision, optional Why, and Carried by; plus the fence → row map and the rejected
     findings. Scaffolded from `assets/fences-template.md`.
   - `<prd-slug>-oq-results.md` — one `## OQ <id>` section per answered Open Question.
-- **The review log** — the audit trail, at
-  `docs/agent-reviews/<date-of-round-1>-<prd-slug>-peer-reviews.md`. Created **once**, at round 1,
-  via the gate's `log-new`; its path is recorded in the fence-file header. Every later round
-  **appends** a `## Round N` section to that same file. The gate's PII-redaction precondition is a
-  hard precondition on every one of those rounds — record the finding, not the raw personal data.
-  It is load-bearing for this format specifically: the copy companion is verbatim user-facing
-  strings and the journeys carry fixtures, both of which reviewers quote back, and this log is
-  committed to the project repo permanently. See the gate skill's "Preserve the durable log".
+- **The review log** — the audit trail. Create it **once**, at round 1 via the gate's `log-new`;
+  record its path in the fence-file header and append each later `## Round N` to the same file.
+  Follow the review-log convention of the `agent-dispatch:running-the-peer-review-gate` skill
+  and verify the log with `review-log-status` before reporting where it landed. The gate's
+  PII-redaction precondition applies to every round: record the finding, not raw personal data.
+  The copy companion contains user-facing strings and the journeys contain fixtures that
+  reviewers may quote.
 - **Per-round fix files** — `<prd-dir>/<prd-slug>-round-<N>-fixes.md`, one per round: the
   checkbox list that is that round's resume point.
 

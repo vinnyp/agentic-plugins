@@ -3,7 +3,8 @@
 A **tiered peer-review gate** is a convention for reviewing a change with more than one lens before
 it merges: a couple of reviewers always run, a few more run when their surface is touched, and the
 specialist lenses are your call by change-shape. Every finding is then checked against the real code
-before it is accepted, and the round leaves a dated record in the repo it reviewed.
+before it is accepted, and the round leaves a dated review log (a working record — verify where
+it landed with `review-log-status`).
 
 The plugin ships two halves of that:
 
@@ -34,7 +35,7 @@ RG=.bin/review-gate
 # optionally run the same lens on a different model, serialized
 "$RG" cross-model --runtime agy --brief /tmp/brief-code-xm.md --timeout 14m
 
-# scaffold the durable record, then fill in findings + dispositions
+# scaffold the review log (a working record), then fill in findings + dispositions
 "$RG" log-new --topic json-flag --mode build \
   --persona peer-code-reviewer --persona peer-test-reviewer
 ```
@@ -51,7 +52,9 @@ this overview intentionally points there instead of duplicating them.
   provider** behind the runtime you pick (`agy` → Google, `codex` → OpenAI), through
   `dispatch-worker`. Same disclosure as any other dispatch; see
   [Data flow](safety-and-data-flow.md#data-flow).
-- **`log-new` writes into the repo you are standing in**, and you commit that log alongside the
-  change. It only scaffolds an empty file — it never sees the findings, so it cannot scan or strip
-  anything. **On a public repo, redact any personal data a reviewer quoted before you commit the
+- **`log-new` writes into the repo you are standing in.** Run `review-log-status --archive <path>`
+  to verify where the log landed. Only `committed` means it shipped; `staged` means commit it and
+  re-run. For an ignored log, report the gate summary in the PR body, whether archived or local-only.
+  The CLI only scaffolds an empty file — it never sees the findings, so it cannot scan or strip
+  anything. **On a public repo, redact any personal data a reviewer quoted before committing the
   log.** That is authoring judgment, not a guarantee the tool provides.

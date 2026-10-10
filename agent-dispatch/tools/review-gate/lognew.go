@@ -160,7 +160,7 @@ func modeOr(m string) string {
 	return m
 }
 
-// renderLogSkeleton builds the durable review-log scaffold. It stamps the
+// renderLogSkeleton builds the review log (a working record) scaffold. It stamps the
 // resolved persona-version so a skew between routes is visible in the log.
 type logSkeleton struct {
 	body              string

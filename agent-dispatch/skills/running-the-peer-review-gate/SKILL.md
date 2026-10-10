@@ -1,21 +1,21 @@
 ---
 name: running-the-peer-review-gate
-description: Use after any code build or before committing a non-trivial change/spec to run the tiered peer-review gate consistently across any project — assemble per-persona briefs, dispatch Claude Agent-tool reviewers (and optionally a different-model agy/codex pass), verify-the-reviewer, and preserve a durable review log with a disposition table in the caller repo. Use in BUILD mode for a diff (post-build, pre-merge) or DESIGN mode for a spec/design doc (pre-build, the spec gate), or REQUIREMENTS mode for a PRD/requirements doc — one round per invocation; the multi-round PRD loop belongs to the caller — operator-agents:writing-prds, or operator-agents:writing-agent-prds for an agent-audience PRD. Trigger phrases - "run the peer-review gate", "peer-review this build", "review gate", "get peer reviewers on this", "spec gate", "requirements gate", "review this diff before merge", "gate this change".
+description: Use after any code build or before committing a non-trivial change/spec to run the tiered peer-review gate consistently across any project — assemble per-persona briefs, dispatch Claude Agent-tool reviewers (and optionally a different-model agy/codex pass), verify-the-reviewer, and keep a review log (a working record — verify where it landed with `review-log-status`) with a disposition table in the caller repo. Use in BUILD mode for a diff (post-build, pre-merge) or DESIGN mode for a spec/design doc (pre-build, the spec gate), or REQUIREMENTS mode for a PRD/requirements doc — one round per invocation; the multi-round PRD loop belongs to the caller — operator-agents:writing-prds, or operator-agents:writing-agent-prds for an agent-audience PRD. Trigger phrases - "run the peer-review gate", "peer-review this build", "review gate", "get peer reviewers on this", "spec gate", "requirements gate", "review this diff before merge", "gate this change".
 ---
 
 # running-the-peer-review-gate
 
 Runs a **tiered peer-review gate** over a diff or a spec: pick the lenses the change warrants,
 brief each one identically, dispatch them, check every finding against the real code, and leave a
-durable record in the repo you reviewed.
+review log (a working record — verify where it landed with `review-log-status`).
 
 The mechanical parts — brief assembly, the different-model run, the log scaffold with its
 disposition table — are handled by the `review-gate` helper CLI. The **judgment** — which tiers
 fire, verify-the-reviewer, commit-then-review — stays here.
 
-This skill runs in **whatever repo you are in** and writes the review log into **that repo's**
-`docs/agent-reviews/`. A peer-review log is a first-class artifact *of the reviewed repo*, auditable
-in its own PR and git history. See [references/review-log-convention.md](references/review-log-convention.md).
+This skill writes the review log into the reviewed repo's `docs/agent-reviews/` as a working
+record. Some repos ignore that directory; verify its state before claiming it is in a PR. See
+[references/review-log-convention.md](references/review-log-convention.md).
 
 **The single source of *who* reviews is the tier reference, not this file.**
 [references/peer-review-tiers.md](references/peer-review-tiers.md) defines the tiers (Tier 1 always;
@@ -278,7 +278,7 @@ mutant produces a syntax error, the test "fails" (or "passes") for the wrong rea
 is indistinguishable from a genuine verdict. **Never add a git-state check to
 `mutation-verify.sh`** — being git-free is precisely what makes it safe on uncommitted work.
 
-### 7. Preserve the durable log
+### 7. Keep the review log (a working record — verify where it landed with `review-log-status`)
 
 In requirements mode, log-new runs only on round 1 — later rounds append to the recorded log (see
 Requirements-mode specifics).
@@ -294,7 +294,14 @@ Scaffold the log in the caller repo, then fill it:
 
 Fill the scaffold with each reviewer's findings, the **verify-the-reviewer disposition table**
 (`# | finding | raised-by | verify | disposition`), and the recorded tier rationale from Phase 2.
-Commit it to the caller repo's `docs/agent-reviews/`.
+After writing the log, and again after committing it, run
+`review-log-status --archive <log-path>`; the CLI handles an unset archive variable. Quote the CLI's
+first stdout word in the completion report. Only `committed` permits a shipped claim or repo link.
+`staged` means commit it, then re-run. For `untracked`, run `git add` and re-run unless the caller
+deliberately keeps the log uncommitted (for example, a design-mode draft); say so explicitly in the
+report. For `ignored`, use the archive or local-only PR wording in the convention. Correct `missing`
+or usage errors before completion. A clean `git status` or successful `git add` does not prove the
+log was included.
 
 **PII redaction is a hard precondition.** Record the *finding*, not the raw personal data — if a
 review quotes real personal data (a privacy review citing real names, say), redact it in the log.
@@ -334,6 +341,9 @@ to them, it does not restate them.
 Resolve every **Blocker/Critical** before proceeding and every **Major/High** before merge;
 Minor/Low can be resolved or explicitly deferred. "The build passes" is **not** a substitute — a
 green suite has shipped a non-functional layer behind it, which is why the Tier-1 test lens exists.
+
+Completion checklist: run `review-log-status --archive <log-path>`, quote its first stdout word,
+and use the matching PR-body wording from the review-log convention.
 
 ## Out of scope (deliberate)
 

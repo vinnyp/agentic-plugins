@@ -11,7 +11,7 @@ runs — round after round — until every row is aligned and the document is sa
 engineering.
 
 The mechanical part of any one review round — brief assembly, dispatch, verify-the-reviewer, the
-durable log — is handled by `agent-dispatch:running-the-peer-review-gate` in `requirements` mode.
+review log (a working record) — is handled by `agent-dispatch:running-the-peer-review-gate` in `requirements` mode.
 **This skill is the caller of that contract**: it owns the multi-round loop, the state that
 survives between rounds (the fence file, the fix files, the OQ results), and every owner
 decision. The gate never sees more than one round at a time; this skill is what makes "one gate,
@@ -52,10 +52,10 @@ runtimes per those notes.
 
 All of this lives **beside the PRD, in the project repo — never in `/tmp`**:
 
-- **The review log** — the audit trail and fresh-lens ledger, at
-  `docs/agent-reviews/<date-of-round-1>-<prd-slug>-peer-reviews.md`. Created **once**, at round 1;
-  its path is recorded in the fence-file header. Every later round **appends** a `## Round N`
-  section to this same file.
+- **The review log** — the audit trail and fresh-lens ledger. Create it **once**, at round 1;
+  record its path in the fence-file header and append each later `## Round N` to the same file.
+  Follow the review-log convention of the `agent-dispatch:running-the-peer-review-gate` skill
+  and verify the log with `review-log-status` before reporting where it landed.
 - **The cumulative fence file** — `<prd-dir>/<prd-slug>-fences.md`. Records owner decisions
   **and** owner-rejected findings. The fence file's header also enumerates the currently
   owner-locked row IDs — any of the template §2's three families (`R<section>.<n>`, `E<n>`,

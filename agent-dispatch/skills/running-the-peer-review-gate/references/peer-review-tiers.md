@@ -337,5 +337,5 @@ for this skill**; named here only to place the gate in the pipeline) → **commi
 gate** (Tier 1 always, Tier 2 by trigger,
 Tier 3 by judgment) → **verify-the-reviewer** (check every finding against real code; correct the
 severities) → resolve Blockers/Criticals and Majors/Highs (multi-file fixes are dispatched, not
-hand-edited) → one clean commit → the durable review log
+hand-edited) → one clean commit → the review log (a working record — verify where it landed with `review-log-status`)
 ([review-log-convention.md](review-log-convention.md)).

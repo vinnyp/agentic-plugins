@@ -3,7 +3,7 @@
 // Subcommands (persona-agnostic -- the standard owns tier selection):
 //
 //	brief        assemble a route-conditional review brief
-//	log-new      scaffold the durable review log
+//	log-new      scaffold the review log (a working record)
 //	cross-model  serialize a different-model review run via dispatch-worker
 //	             (--workdir selects the checkout under review; defaults to the brief's repo root, else cwd)
 //
