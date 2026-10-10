@@ -11,7 +11,7 @@ runs — round after round — until every row is aligned and the document is sa
 engineering.
 
 The mechanical part of any one review round — brief assembly, dispatch, verify-the-reviewer, the
-durable log — is handled by `agent-dispatch:running-the-peer-review-gate` in `requirements` mode.
+review log (a working record) — is handled by `agent-dispatch:running-the-peer-review-gate` in `requirements` mode.
 **This skill is the caller of that contract**: it owns the multi-round loop, the state that
 survives between rounds (the fence file, the fix files, the OQ results), and every owner
 decision. The gate never sees more than one round at a time; this skill is what makes "one gate,

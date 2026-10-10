@@ -34,6 +34,16 @@ grep -q 'Usage:' "$tmp/err" || fail 'outside-repo usage missing'
 check 2 '' "$cli"
 grep -q 'Usage:' "$tmp/err" || fail 'no-args usage missing'
 
+unborn=$tmp/unborn
+mkdir -p "$unborn"
+git -C "$unborn" init -q
+printf 'first\n' > "$unborn/review.md"
+check 3 untracked "$cli" "$unborn/review.md"
+[ ! -s "$tmp/err" ] || fail 'unborn untracked check wrote stderr'
+git -C "$unborn" add review.md
+check 6 staged "$cli" "$unborn/review.md"
+[ ! -s "$tmp/err" ] || fail 'unborn staged check wrote stderr'
+
 printf 'review\n' > "$log"
 check 3 untracked "$cli" "$log"
 git -C "$repo" add plain.md
@@ -43,7 +53,12 @@ check 0 committed "$cli" "$log"
 printf 'changed\n' >> "$log"
 check 6 staged "$cli" "$log"
 git -C "$repo" add plain.md
+check 6 staged "$cli" "$log"
+git -C "$repo" show HEAD:plain.md > "$log"
+check 6 staged "$cli" "$log"
 git -C "$repo" commit -qm 'Update plain log'
+check 6 staged "$cli" "$log"
+git -C "$repo" show HEAD:plain.md > "$log"
 check 0 committed "$cli" "$log"
 check 0 committed env PEER_REVIEW_LOG_ARCHIVE="$tmp/archive" "$cli" --archive "$log"
 [ "$(find "$tmp/archive" -type f | wc -l | tr -d ' ')" -eq 0 ] || fail 'committed log was archived'
@@ -105,15 +120,34 @@ grep -q 'not an existing directory' "$tmp/err" || fail 'regular-file archive not
 [ "$(cat "$regular")" = untouched ] || fail 'regular-file archive changed'
 check 4 ignored env PEER_REVIEW_LOG_ARCHIVE="$repo/docs" "$cli" --archive "$ignored"
 grep -q 'inside the log repository' "$tmp/err" || fail 'in-repo archive refusal missing'
+git -C "$repo" worktree add -q -b archive-checkout "$tmp/linked-archive"
+check 4 ignored env PEER_REVIEW_LOG_ARCHIVE="$tmp/linked-archive" "$cli" --archive "$ignored"
+grep -q 'another checkout of the log repository' "$tmp/err" || fail 'linked-worktree archive refusal missing'
+[ ! -e "$tmp/linked-archive/ignored-$hash.md" ] || fail 'linked-worktree archive made a copy'
+
+hidden=$repo/docs/agent-reviews/.hidden
+printf 'hidden\n' > "$hidden"
+hidden_hash=$(git hash-object -- "$hidden" | cut -c 1-8)
+check 4 "$(printf 'ignored\narchived %s/archive/.hidden-%s' "$tmp" "$hidden_hash")" env PEER_REVIEW_LOG_ARCHIVE="$tmp/archive" "$cli" --archive "$hidden"
+cmp -s "$hidden" "$tmp/archive/.hidden-$hidden_hash" || fail 'dotfile archive copy differs'
 
 other=$repo/docs/agent-reviews/report.txt
 printf 'other\n' > "$other"
 other_hash=$(git hash-object -- "$other" | cut -c 1-8)
 check 4 "$(printf 'ignored\narchived %s/archive/report-%s.txt' "$tmp" "$other_hash")" env PEER_REVIEW_LOG_ARCHIVE="$tmp/archive" "$cli" --archive "$other"
 
-# A git configuration error in check-ignore must not become an untracked verdict.
-check 2 '' env GIT_LITERAL_PATHSPECS=1 "$cli" "$ignored"
-grep -q 'fatal:' "$tmp/err" || fail 'check-ignore Git error was hidden'
+case_dir=$tmp/case-check
+mkdir -p "$case_dir"
+printf 'probe\n' > "$case_dir/review.md"
+if [ -e "$case_dir/Review.md" ]; then
+  echo 'SKIP: case-insensitive filesystem cannot test GIT_ICASE_PATHSPECS isolation'
+else
+  printf 'review\n' > "$repo/review.md"
+  git -C "$repo" add review.md
+  git -C "$repo" commit -qm 'Add case decoy'
+  printf 'untracked\n' > "$repo/Review.md"
+  check 3 untracked env GIT_ICASE_PATHSPECS=1 "$cli" "$repo/Review.md"
+fi
 
 # Force check-ignore itself to fail after a successful ls-files miss.
 mkdir -p "$tmp/stub"

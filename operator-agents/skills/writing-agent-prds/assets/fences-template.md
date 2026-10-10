@@ -20,7 +20,7 @@
      2. The historical baseline: which fences predate the current lock, and the statement that
         they stand as recorded — an amendment preserves historical decisions, it does not
         re-decide them.
-     3. The review-log path: the durable log this PRD's rounds append to, recorded once, at
+     3. The review-log path: the review log (a working record) this PRD's rounds append to, recorded once, at
         round 1, and never re-created.
      4. The amendment pending mark: the PRD status line's amendment clause, repeated here while
         that amendment's review rounds run and cleared by the bookkeeping close — absent from a
@@ -50,7 +50,7 @@ re-raised.
 amendment preserves them; it does not re-decide them.
 
 **Review log:** `{{review-log-path}}`.
-<!-- guidance: {{review-log-path}} is the path of the durable peer-review log for this PRD,
+<!-- guidance: {{review-log-path}} is the path of the review log (a working record) for this PRD,
      created once at round 1 and appended to by every later round — recorded here so every later
      brief can find it without re-deriving it. -->
 
