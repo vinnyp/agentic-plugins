@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.3](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.7.2...agent-dispatch-v1.7.3) (2026-10-10)
+
+
+### Bug Fixes
+
+* **agent-dispatch:** verify where the peer-review log landed, never assume it ([#46](https://github.com/vinnyp/agentic-plugins/issues/46)) ([d5102ae](https://github.com/vinnyp/agentic-plugins/commit/d5102ae229edf6e49c1175d7c6a1633ce035898d))
+
 ## [1.7.2](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.7.1...agent-dispatch-v1.7.2) (2026-10-10)
 
 
