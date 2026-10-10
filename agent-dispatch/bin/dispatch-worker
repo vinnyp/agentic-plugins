@@ -306,9 +306,10 @@ dispatch_codex() {
   # codex refuse to do real work while still EXITING 0 — the ChatGPT usage limit
   # (an earlier incident: codex hit the limit mid-batch, exited 0, made zero
   # edits, and only echoed the prompt). An exit-0 no-op otherwise passes as a successful
-  # fix and a future session ships an un-implemented change. We detect the limit
-  # signature in either codex output stream and
-  # return the dedicated rc 6 (distinct from auth rc 5, dep-gate rc 4, timeout 124)
+  # fix and a future session ships an un-implemented change. We grep both streams:
+  # codex mirrors banners and the echoed brief across both, so neither is a clean
+  # control-signal stream. A detected limit returns the dedicated rc 6 (distinct
+  # from auth rc 5, dep-gate rc 4, timeout 124)
   # with the reset hint, so the orchestrator surfaces it as a BLOCKED phase instead
   # of a green result. Belt-and-suspenders: even when the message doesn't match, an
   # edit brief that returns rc 0 with a ZERO worktree diff is itself a blocker — the
@@ -343,9 +344,15 @@ dispatch_codex() {
   # Tee each stream through a waited pipeline: fd 3 sends stdout to its tee while
   # stderr goes through the inner tee. Both files are complete before either grep.
   # Keep the files separate; concatenation could split a banner while stderr is written.
-  # The inner PIPESTATUS preserves codex's rc, including run_with_timeout's timeout rc.
+  # A codex descendant that escapes the process group and holds either stream open can
+  # keep these waited pipelines alive past the external timeout; same-group children
+  # are killed by timeout's group kill.
+  # The brace group is a pipeline element, so it runs in a forked subshell: exit ends
+  # only that subshell. Explicitly exiting with PIPESTATUS[0] preserves codex's rc,
+  # including timeout rc; under pipefail, the group would otherwise return the inner
+  # tee's rightmost non-zero status if that tee failed.
   { run_with_timeout codex "${codex_args[@]}" < "$BRIEF" 2>&1 1>&3 3>&- \
-      | tee -a "$errlog" >&2; exit "${PIPESTATUS[0]}"; } 3>&1 | tee -a "$stdoutlog"
+      | tee -a "$errlog" >&2 3>&-; exit "${PIPESTATUS[0]}"; } 3>&1 | tee -a "$stdoutlog"
   rc=${PIPESTATUS[0]}
   if [ "$rc" -ne 0 ] && grep -qiE 'not supported when using Codex|with a ChatGPT account|no (supported )?models? (are )?available|all models? (were |are )?rejected' "$errlog" "$stdoutlog"; then
     echo "dispatch-worker: codex rejected the request at the auth/config layer (not a build failure) — every model was refused." >&2
