@@ -57,11 +57,10 @@
 # DISPATCH=ok-noop (exit 0): a RESUME dispatch found the prior work already complete — rc=0,
 # empty diff, but a present + parseable _coding-result.json marker. Distinct from
 # DISPATCH=fail: empty diff, which still fires for a genuine no-marker no-op/failure (#128b).
-# Exit 143 = killed by INT/TERM mid-dispatch; worktree mode's trap removed a fresh empty
-#            worktree (a partial diff is left for salvage instead). NOTE: the internal agent
-#            timeout kills the AGENT (not this script), after which we fall through to the
-#            normal empty/salvage exits — the trap covers the SCRIPT-killed path (Ctrl-C /
-#            a killed phase), not the agent-hang path.
+# Exit 143 = interrupted by HUP/INT/TERM. Stop the worker before reverting in-place
+#            changes or salvaging worktree/TDD changes; remove a fresh empty worktree.
+#            Foreground build gates defer trapped signals until the gate returns.
+#            Internal agent timeouts instead follow the normal failure/salvage exits.
 #
 # The 3-strike circuit breaker is the CALLER's responsibility (count exit-1s; after 3
 # consecutive, stop delegating and finish the task yourself). See the README.
@@ -411,6 +410,15 @@ if [ "$WORKTREE" -eq 1 ]; then
     resolve_worktree_base
     check_worktree_base_freshness
     git worktree add -b "$SLUG" "$WT_DIR" "$WORKTREE_BASE_SHA" >&2 || die "git worktree add failed"
+    child=""
+    # shellcheck disable=SC2329 # invoked by the early signal trap
+    cleanup_early_worktree() {
+      trap '' HUP INT TERM
+      cd "$PARENT_ROOT" || exit 143
+      git worktree remove --force "$WT_DIR" 2>/dev/null
+      exit 143
+    }
+    trap cleanup_early_worktree HUP INT TERM
     CREATED_HERE=1
     cd "$WT_DIR" || die "cannot enter new worktree $WT_DIR"
   fi
@@ -542,7 +550,7 @@ revert() { git reset --hard "$BASE" >/dev/null 2>&1; git clean -fd >/dev/null 2>
 # about to be deleted, so that patch is keyed by slug under the PARENT repo's git directory.
 FAIL_PATCH_NAME="coding-dispatch-last-fail.patch"
 report_fail() {
-  local label="$1" stream="${2:-out}" patch_content write_dir patch_path
+  local label="$1" stream="${2:-out}" from_signal="${3:-0}" patch_content write_dir patch_path
   # `git diff <commit>` only shows paths git already KNOWS about (tracked, or staged) — a
   # brand-new untracked file (the common shape: the agent adds a file, never `git add`s it)
   # is invisible to it. `git add -N` (intent-to-add) marks new paths as known without staging
@@ -572,7 +580,7 @@ report_fail() {
   mkdir -p "$write_dir" 2>/dev/null
   _emit() { if [ "$stream" = err ]; then printf '%s\n' "$1" >&2; else printf '%s\n' "$1"; fi; }
   if [ "$WORKTREE" -eq 1 ]; then
-    trap - INT TERM
+    [ "$from_signal" = 1 ] || trap - HUP INT TERM
     if [ "${CODING_DISPATCH_RM_ON_FAIL:-0}" = "1" ] && [ "$CREATED_HERE" -eq 1 ]; then
       # #118's whole point is that a gate failure stays inspectable — RM_ON_FAIL removes the
       # worktree immediately, so the patch must be written somewhere that SURVIVES the removal.
@@ -615,14 +623,26 @@ report_fail() {
 child=""
 # shellcheck disable=SC2329 # invoked by the signal trap
 cleanup_signal() {
-  trap '' INT TERM
+  trap '' HUP INT TERM
   if [ -n "$child" ]; then
-    kill -TERM "$child" 2>/dev/null || true
-    for _ in 1 2 3 4 5 6 7 8 9 10; do
-      kill -0 "$child" 2>/dev/null || break
-      sleep 0.1
+    if [ -n "$TIMEOUT_BIN" ]; then
+      kill -TERM -- -"$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null || true
+    else
+      kill -TERM "$child" 2>/dev/null || true
+    fi
+    for _ in 1 2 3 4 5; do
+      if [ -n "$TIMEOUT_BIN" ]; then
+        kill -0 -- -"$child" 2>/dev/null || break
+      else
+        kill -0 "$child" 2>/dev/null || break
+      fi
+      sleep 1
     done
-    kill -KILL "$child" 2>/dev/null || true
+    if [ -n "$TIMEOUT_BIN" ]; then
+      kill -KILL -- -"$child" 2>/dev/null || kill -KILL "$child" 2>/dev/null || true
+    else
+      kill -KILL "$child" 2>/dev/null || true
+    fi
     wait "$child" 2>/dev/null || true
   fi
   if [ "$WORKTREE" -eq 1 ] && [ "$CREATED_HERE" -eq 1 ] \
@@ -631,11 +651,11 @@ cleanup_signal() {
     git worktree remove --force "$WT_DIR" 2>/dev/null
     note "DISPATCH=fail: interrupted (signal) — removed empty worktree $WT_DIR"
   else
-    report_fail "interrupted (signal)" err
+    report_fail "interrupted (signal)" err 1
   fi
   exit 143
 }
-trap cleanup_signal INT TERM
+trap cleanup_signal HUP INT TERM
 
 case "$agent" in
   codex)
@@ -702,7 +722,7 @@ if [ -z "$(git status --porcelain)" ]; then
     if [ "$agent_rc" -eq 0 ] && [ -f _coding-result.json ] && [ "$marker_status" = "complete" ]; then
       rm -f _coding-result.json
       if [ "$WORKTREE" -eq 1 ]; then
-        trap - INT TERM
+        trap - HUP INT TERM
         if [ "$CREATED_HERE" -eq 1 ]; then
           cd "$PARENT_ROOT" && git worktree remove --force "$WT_DIR" 2>/dev/null
         fi
@@ -719,7 +739,7 @@ if [ -z "$(git status --porcelain)" ]; then
       _empty_reason="TIMEOUT — agent exceeded the $TIMEOUT cap (CODING_DISPATCH_TIMEOUT), rc=124, no changes produced"
     fi
     if [ "$WORKTREE" -eq 1 ]; then
-      trap - INT TERM
+      trap - HUP INT TERM
       if [ "$CREATED_HERE" -eq 1 ]; then
         cd "$PARENT_ROOT" && git worktree remove --force "$WT_DIR" 2>/dev/null
       fi
@@ -846,7 +866,7 @@ files="$(jq -r '.files_written // [] | join(", ")' _coding-result.json 2>/dev/nu
 # genuine no-op look like a change (defeating the empty-diff guard + the 3-strike breaker).
 rm -f _coding-result.json
 if [ "$WORKTREE" -eq 1 ]; then
-  trap - INT TERM
+  trap - HUP INT TERM
   printf 'DISPATCH=ok worktree_ns=%s worktree=%s branch=%s base_sha=%s head=%s files=%s\n' "$WT_DIR" "$WT_DIR" "$SLUG" "${WORKTREE_BASE_SHORT:-unknown}" "$(git rev-parse HEAD)" "${files:-unknown}"
   exit 0
 fi

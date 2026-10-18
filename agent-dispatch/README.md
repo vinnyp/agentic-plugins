@@ -51,7 +51,9 @@ exactly where the agent left it. See
 git-level revert cannot undo.
 
 On INT/TERM, `coding-dispatch.sh` stops its worker before cleanup and reports
-`DISPATCH=fail: interrupted (signal)`. In-place changes are reverted unless
+`DISPATCH=fail: interrupted (signal)`. HUP is handled alongside INT/TERM; with timeout
+available, cleanup escalates TERM to KILL for the worker process group after about five seconds.
+Foreground build gates defer trapped signals until they return. In-place changes are reverted unless
 `--keep-on-fail` applies or the worker committed changes; worktree changes and
 commits are salvaged with a failure patch. Fresh empty worktrees are removed.
 

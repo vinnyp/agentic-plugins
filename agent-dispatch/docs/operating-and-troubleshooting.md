@@ -3,6 +3,11 @@
 The conventions the exit codes assume you follow, and how to read the failures when they don't.
 The per-command exit-code tables live in the [command reference](commands.md).
 
+A HUP, INT, or TERM to `coding-dispatch.sh` stops the worker before reverting or
+salvaging changes and exits 143. With timeout available, escalation kills the worker's
+process group after about five seconds. Without timeout, only the worker PID is signalled.
+In-place mode defers a trapped signal during a foreground build gate until that gate returns.
+
 ## Operating rules
 
 These are the rules the exit codes assume you are following. They are not enforced by code.
