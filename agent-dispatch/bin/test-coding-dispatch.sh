@@ -5,6 +5,8 @@ SELF_DIR="$(cd "$(dirname "$0")" && pwd)"; TMP="$(cd "$(mktemp -d)" && pwd -P)";
 . "$SELF_DIR/lib/test-env-reset.sh"
 # shellcheck disable=SC1091
 . "$SELF_DIR/lib/hash.sh"
+# shellcheck disable=SC1091
+. "$SELF_DIR/lib/agy-models.sh"
 reset_dispatch_env  # neutralize any operator-exported dispatch vars before the suite runs
 CD="$SELF_DIR/coding-dispatch.sh"
 fail() { echo "FAIL: $1"; exit 1; }
@@ -536,7 +538,7 @@ export TIMEOUT_ARGS_FILE="$TMP/timeout-args"
 PATH="$TMP/timeoutbin:$TMP/bin:$PATH" bash "$CD" agy "$P_to" "$TMP/prompt" "true" >"$TMP/out_to_agy" 2>&1; rc=$?
 [ "$rc" -eq 1 ] || fail "#20 agy timeout/no-op path should fail empty diff with rc 1, got $rc"
 grep -q -- '-k 30s 25m agy' "$TIMEOUT_ARGS_FILE" || { cat "$TIMEOUT_ARGS_FILE"; fail "#20 agy default timeout should be 25m"; }
-grep -q "agy model: Gemini 3.8 Flash (Medium)" "$TMP/out_to_agy" || { cat "$TMP/out_to_agy"; fail "#20 agy model note missing"; }
+grep -q "agy model: $AGY_MODEL_CODING_DEFAULT" "$TMP/out_to_agy" || { cat "$TMP/out_to_agy"; fail "#20 agy model note missing"; }
 grep -q "agy timed out (rc=124)" "$TMP/out_to_agy" || { cat "$TMP/out_to_agy"; fail "#20 agy timeout hint missing"; }
 : > "$TIMEOUT_ARGS_FILE"
 PATH="$TMP/timeoutbin:$TMP/bin:$PATH" CODING_DISPATCH_TIMEOUT=10m bash "$CD" agy "$P_to" "$TMP/prompt" "true" >"$TMP/out_to_agy_explicit" 2>&1; rc=$?
@@ -547,9 +549,11 @@ PATH="$TMP/timeoutbin:$TMP/bin:$PATH" bash "$CD" codex "$P_to" "$TMP/prompt" "tr
 [ "$rc" -eq 1 ] || fail "#20 codex timeout/no-op path should fail empty diff with rc 1, got $rc"
 grep -q -- '-k 30s 15m codex' "$TIMEOUT_ARGS_FILE" || { cat "$TIMEOUT_ARGS_FILE"; fail "#20 codex default timeout should remain 15m"; }
 ! grep -q "agy timed out" "$TMP/out_to_codex" || { cat "$TMP/out_to_codex"; fail "#20 codex run must not print agy timeout hint"; }
-PATH="$TMP/timeoutbin:$TMP/bin:$PATH" AGY_MODEL="Gemini 3.1 Pro (High)" bash "$CD" agy "$P_to" "$TMP/prompt" "true" >"$TMP/out_to_pro" 2>&1; rc=$?
+for slow_model in gemini-pro-test gemini-argon-test; do
+PATH="$TMP/timeoutbin:$TMP/bin:$PATH" AGY_MODEL="$slow_model" bash "$CD" agy "$P_to" "$TMP/prompt" "true" >"$TMP/out_to_pro" 2>&1; rc=$?
 [ "$rc" -eq 1 ] || fail "#20 Pro warning run should fail empty diff with rc 1, got $rc"
-grep -q "deep/slow agy model (Pro)" "$TMP/out_to_pro" || { cat "$TMP/out_to_pro"; fail "#20 Pro model warning missing"; }
+grep -q "deep/slow agy model (Pro/Argon)" "$TMP/out_to_pro" || { cat "$TMP/out_to_pro"; fail "#20 Pro model warning missing"; }
+done
 echo "test #20 agy timeout defaults, hint, and model surfacing PASS"
 
 # #21 (regression): the agy invocation must use BARE STDIN, in BOTH dispatch branches.

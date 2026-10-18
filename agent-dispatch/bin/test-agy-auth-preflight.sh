@@ -23,8 +23,9 @@ printf '%s\n' "$*" >> "$AGY_CALL_LOG"
 case "${1:-}" in
   models)
     case "${AGY_STUB_MODE:-healthy}" in
+      missing) printf 'custom-id\tCustom Display\n'; exit 0 ;;
       healthy)
-        printf '%s\n' 'Gemini 3.1 Pro (High)'
+        printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\n'
         exit 0
         ;;
       dead)
@@ -235,5 +236,29 @@ AGY_STUB_MODE=healthy TIMEOUT=0 "$DW" --runtime agy --brief "$BRIEF" --workdir /
 assert_called "models"
 assert_no_rejected_agy_args
 echo "test 7 (dispatch_agy non-review live auth and bare stdin) PASS"
+
+# Missing coding pin and both supported override forms.
+AGY_STUB_MODE=missing "$PREFLIGHT" agy >"$TMP/missing.out" 2>&1; rc=$?
+[ "$rc" -eq 1 ] || fail "missing coding default should fail rc1"
+# shellcheck disable=SC1091
+. "$(dirname "$PREFLIGHT")/lib/agy-models.sh"
+grep -qF "PREFLIGHT=error: agy model '$AGY_MODEL_CODING_DEFAULT'" "$TMP/missing.out" || fail "missing coding diagnostic lacks ID"
+for model in custom-id 'Custom Display'; do
+  AGY_STUB_MODE=missing AGY_MODEL="$model" "$PREFLIGHT" agy >"$TMP/override.out" 2>&1; rc=$?
+  [ "$rc" -eq 0 ] || fail "offered override $model should pass"
+  grep -qFx "CODING_MODEL=$model" "$TMP/override.out" || fail "effective coding model not reported"
+done
+
+# Exact columns and CRLF, plus clearing a successful probe's cached output.
+model_list="$(printf 'id-one\tDisplay One\tignored\r\n')"
+agy_model_present "$model_list" id-one || fail "CRLF ID did not match"
+agy_model_present "$model_list" 'Display One' || fail "CRLF display name did not match"
+for model in id 'Display' ignored; do
+  if agy_model_present "$model_list" "$model"; then fail "non-exact model matched: $model"; fi
+done
+AGY_STUB_MODE=healthy agy_auth_probe >/dev/null 2>&1
+[ -n "$AGY_AUTH_PROBE_OUTPUT" ] || fail "successful probe did not retain model list"
+AGY_STUB_MODE=network agy_auth_probe >/dev/null 2>&1
+[ -z "$AGY_AUTH_PROBE_OUTPUT" ] || fail "inconclusive probe leaked stale model list"
 
 echo "ALL PASS"

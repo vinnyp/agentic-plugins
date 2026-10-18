@@ -41,8 +41,10 @@ killed review, `review-pin.sh release <workdir>` clears it, and it expires on it
 
 **Start with the doctor.** `agent-dispatch-doctor` checks that every entrypoint is on PATH and
 executable, that `lib/` is *not* on PATH, that codex and agy are present, that `agy models` works,
-that the default agy model names still exist (if agy renames a model, `--model` fails silently at
-dispatch time — this catches it), and that the entrypoints are shellcheck-clean.
+that both pinned agy role models still exist (missing models fail loudly), and that the
+entrypoints are shellcheck-clean. If preflight, dispatch-worker or the doctor reports a
+missing model, run `agy models` and update `bin/lib/agy-models.sh`. Use `--model`/`MODEL`
+on dispatch-worker or `AGY_MODEL` for coding as a validated one-off override.
 
 **"agy not authenticated" (exit 7) when agy looks signed in.** Auth freshness is probed by a *live
 call*, not by reading a token expiry — a token file can look valid while the session is not. Run

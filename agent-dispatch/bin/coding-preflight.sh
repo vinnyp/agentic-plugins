@@ -19,6 +19,8 @@ while [ -L "$_src" ]; do
   case "$_src" in /*) ;; *) _src="$_dir/$_src" ;; esac
 done
 SCRIPT_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/lib/agy-models.sh"
 agent="${1:-}"
 note() { printf '%s\n' "$*" >&2; }
 fail() { printf 'PREFLIGHT=error: %s\n' "$1"; note "✗ ${agent:-?} preflight: $1"; exit 1; }
@@ -58,8 +60,11 @@ case "$agent" in
     AGY_BIN="$bin" agy_auth_probe
     auth_rc=$?
     case "$auth_rc" in
-      0) : ;;
-      2) note "⚠ agy auth probe inconclusive — proceeding" ;;
+      0)
+        agy_model="${AGY_MODEL:-$AGY_MODEL_CODING_DEFAULT}"
+        agy_model_present "$AGY_AUTH_PROBE_OUTPUT" "$agy_model" || fail "agy model '$agy_model' (coding) not offered by installed agy — update AGY_MODEL_CODING_DEFAULT in bin/lib/agy-models.sh (or your AGY_MODEL override); run 'agy models' for current IDs"
+        ;;
+      2) note "⚠ agy auth probe inconclusive — skipping model check; proceeding" ;;
       7) fail "agy not signed in — run: agy (launch once to sign in)" ;;
       *) fail "agy auth probe failed unexpectedly (rc=$auth_rc)" ;;
     esac
@@ -77,7 +82,7 @@ case "$agent" in
     esac
     echo "CODING_AGENT=agy"
     echo "CODING_BIN=$bin"
-    echo "CODING_MODEL=agy default (Antigravity)"
+    echo "CODING_MODEL=${AGY_MODEL:-$AGY_MODEL_CODING_DEFAULT}"
     echo "CODING_INVOKE=agy < brief   (prompt on bare stdin; the _coding-result.json marker is the success signal, NOT stdout)"
     echo "PREFLIGHT=ok"
     note "✓ agy ready + authed — $bin"

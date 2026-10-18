@@ -16,14 +16,17 @@ set -uo pipefail
 # invoked directly from agent-dispatch/bin/ OR via a ~/.local/bin symlink.
 # ---------------------------------------------------------------------------
 resolve_self() {
-  local s="${BASH_SOURCE[0]:-$0}"
+  local s="${BASH_SOURCE[0]:-$0}" d
   while [ -L "$s" ]; do
-    local t; t="$(readlink "$s")"
-    case "$t" in /*) s="$t" ;; *) s="$(dirname "$s")/$t" ;; esac
+    d="$(cd -P "$(dirname "$s")" && pwd)"
+    s="$(readlink "$s")"
+    case "$s" in /*) ;; *) s="$d/$s" ;; esac
   done
-  cd "$(dirname "$s")" && pwd
+  cd -P "$(dirname "$s")" && pwd
 }
 BIN_DIR="$(resolve_self)"
+# shellcheck disable=SC1091
+. "$BIN_DIR/lib/agy-models.sh"
 LIB_DIR="$(cd "$BIN_DIR/../lib" 2>/dev/null && pwd || echo "$BIN_DIR/../lib")"
 
 # ---------------------------------------------------------------------------
@@ -257,17 +260,13 @@ if [ "$AGY_PRESENT" -eq 1 ]; then
   agy_models_out="$($TIMEOUT_CMD agy models 2>&1)" && agy_models_ok=1 || agy_models_ok=0
   if [ "$agy_models_ok" -eq 1 ]; then
     report PASS "5. agy models: OK"
-    # Verify the two default model strings that dispatch-worker + coding-dispatch hard-code
-    # as defaults. If agy renames them, --model silently fails at dispatch time; catch it here.
-    DEFAULT_MODELS=(
-      "Gemini 3.1 Pro (High)"
-      "Gemini 3.8 Flash (Medium)"
-    )
-    for model_name in "${DEFAULT_MODELS[@]}"; do
-      if echo "$agy_models_out" | grep -qF "$model_name"; then
-        report PASS "5. default model present: $model_name"
+    # Catch renamed role defaults before they fail loudly at dispatch time.
+    for role in coding review; do
+      if [ "$role" = coding ]; then model_name="$AGY_MODEL_CODING_DEFAULT"; else model_name="$AGY_MODEL_REVIEW_DEFAULT"; fi
+      if agy_model_present "$agy_models_out" "$model_name"; then
+        report PASS "5. $role default model present: $model_name"
       else
-        report WARN "5. default model '$model_name' not found in 'agy models' output — run 'agy models' to see current names and update the defaults in dispatch-worker + coding-dispatch.sh if renamed"
+        report FAIL "5. $role default model '$model_name' not offered — run 'agy models' and update bin/lib/agy-models.sh"
       fi
     done
   else

@@ -17,6 +17,8 @@ export CLAUDE_ARGS_FILE="$TMP/claude.args"
 recall_cmd="dispatch-recall"
 export RECALL_CAPTURE_FILE="$TMP/$recall_cmd.capture"
 cp "$DW_SRC" "$TMP/plugin-bin/dispatch-worker"
+mkdir -p "$TMP/plugin-bin/lib"
+cp "$ROOT/bin/lib/agy-models.sh" "$TMP/plugin-bin/lib/agy-models.sh"
 DW_MUT="$TMP/plugin-bin/dispatch-worker"
 DW="$DW_SRC"
 
@@ -28,7 +30,7 @@ STUB
 cat > "$TMP/bin/agy" <<'STUB'
 #!/usr/bin/env bash
 case "${1:-}" in
-  models) exit 0 ;;
+  models) printf 'gemini-3.8-flash-medium\tCoding\ngemini-4-argon-high\tReview\n'; exit 0 ;;
 esac
 cat > "$AGY_STDIN_FILE"
 STUB

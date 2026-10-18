@@ -17,6 +17,8 @@ set -uo pipefail
 SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck disable=SC1091
 . "$SELF_DIR/lib/test-env-reset.sh"
+# shellcheck disable=SC1091
+. "$SELF_DIR/lib/agy-models.sh"
 reset_dispatch_env  # neutralize any operator-exported dispatch vars before the suite runs
 DW="$SELF_DIR/dispatch-worker"
 TMP="$(mktemp -d)"
@@ -49,6 +51,14 @@ cat > "$TMP/bin/agy" <<'STUB'
 #!/usr/bin/env bash
 # PERSONA_ROSTER_STUB
 case "${1:-}" in
+  models)
+    printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
+    if [ "${AGY_MISSING_REVIEW:-0}" = 1 ]; then
+      printf 'custom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'
+    else
+      printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'
+    fi
+    exit 0 ;;
   agent)
     printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
     [ "${AGY_ROSTER_MODE:-}" = nonzero ] && exit 19
@@ -57,6 +67,7 @@ case "${1:-}" in
     ;;
 esac
 printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
+case "${1:-}" in models) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\n'; exit 0 ;; esac
 cat
 STUB
 cat > "$TMP/bin/codex" <<'STUB'
@@ -93,6 +104,16 @@ assert_agy_invocation_has_no_rejected_positionals() {
     fail "agy invocation used rejected positional args (got: $(cat "$AGY_ARGS_FILE"))"
   fi
 }
+
+# Missing review pin refuses dispatch; an offered override bypasses the dead pin.
+AGY_MISSING_REVIEW=1 TIMEOUT=0 "$DW" --runtime agy --review --brief "$BRIEF" >"$TMP/missing" 2>&1; rc=$?
+[ "$rc" -eq 9 ] || fail "missing review default expected rc9, got $rc"
+grep -qF "$AGY_MODEL_REVIEW_DEFAULT" "$TMP/missing" || fail "missing-model diagnostic lacks ID"
+[ -z "$(agy_exec_args)" ] || fail "missing model dispatched agy"
+AGY_MISSING_REVIEW=1 DISPATCH_MIN_REVIEW_BYTES=1 DISPATCH_REVIEW_REQUIRE_EVIDENCE=0 TIMEOUT=0 "$DW" --runtime agy --review --model custom-id --brief "$BRIEF" >"$TMP/override" 2>&1; rc=$?
+[ "$rc" -eq 0 ] || fail "offered override should dispatch, got $rc"
+grep -qF -- '--model custom-id' "$AGY_ARGS_FILE" || fail "override did not reach dispatch"
+: > "$AGY_ARGS_FILE"
 
 # 1. agy --review → read-only preamble, no edit marker, no "IGNORED", brief preserved.
 OUT="$(TIMEOUT=0 "$DW" --runtime agy --review --brief "$BRIEF" --workdir "$TMP" 2>/dev/null)"
@@ -147,12 +168,12 @@ echo "test 5 (--help) PASS"
 
 # 6. agy --review defaults to the review model (Pro/High), multi-word name intact.
 TIMEOUT=0 "$DW" --runtime agy --review --brief "$BRIEF" --workdir "$TMP" >/dev/null 2>&1
-grep -qF -- "--model Gemini 3.1 Pro (High)" <<<"$(agy_exec_args)" || fail "agy --review missing/!= review model (got: $(cat "$AGY_ARGS_FILE"))"
+grep -qF -- "--model $AGY_MODEL_REVIEW_DEFAULT" <<<"$(agy_exec_args)" || fail "agy --review missing/!= review model (got: $(cat "$AGY_ARGS_FILE"))"
 echo "test 6 (agy review model default) PASS"
 
 # 7. agy edit mode defaults to the coding model (Flash/Medium).
 TIMEOUT=0 "$DW" --runtime agy --brief "$BRIEF" --workdir /repo/x >/dev/null 2>&1
-grep -qF -- "--model Gemini 3.8 Flash (Medium)" <<<"$(agy_exec_args)" || fail "agy edit missing/!= coding model"
+grep -qF -- "--model $AGY_MODEL_CODING_DEFAULT" <<<"$(agy_exec_args)" || fail "agy edit missing/!= coding model"
 echo "test 7 (agy edit model default) PASS"
 
 # 8. explicit --model overrides.
@@ -175,7 +196,7 @@ case "${1:-}" in
     ;;
 esac
 printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
-case "${1:-}" in models) exit 0;; esac
+case "${1:-}" in models) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0;; esac
 for arg in "$@"; do
   case "$arg" in
     exec|-) printf 'unexpected positional arg: %s\n' "$arg" >&2; exit 64 ;;
@@ -202,6 +223,7 @@ case "${1:-}" in
     ;;
 esac
 printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
+case "${1:-}" in models) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\n'; exit 0 ;; esac
 cat
 STUB
 chmod +x "$TMP/bin/agy"
@@ -483,6 +505,7 @@ case "${1:-}" in
     ;;
 esac
 printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
+case "${1:-}" in models) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\n'; exit 0 ;; esac
 cat
 STUB
   chmod +x "$TMP/bin/agy"
@@ -501,7 +524,7 @@ case "${1:-}" in
     exit 0
     ;;
 esac
-case "$*" in *models*) exit 0;; esac
+case "$*" in *models*) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0;; esac
 printf 'ok'
 STUB
 chmod +x "$TMP/bin/agy"
@@ -525,7 +548,7 @@ case "${1:-}" in
     exit 0
     ;;
 esac
-case "$*" in *models*) exit 0;; esac
+case "$*" in *models*) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0;; esac
 for i in $(seq 1 60); do printf 'Minor REVIEW LINE %s: no issues found in this pass.\n' "$i"; done
 STUB
 chmod +x "$TMP/bin/agy"
@@ -572,7 +595,7 @@ case "${1:-}" in
     exit 0
     ;;
 esac
-case "$*" in *models*) exit 0;; esac
+case "$*" in *models*) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0;; esac
 printf 'I have completed the review. No issues found.'
 STUB
 chmod +x "$TMP/bin/agy"
@@ -595,7 +618,7 @@ case "${1:-}" in
     exit 0
     ;;
 esac
-case "$*" in *models*) exit 0;; esac
+case "$*" in *models*) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0;; esac
 printf 'short'
 STUB
 chmod +x "$TMP/bin/agy"
@@ -619,7 +642,7 @@ case "${1:-}" in
     exit 0
     ;;
 esac
-case "$*" in *models*) exit 0;; esac
+case "$*" in *models*) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0;; esac
 printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
 cat > "$AGY_STDIN_FILE"
 touch scratch_evil.py
@@ -667,7 +690,7 @@ case "${1:-}" in
     exit 0
     ;;
 esac
-case "$*" in *models*) exit 0;; esac
+case "$*" in *models*) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0;; esac
 printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
 cat > "$AGY_STDIN_FILE"
 for i in $(seq 1 60); do printf 'Minor REVIEW LINE %s: non-git target reviewed.\n' "$i"; done
@@ -726,7 +749,7 @@ case "${1:-}" in
     exit 0
     ;;
 esac
-case "$*" in *models*) exit 0;; esac
+case "$*" in *models*) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0;; esac
 for i in $(seq 1 60); do printf 'Minor REVIEW LINE %s: reviewed committed HEAD.\n' "$i"; done
 STUB
 chmod +x "$TMP/bin/agy"
@@ -757,7 +780,7 @@ case "${1:-}" in
     exit 0
     ;;
 esac
-case "$*" in *models*) exit 0;; esac
+case "$*" in *models*) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0;; esac
 n=$(( $(cat "$AGY_COUNT_FILE" 2>/dev/null || echo 0) + 1 ))
 echo "$n" > "$AGY_COUNT_FILE"
 printf 'x'
@@ -789,7 +812,7 @@ case "${1:-}" in
     exit 0
     ;;
 esac
-case "$*" in *models*) exit 0;; esac
+case "$*" in *models*) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0;; esac
 n=$(( $(cat "$AGY_COUNT_FILE" 2>/dev/null || echo 0) + 1 ))
 echo "$n" > "$AGY_COUNT_FILE"
 printf 'ok'
@@ -825,7 +848,7 @@ case "${1:-}" in
     exit 0
     ;;
 esac
-case "$*" in *models*) exit 0;; esac
+case "$*" in *models*) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0;; esac
 n=$(( $(cat "$AGY_COUNT_FILE" 2>/dev/null || echo 0) + 1 ))
 echo "$n" > "$AGY_COUNT_FILE"
 if [ "$n" -eq 1 ]; then
@@ -870,7 +893,7 @@ case "${1:-}" in
     exit 0
     ;;
 esac
-case "$*" in *models*) exit 0;; esac
+case "$*" in *models*) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0;; esac
 n=$(( $(cat "$AGY_COUNT_FILE" 2>/dev/null || echo 0) + 1 ))
 echo "$n" > "$AGY_COUNT_FILE"
 for i in $(seq 1 60); do printf 'REVIEW LINE %s: long partial before the hang.\n' "$i"; done
@@ -934,7 +957,7 @@ case "${1:-}" in
     exit 0
     ;;
 esac
-case "$*" in *models*) exit 0;; esac
+case "$*" in *models*) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0;; esac
 for i in $(seq 1 60); do printf 'Minor REVIEW LINE %s: reviewed despite the dirty tree.\n' "$i"; done
 STUB
 chmod +x "$TMP/bin/agy"
@@ -982,7 +1005,7 @@ case "${1:-}" in
     exit 0
     ;;
 esac
-case "$*" in *models*) exit 0;; esac
+case "$*" in *models*) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0;; esac
 for i in $(seq 1 40); do printf 'Major finding %s: concise evidence.\n' "$i"; done
 STUB
 chmod +x "$TMP/bin/agy"
@@ -1010,7 +1033,7 @@ case "${1:-}" in
     exit 0
     ;;
 esac
-case "$*" in *models*) exit 0;; esac
+case "$*" in *models*) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0;; esac
 printf '%s\n' '## Review summary' '- The change is internally consistent and the implementation follows the brief.' '- Tests cover the expected success and failure cases.' '- Documentation appears synchronized with behavior.' '- No major issues were found after reading the affected paths.' '- Confidence is high and operational risk is low.'
 for i in $(seq 1 "${SIGNOFF_NOTES:-18}"); do printf 'Additional verification note %s confirms the same findings-free sign-off without a labelled item.\n' "$i"; done
 STUB
@@ -1049,7 +1072,7 @@ case "${1:-}" in
     exit 0
     ;;
 esac
-case "$*" in *models*) exit 0;; esac
+case "$*" in *models*) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0;; esac
 printf 'Major: concrete but deliberately short finding.'
 STUB
 chmod +x "$TMP/bin/agy"
@@ -1075,7 +1098,7 @@ case "${1:-}" in
     exit 0
     ;;
 esac
-case "$*" in *models*) exit 0;; esac
+case "$*" in *models*) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0;; esac
 printf 'Finding at %s. ' "$EVIDENCE_FIXTURE"
 for i in $(seq 1 30); do printf 'Concrete review analysis item %s explains behavior and verification. ' "$i"; done
 STUB
@@ -1104,7 +1127,7 @@ case "${1:-}" in
     exit 0
     ;;
 esac
-case "$*" in *models*) exit 0;; esac
+case "$*" in *models*) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0;; esac
 if [ "${ROWVERDICT_MODE:-table}" = table ]; then
   printf '%s\n' '## Per-row dispositions' '| Row | Disposition |' '|---|---|' '| R1.1 | ALIGN |' '| R1.2 | ALIGN |' '| E3 | ABSTAIN (out of lens) |' '| M1 | ALIGN |' '' 'Findings: none.'
 else
@@ -1142,7 +1165,7 @@ case "${1:-}" in
     ;;
 esac
 printf 'PWD=%s\n' "$PWD" >> "$AGY_ARGS_FILE"
-case "$*" in *models*) exit 0;; esac
+case "$*" in *models*) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0;; esac
 # GNU coreutils stat may precede BSD stat on PATH, and its -f means something else
 # entirely (filesystem info), so try the GNU form FIRST and fall back to BSD.
 parent_mode="$(stat -c '%a' "$(dirname "$PWD")" 2>/dev/null || stat -f '%Lp' "$(dirname "$PWD")" 2>/dev/null)"
@@ -1249,7 +1272,7 @@ case "${1:-}" in
 esac
 printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
 case "${1:-}" in
-  models) exit 0 ;;
+  models) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0 ;;
   agent) printf '%s\n' peer-security-reviewer peer-code-reviewer; exit 0 ;;
 esac
 cat
@@ -1257,7 +1280,7 @@ STUB
 chmod +x "$TMP/bin/agy"
 : > "$AGY_ARGS_FILE"
 TIMEOUT=0 "$DW" --runtime agy --brief "$BRIEF" --workdir /repo/x >/dev/null 2>&1
-[ "$(agy_exec_args)" = "--model Gemini 3.8 Flash (Medium)" ] \
+[ "$(agy_exec_args)" = "--model $AGY_MODEL_CODING_DEFAULT" ] \
   || fail "non---agent argv changed; golden filters only the auth-probe 'models' line (got: $(cat "$AGY_ARGS_FILE"))"
 : > "$AGY_ARGS_FILE"
 TIMEOUT=0 "$DW" --runtime agy --agent peer-security-reviewer --brief "$BRIEF" --workdir /repo/x >/dev/null 2>&1
@@ -1314,7 +1337,7 @@ case "${1:-}" in
 esac
 printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
 case "${1:-}" in
-  models) exit 0 ;;
+  models) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0 ;;
   agent) printf '%s\n' peer-security-reviewer peer-code-reviewer; exit 0 ;;
 esac
 n="$(cat "$AGY_COUNT_FILE")"; n=$((n + 1)); printf '%s\n' "$n" > "$AGY_COUNT_FILE"
@@ -1346,7 +1369,7 @@ case "${1:-}" in
 esac
 printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
 case "${1:-}" in
-  models) exit 0 ;;
+  models) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0 ;;
   agent)
     [ "$AGY_ROSTER_MODE" = nonzero ] && exit 19
     exit 0
@@ -1370,7 +1393,7 @@ cat > "$TMP/bin/agy" <<'STUB'
 #!/usr/bin/env bash
 # PERSONA_ROSTER_STUB
 case "${1:-}" in
-  models) exit 0 ;;
+  models) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0 ;;
   agent) cat; exit 0 ;;
 esac
 printf 'DISPATCHED\n'

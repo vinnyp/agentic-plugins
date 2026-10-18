@@ -43,7 +43,7 @@ emit_mode() {
 case "\${1:-}" in
   models)
     case "\${AGY_STUB_MODE:-healthy}" in
-      healthy) printf '%s\n' 'Gemini 3.1 Pro (High)'; exit 0 ;;
+      healthy) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\n'; exit 0 ;;
       dead)    printf '%s\n' 'Error: Please sign in to view available models. Launch the CLI without arguments to sign in.' >&2; exit 1 ;;
     esac
     ;;

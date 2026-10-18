@@ -177,8 +177,13 @@ authoritative text.
 | `workflow` | emits a JSON hand-off marker on stdout | for a workflow the calling session launches itself |
 | `a2a-endpoint` | not wired yet | returns 3 |
 
-Default agy models: `Gemini 3.1 Pro (High)` under `--review`, `Gemini 3.8 Flash (Medium)` for
-edits. Multi-word model names are kept intact as one argument.
+Default agy models: `gemini-4-argon-high` under `--review`, `gemini-3.8-flash-medium` for
+edits, defined in `bin/lib/agy-models.sh`. Multi-word overrides stay one argument.
+Preflight validates the effective coding model; dispatch-worker validates its effective
+role model (exit 9 if missing); the doctor fails if either pinned default is missing.
+If any gate reports drift, run `agy models` and edit `bin/lib/agy-models.sh`, or use
+`--model`/`MODEL` (dispatch-worker) or `AGY_MODEL` (coding) for a one-off override.
+Inconclusive auth probes skip model validation with a warning.
 `--agent NAME` is agy-only and rejects an unknown or unavailable persona roster with exit 2 before
 the brief is dispatched. The selected persona is retained on the one permitted review-timeout retry.
 
@@ -236,6 +241,7 @@ so judge those reviews yourself. For a whole round of lenses, see
 | `6` | codex hit a usage/rate limit. It can exit 0 on a zero-edit no-op, so this is detected from the limit signature *plus* an absence of substantive output. Treat as blocked. |
 | `7` | agy is not authenticated (`agy` and sign in). Do not retry as a build. |
 | `8` | an agy `--review` did not produce a real review (too short, no evidence, or timed out twice) |
+| `9` | effective agy model missing from live `agy models`; update `bin/lib/agy-models.sh` or the override |
 | `124` | the external `--timeout` bound killed a hung agent — a blocked phase, not a result |
 | other | the runtime's own exit code, unchanged |
 
@@ -561,8 +567,8 @@ PASS    2. lib/ is not on PATH (…/agent-dispatch/bin/../lib)
 PASS    3. codex on PATH (/usr/local/bin/codex)
 PASS    4. agy on PATH (/usr/local/bin/agy)
 PASS    5. agy models: OK
-PASS    5. default model present: Gemini 3.1 Pro (High)
-PASS    5. default model present: Gemini 3.8 Flash (Medium)
+PASS    5. review default model present: gemini-4-argon-high
+PASS    5. coding default model present: gemini-3.8-flash-medium
 PASS    6. shellcheck clean (entrypoints, severity>=warning)
 
 Summary: 0 fail, 0 warn
@@ -585,7 +591,7 @@ FAIL. So an `--install` that skipped an entrypoint (a foreign symlink it refused
 | `CODING_DISPATCH_PREAMBLE` | `coding-dispatch.sh` | path to the file holding the dispatch-preamble block (default: the plugin's `docs/dispatch-preamble.md`). A missing or empty block is a hard refusal (exit 2) before any side effect — a brief without the ground rules is the failure this exists to prevent. |
 | `CODING_BUILD_CMD` | `coding-build-phase.sh` | default for `--build-cmd` |
 | `CODING_COMMIT_SCOPE` | `coding-build-phase.sh` | conventional-commit scope (default: repo dir basename) |
-| `AGY_MODEL` | `coding-dispatch.sh` | agy model for edit dispatches (default `Gemini 3.8 Flash (Medium)`) |
+| `AGY_MODEL` | `coding-dispatch.sh` | agy model for edit dispatches (default `gemini-3.8-flash-medium` in `bin/lib/agy-models.sh`) |
 | `DISPATCH_NO_VENV` | `gate-run.sh` via `lib/gate-env.sh` | any value = same as `--no-venv` |
 | `DISPATCH_GATE_ADVISORY_TTL_SECS` | `coding-dispatch.sh` | `3600` — how long a "your build-cmd skips gate-target X" advisory is deduplicated |
 | `DISPATCH_REVIEW_PIN_TTL_SECS` | `review-pin.sh` | `14400` — after this a pin is stale and auto-removed |

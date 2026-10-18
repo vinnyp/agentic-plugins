@@ -181,8 +181,8 @@ printf '#!/usr/bin/env bash\nexit 0\n' > "$FAKE_RUNTIME_BIN/shellcheck"
 cat > "$FAKE_RUNTIME_BIN/agy" <<'EOF'
 #!/usr/bin/env bash
 if [ "${1:-}" = "models" ]; then
-  printf '%s\n' "Gemini 3.1 Pro (High)"
-  printf '%s\n' "Gemini 3.8 Flash (Medium)"
+  [ "${DOCTOR_DROP_MODEL:-}" = coding ] || printf 'gemini-3.8-flash-medium\tCoding\n'
+  [ "${DOCTOR_DROP_MODEL:-}" = review ] || printf 'gemini-4-argon-high\tReview\n'
   exit 0
 fi
 exit 0
@@ -197,6 +197,21 @@ else
   printf '%s\n' "$verify_out"
   fail "Test 5: verify mode did not pass check 1 for all registered entrypoints"
 fi
+
+# Both pins fail closed independently, including through relative symlink hops.
+mkdir -p "$TMP/links/hop"
+ln -s "$DOCTOR_BIN" "$TMP/links/hop/doctor"
+ln -s hop/doctor "$TMP/links/doctor"
+verify_out="$(PATH="$FAKE_RUNTIME_BIN:$BIN_DIR:$PATH" "$TMP/links/doctor" 2>&1)"; verify_rc=$?
+[ "$verify_rc" -eq 0 ] || fail "relative multi-hop doctor symlink failed: $verify_out"
+for role in coding review; do
+  verify_out="$(DOCTOR_DROP_MODEL="$role" PATH="$FAKE_RUNTIME_BIN:$BIN_DIR:$PATH" "$DOCTOR_BIN" 2>&1)"; verify_rc=$?
+  if [ "$verify_rc" -eq 1 ] && printf '%s\n' "$verify_out" | grep -q "FAIL.*$role default model"; then
+    pass "missing $role pin fails doctor"
+  else
+    fail "missing $role pin did not fail doctor: $verify_out"
+  fi
+done
 
 # ---------------------------------------------------------------------------
 # Test 6: run-tests.sh aggregate runner behavior

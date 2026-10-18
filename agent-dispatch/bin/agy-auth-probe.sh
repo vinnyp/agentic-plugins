@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Source-able agy OAuth freshness probe. Defines agy_auth_probe only.
+# Source-able agy OAuth freshness probe; retains successful output for model checks.
 
 agy_auth_probe() {
+  AGY_AUTH_PROBE_OUTPUT=""
   local agy_bin="${AGY_BIN:-agy}"
   local output rc timeout_bin
 
@@ -22,6 +23,8 @@ agy_auth_probe() {
   fi
 
   if [ "$rc" -eq 0 ]; then
+    # shellcheck disable=SC2034  # consumed by sourcing callers
+    AGY_AUTH_PROBE_OUTPUT="$output"
     printf '%s\n' 'agy auth probe healthy' >&2
     return 0
   fi

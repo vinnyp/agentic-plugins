@@ -91,6 +91,9 @@ for candidate in "$BIN_DIR"/* "$BIN_DIR"/lib/*; do
   case "$(basename "$candidate")" in
     test-*.sh) continue ;;
   esac
+  if [ "$candidate" != "$BIN_DIR/lib/agy-models.sh" ] && grep -Eq 'Gemini [0-9]|gemini-[a-z0-9]+-' "$candidate"; then
+    fail "agy model literal outside lib/agy-models.sh: $candidate"
+  fi
   scan_targets+=("$candidate")
 done
 
