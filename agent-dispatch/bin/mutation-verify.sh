@@ -153,10 +153,15 @@ cp -p "$file" "$snap_file" || {
 # BLOCKER 4: a failed restore must never lose the only surviving copy of
 # the file).
 restored=0
+# `cp -p` keeps the file's mode, but it also copies the snapshot's ORIGINAL
+# mtime back — older than the mutant's build artifacts — so an mtime-based
+# build (cargo, make) would treat the mutant's artifacts as fresh and keep
+# running the mutant after a byte-identical restore.
+# `touch` after a successful copy makes the restored source the newest input.
 restore_file() {
   [ "$restored" -eq 1 ] && return 0
   restored=1
-  cp -p "$snap_file" "$file"
+  cp -p "$snap_file" "$file" && touch "$file"
 }
 verify_restore() {
   cmp -s "$snap_file" "$file"

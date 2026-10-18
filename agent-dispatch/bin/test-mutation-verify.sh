@@ -634,4 +634,34 @@ grep -q "MUTANT-UNREACHABLE" "$TMP/out25" && { cat "$TMP/out25"; fail "--cover-c
 [ "$(cat "$GO25/target.go")" = "$before25" ] || fail "--cover-check compile-breaking mutant: file not byte-identical after restore"
 echo "test --cover-check compile-breaking mutant -> CAUGHT PASS"
 
+# ---------------------------------------------------------------------------
+# Test 26: the restored file must look NEWER than anything built from the
+# mutant. mtime-based build tools (cargo's fingerprint,
+# make) skip a rebuild when the source is older than its artifacts. A restore
+# that copies the snapshot's ORIGINAL (old) mtime back leaves the mutant's
+# artifacts looking fresh, so the next run silently executes the mutant.
+# The test-cmd stands in for a build: it writes an artifact on every run, the
+# last one being the under-mutation run.
+# ---------------------------------------------------------------------------
+F26="$TMP/mtime_target.txt"
+A26="$TMP/mtime_artifact"
+REF26="$TMP/mtime_ref"
+printf 'hello world\n' > "$F26"
+touch -t 200001010000 "$F26"
+touch -t 200001020000 "$REF26"
+before26="$(cat "$F26")"
+cat > "$TMP/mtime_test.sh" <<EOF
+#!/usr/bin/env bash
+touch "$A26"
+grep -q "hello world" "$F26"
+EOF
+chmod +x "$TMP/mtime_test.sh"
+bash "$MV" --file "$F26" --test-cmd "$TMP/mtime_test.sh" --mutate-sed 's/hello/goodbye/' >"$TMP/out26" 2>&1
+rc=$?
+[ "$rc" -eq 0 ] || { cat "$TMP/out26"; fail "restore mtime: expected exit 0 (mutation caught), got $rc"; }
+[ "$(cat "$F26")" = "$before26" ] || fail "restore mtime: file not byte-identical after restore"
+[ "$F26" -nt "$REF26" ] || fail "restore mtime: restored file kept its pre-mutation mtime — an mtime-based build would reuse the mutant's artifacts"
+[ "$A26" -nt "$F26" ] && fail "restore mtime: an artifact built from the mutant is newer than the restored source"
+echo "test restored file is newer than mutant artifacts -> PASS"
+
 echo "ALL PASS"
