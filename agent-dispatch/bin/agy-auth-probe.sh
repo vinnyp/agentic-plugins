@@ -4,7 +4,7 @@
 agy_auth_probe() {
   AGY_AUTH_PROBE_OUTPUT=""
   local agy_bin="${AGY_BIN:-agy}"
-  local output rc timeout_bin
+  local output rc timeout_bin output_file
 
   timeout_bin=""
   if command -v timeout >/dev/null 2>&1; then
@@ -13,14 +13,17 @@ agy_auth_probe() {
     timeout_bin="gtimeout"
   fi
 
+  output_file="$(mktemp)" || return 2
   if [ -n "$timeout_bin" ]; then
-    output="$("$timeout_bin" 5s "$agy_bin" models </dev/null 2>&1)"
+    "$timeout_bin" -k 2s 5s "$agy_bin" models </dev/null >"$output_file" 2>&1
     rc=$?
   else
     printf '%s\n' 'agy auth probe: no timeout binary — probe is unbounded' >&2
-    output="$("$agy_bin" models </dev/null 2>&1)"
+    "$agy_bin" models </dev/null >"$output_file" 2>&1
     rc=$?
   fi
+  output="$(cat "$output_file")"
+  rm -f "$output_file"
 
   if [ "$rc" -eq 0 ]; then
     # shellcheck disable=SC2034  # consumed by sourcing callers

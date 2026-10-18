@@ -17,9 +17,10 @@ set -uo pipefail
 SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck disable=SC1091
 . "$SELF_DIR/lib/test-env-reset.sh"
-# shellcheck disable=SC1091
-. "$SELF_DIR/lib/agy-models.sh"
 reset_dispatch_env  # neutralize any operator-exported dispatch vars before the suite runs
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "$0")" && pwd)/lib/agy-models.sh"
+export AGY_TEST_CODING_PIN="$AGY_MODEL_CODING_DEFAULT" AGY_TEST_REVIEW_PIN="$AGY_MODEL_REVIEW_DEFAULT"
 DW="$SELF_DIR/dispatch-worker"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -56,7 +57,7 @@ case "${1:-}" in
     if [ "${AGY_MISSING_REVIEW:-0}" = 1 ]; then
       printf 'custom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'
     else
-      printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'
+      printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n' "$AGY_TEST_CODING_PIN" "$AGY_TEST_REVIEW_PIN"
     fi
     exit 0 ;;
   agent)
@@ -67,7 +68,7 @@ case "${1:-}" in
     ;;
 esac
 printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
-case "${1:-}" in models) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\n'; exit 0 ;; esac
+case "${1:-}" in models) printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon (High)\n' "$AGY_TEST_CODING_PIN" "$AGY_TEST_REVIEW_PIN"; exit 0 ;; esac
 cat
 STUB
 cat > "$TMP/bin/codex" <<'STUB'
@@ -196,7 +197,7 @@ case "${1:-}" in
     ;;
 esac
 printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
-case "${1:-}" in models) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0;; esac
+case "${1:-}" in models) printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n' "$AGY_TEST_CODING_PIN" "$AGY_TEST_REVIEW_PIN"; exit 0;; esac
 for arg in "$@"; do
   case "$arg" in
     exec|-) printf 'unexpected positional arg: %s\n' "$arg" >&2; exit 64 ;;
@@ -223,7 +224,7 @@ case "${1:-}" in
     ;;
 esac
 printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
-case "${1:-}" in models) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\n'; exit 0 ;; esac
+case "${1:-}" in models) printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon (High)\n' "$AGY_TEST_CODING_PIN" "$AGY_TEST_REVIEW_PIN"; exit 0 ;; esac
 cat
 STUB
 chmod +x "$TMP/bin/agy"
@@ -505,7 +506,7 @@ case "${1:-}" in
     ;;
 esac
 printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
-case "${1:-}" in models) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\n'; exit 0 ;; esac
+case "${1:-}" in models) printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon (High)\n' "$AGY_TEST_CODING_PIN" "$AGY_TEST_REVIEW_PIN"; exit 0 ;; esac
 cat
 STUB
   chmod +x "$TMP/bin/agy"
@@ -524,7 +525,7 @@ case "${1:-}" in
     exit 0
     ;;
 esac
-case "$*" in *models*) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0;; esac
+case "$*" in *models*) printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n' "$AGY_TEST_CODING_PIN" "$AGY_TEST_REVIEW_PIN"; exit 0;; esac
 printf 'ok'
 STUB
 chmod +x "$TMP/bin/agy"
@@ -548,7 +549,7 @@ case "${1:-}" in
     exit 0
     ;;
 esac
-case "$*" in *models*) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0;; esac
+case "$*" in *models*) printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n' "$AGY_TEST_CODING_PIN" "$AGY_TEST_REVIEW_PIN"; exit 0;; esac
 for i in $(seq 1 60); do printf 'Minor REVIEW LINE %s: no issues found in this pass.\n' "$i"; done
 STUB
 chmod +x "$TMP/bin/agy"
@@ -595,7 +596,7 @@ case "${1:-}" in
     exit 0
     ;;
 esac
-case "$*" in *models*) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0;; esac
+case "$*" in *models*) printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n' "$AGY_TEST_CODING_PIN" "$AGY_TEST_REVIEW_PIN"; exit 0;; esac
 printf 'I have completed the review. No issues found.'
 STUB
 chmod +x "$TMP/bin/agy"
@@ -618,7 +619,7 @@ case "${1:-}" in
     exit 0
     ;;
 esac
-case "$*" in *models*) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0;; esac
+case "$*" in *models*) printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n' "$AGY_TEST_CODING_PIN" "$AGY_TEST_REVIEW_PIN"; exit 0;; esac
 printf 'short'
 STUB
 chmod +x "$TMP/bin/agy"
@@ -642,7 +643,7 @@ case "${1:-}" in
     exit 0
     ;;
 esac
-case "$*" in *models*) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0;; esac
+case "$*" in *models*) printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n' "$AGY_TEST_CODING_PIN" "$AGY_TEST_REVIEW_PIN"; exit 0;; esac
 printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
 cat > "$AGY_STDIN_FILE"
 touch scratch_evil.py
@@ -690,7 +691,7 @@ case "${1:-}" in
     exit 0
     ;;
 esac
-case "$*" in *models*) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0;; esac
+case "$*" in *models*) printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n' "$AGY_TEST_CODING_PIN" "$AGY_TEST_REVIEW_PIN"; exit 0;; esac
 printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
 cat > "$AGY_STDIN_FILE"
 for i in $(seq 1 60); do printf 'Minor REVIEW LINE %s: non-git target reviewed.\n' "$i"; done
@@ -749,7 +750,7 @@ case "${1:-}" in
     exit 0
     ;;
 esac
-case "$*" in *models*) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0;; esac
+case "$*" in *models*) printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n' "$AGY_TEST_CODING_PIN" "$AGY_TEST_REVIEW_PIN"; exit 0;; esac
 for i in $(seq 1 60); do printf 'Minor REVIEW LINE %s: reviewed committed HEAD.\n' "$i"; done
 STUB
 chmod +x "$TMP/bin/agy"
@@ -780,7 +781,7 @@ case "${1:-}" in
     exit 0
     ;;
 esac
-case "$*" in *models*) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0;; esac
+case "$*" in *models*) printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n' "$AGY_TEST_CODING_PIN" "$AGY_TEST_REVIEW_PIN"; exit 0;; esac
 n=$(( $(cat "$AGY_COUNT_FILE" 2>/dev/null || echo 0) + 1 ))
 echo "$n" > "$AGY_COUNT_FILE"
 printf 'x'
@@ -812,7 +813,7 @@ case "${1:-}" in
     exit 0
     ;;
 esac
-case "$*" in *models*) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0;; esac
+case "$*" in *models*) printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n' "$AGY_TEST_CODING_PIN" "$AGY_TEST_REVIEW_PIN"; exit 0;; esac
 n=$(( $(cat "$AGY_COUNT_FILE" 2>/dev/null || echo 0) + 1 ))
 echo "$n" > "$AGY_COUNT_FILE"
 printf 'ok'
@@ -848,7 +849,7 @@ case "${1:-}" in
     exit 0
     ;;
 esac
-case "$*" in *models*) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0;; esac
+case "$*" in *models*) printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n' "$AGY_TEST_CODING_PIN" "$AGY_TEST_REVIEW_PIN"; exit 0;; esac
 n=$(( $(cat "$AGY_COUNT_FILE" 2>/dev/null || echo 0) + 1 ))
 echo "$n" > "$AGY_COUNT_FILE"
 if [ "$n" -eq 1 ]; then
@@ -893,7 +894,7 @@ case "${1:-}" in
     exit 0
     ;;
 esac
-case "$*" in *models*) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0;; esac
+case "$*" in *models*) printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n' "$AGY_TEST_CODING_PIN" "$AGY_TEST_REVIEW_PIN"; exit 0;; esac
 n=$(( $(cat "$AGY_COUNT_FILE" 2>/dev/null || echo 0) + 1 ))
 echo "$n" > "$AGY_COUNT_FILE"
 for i in $(seq 1 60); do printf 'REVIEW LINE %s: long partial before the hang.\n' "$i"; done
@@ -957,7 +958,7 @@ case "${1:-}" in
     exit 0
     ;;
 esac
-case "$*" in *models*) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0;; esac
+case "$*" in *models*) printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n' "$AGY_TEST_CODING_PIN" "$AGY_TEST_REVIEW_PIN"; exit 0;; esac
 for i in $(seq 1 60); do printf 'Minor REVIEW LINE %s: reviewed despite the dirty tree.\n' "$i"; done
 STUB
 chmod +x "$TMP/bin/agy"
@@ -1005,7 +1006,7 @@ case "${1:-}" in
     exit 0
     ;;
 esac
-case "$*" in *models*) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0;; esac
+case "$*" in *models*) printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n' "$AGY_TEST_CODING_PIN" "$AGY_TEST_REVIEW_PIN"; exit 0;; esac
 for i in $(seq 1 40); do printf 'Major finding %s: concise evidence.\n' "$i"; done
 STUB
 chmod +x "$TMP/bin/agy"
@@ -1033,7 +1034,7 @@ case "${1:-}" in
     exit 0
     ;;
 esac
-case "$*" in *models*) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0;; esac
+case "$*" in *models*) printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n' "$AGY_TEST_CODING_PIN" "$AGY_TEST_REVIEW_PIN"; exit 0;; esac
 printf '%s\n' '## Review summary' '- The change is internally consistent and the implementation follows the brief.' '- Tests cover the expected success and failure cases.' '- Documentation appears synchronized with behavior.' '- No major issues were found after reading the affected paths.' '- Confidence is high and operational risk is low.'
 for i in $(seq 1 "${SIGNOFF_NOTES:-18}"); do printf 'Additional verification note %s confirms the same findings-free sign-off without a labelled item.\n' "$i"; done
 STUB
@@ -1072,7 +1073,7 @@ case "${1:-}" in
     exit 0
     ;;
 esac
-case "$*" in *models*) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0;; esac
+case "$*" in *models*) printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n' "$AGY_TEST_CODING_PIN" "$AGY_TEST_REVIEW_PIN"; exit 0;; esac
 printf 'Major: concrete but deliberately short finding.'
 STUB
 chmod +x "$TMP/bin/agy"
@@ -1098,7 +1099,7 @@ case "${1:-}" in
     exit 0
     ;;
 esac
-case "$*" in *models*) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0;; esac
+case "$*" in *models*) printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n' "$AGY_TEST_CODING_PIN" "$AGY_TEST_REVIEW_PIN"; exit 0;; esac
 printf 'Finding at %s. ' "$EVIDENCE_FIXTURE"
 for i in $(seq 1 30); do printf 'Concrete review analysis item %s explains behavior and verification. ' "$i"; done
 STUB
@@ -1127,7 +1128,7 @@ case "${1:-}" in
     exit 0
     ;;
 esac
-case "$*" in *models*) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0;; esac
+case "$*" in *models*) printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n' "$AGY_TEST_CODING_PIN" "$AGY_TEST_REVIEW_PIN"; exit 0;; esac
 if [ "${ROWVERDICT_MODE:-table}" = table ]; then
   printf '%s\n' '## Per-row dispositions' '| Row | Disposition |' '|---|---|' '| R1.1 | ALIGN |' '| R1.2 | ALIGN |' '| E3 | ABSTAIN (out of lens) |' '| M1 | ALIGN |' '' 'Findings: none.'
 else
@@ -1165,7 +1166,7 @@ case "${1:-}" in
     ;;
 esac
 printf 'PWD=%s\n' "$PWD" >> "$AGY_ARGS_FILE"
-case "$*" in *models*) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0;; esac
+case "$*" in *models*) printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n' "$AGY_TEST_CODING_PIN" "$AGY_TEST_REVIEW_PIN"; exit 0;; esac
 # GNU coreutils stat may precede BSD stat on PATH, and its -f means something else
 # entirely (filesystem info), so try the GNU form FIRST and fall back to BSD.
 parent_mode="$(stat -c '%a' "$(dirname "$PWD")" 2>/dev/null || stat -f '%Lp' "$(dirname "$PWD")" 2>/dev/null)"
@@ -1272,7 +1273,7 @@ case "${1:-}" in
 esac
 printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
 case "${1:-}" in
-  models) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0 ;;
+  models) printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n' "$AGY_TEST_CODING_PIN" "$AGY_TEST_REVIEW_PIN"; exit 0 ;;
   agent) printf '%s\n' peer-security-reviewer peer-code-reviewer; exit 0 ;;
 esac
 cat
@@ -1337,7 +1338,7 @@ case "${1:-}" in
 esac
 printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
 case "${1:-}" in
-  models) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0 ;;
+  models) printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n' "$AGY_TEST_CODING_PIN" "$AGY_TEST_REVIEW_PIN"; exit 0 ;;
   agent) printf '%s\n' peer-security-reviewer peer-code-reviewer; exit 0 ;;
 esac
 n="$(cat "$AGY_COUNT_FILE")"; n=$((n + 1)); printf '%s\n' "$n" > "$AGY_COUNT_FILE"
@@ -1369,7 +1370,7 @@ case "${1:-}" in
 esac
 printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
 case "${1:-}" in
-  models) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0 ;;
+  models) printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n' "$AGY_TEST_CODING_PIN" "$AGY_TEST_REVIEW_PIN"; exit 0 ;;
   agent)
     [ "$AGY_ROSTER_MODE" = nonzero ] && exit 19
     exit 0
@@ -1393,7 +1394,7 @@ cat > "$TMP/bin/agy" <<'STUB'
 #!/usr/bin/env bash
 # PERSONA_ROSTER_STUB
 case "${1:-}" in
-  models) printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'; exit 0 ;;
+  models) printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n' "$AGY_TEST_CODING_PIN" "$AGY_TEST_REVIEW_PIN"; exit 0 ;;
   agent) cat; exit 0 ;;
 esac
 printf 'DISPATCHED\n'

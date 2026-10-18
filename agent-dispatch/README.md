@@ -155,13 +155,13 @@ Issues and pull requests are welcome. Keep `bin/run-tests.sh` green, keep shellc
 convention is to assert the observable effect (what the child process saw, what is on disk, what
 the exit code was), not that a line of code exists.
 
-## License
-
-MIT.
-
 agy role defaults live in [`bin/lib/agy-models.sh`](bin/lib/agy-models.sh): coding uses
 Flash Medium and review uses Argon High. Preflight and dispatch-worker validate the
 effective model against live `agy models`; the doctor checks both pins. On drift,
 run `agy models` and edit that file, or use `--model`/`MODEL` on dispatch-worker or
 `AGY_MODEL` for coding as a one-off override. Inconclusive auth probes warn and skip
 the model check. See [commands](docs/commands.md) for details.
+
+## License
+
+MIT.

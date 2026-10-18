@@ -76,9 +76,15 @@ case "$agent" in
     case "$auth_rc" in
       0)
         agy_model="${AGY_MODEL:-$AGY_MODEL_CODING_DEFAULT}"
-        agy_model_present "$AGY_AUTH_PROBE_OUTPUT" "$agy_model" || fail "agy model '$agy_model' (coding) not offered by installed agy — update AGY_MODEL_CODING_DEFAULT in bin/lib/agy-models.sh (or your AGY_MODEL override); run 'agy models' for current IDs"
+        model_rc=0
+        agy_model_present "$AGY_AUTH_PROBE_OUTPUT" "$agy_model" || model_rc=$?
+        case "$model_rc" in
+          0) echo "AGY_MODEL_CHECK=ok" ;;
+          1) fail "agy model '$agy_model' (coding) not offered by installed agy — update $SCRIPT_DIR/lib/agy-models.sh (or your AGY_MODEL override); run 'agy models' for current IDs" ;;
+          2) echo "AGY_MODEL_CHECK=skipped:unparseable models"; note "unparseable agy models — skipping model check" ;;
+        esac
         ;;
-      2) note "⚠ agy auth probe inconclusive — skipping model check; proceeding" ;;
+      2) echo "AGY_MODEL_CHECK=skipped:inconclusive auth"; note "⚠ agy auth probe inconclusive — skipping model check; proceeding" ;;
       7) fail "agy not signed in — run: agy (launch once to sign in)" ;;
       *) fail "agy auth probe failed unexpectedly (rc=$auth_rc)" ;;
     esac
@@ -97,7 +103,7 @@ case "$agent" in
     echo "CODING_AGENT=agy"
     echo "CODING_BIN=$bin"
     echo "CODING_MODEL=${AGY_MODEL:-$AGY_MODEL_CODING_DEFAULT}"
-    echo "CODING_INVOKE=agy < brief   (prompt on bare stdin; the _coding-result.json marker is the success signal, NOT stdout)"
+    echo "CODING_INVOKE=agy --model ${AGY_MODEL:-$AGY_MODEL_CODING_DEFAULT} < brief   (prompt on bare stdin; the _coding-result.json marker is the success signal, NOT stdout)"
     echo "PREFLIGHT=ok"
     note "✓ agy ready + authed — $bin"
     ;;

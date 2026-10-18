@@ -183,13 +183,16 @@ authoritative text.
 | `workflow` | emits a JSON hand-off marker on stdout | for a workflow the calling session launches itself |
 | `a2a-endpoint` | not wired yet | returns 3 |
 
-Default agy models: `gemini-4-argon-high` under `--review`, `gemini-3.8-flash-medium` for
-edits, defined in `bin/lib/agy-models.sh`. Multi-word overrides stay one argument.
+Default agy models are defined by role in `bin/lib/agy-models.sh`: review under `--review`, coding for
+edits. Multi-word overrides stay one argument.
 Preflight validates the effective coding model; dispatch-worker validates its effective
 role model (exit 9 if missing); the doctor fails if either pinned default is missing.
 If any gate reports drift, run `agy models` and edit `bin/lib/agy-models.sh`, or use
 `--model`/`MODEL` (dispatch-worker) or `AGY_MODEL` (coding) for a one-off override.
-Inconclusive auth probes skip model validation with a warning.
+Inconclusive auth probes and unparseable lists skip model validation with a warning.
+Agy preflight emits `AGY_MODEL_CHECK=ok` or `AGY_MODEL_CHECK=skipped:<reason>`;
+its `CODING_INVOKE` includes the effective `--model`. Matching ignores case; tierless
+IDs warn that agy chooses a tier. Missing-model remedies name the absolute pin file.
 `--agent NAME` is agy-only and rejects an unknown or unavailable persona roster with exit 2 before
 the brief is dispatched. The selected persona is retained on the one permitted review-timeout retry.
 
@@ -573,8 +576,8 @@ PASS    2. lib/ is not on PATH (…/agent-dispatch/bin/../lib)
 PASS    3. codex on PATH (/usr/local/bin/codex)
 PASS    4. agy on PATH (/usr/local/bin/agy)
 PASS    5. agy models: OK
-PASS    5. review default model present: gemini-4-argon-high
-PASS    5. coding default model present: gemini-3.8-flash-medium
+PASS    5. coding default model present: <coding pin>
+PASS    5. review default model present: <review pin>
 PASS    6. shellcheck clean (entrypoints, severity>=warning)
 
 Summary: 0 fail, 0 warn
@@ -597,7 +600,7 @@ FAIL. So an `--install` that skipped an entrypoint (a foreign symlink it refused
 | `CODING_DISPATCH_PREAMBLE` | `coding-dispatch.sh` | path to the file holding the dispatch-preamble block (default: the plugin's `docs/dispatch-preamble.md`). A missing or empty block is a hard refusal (exit 2) before any side effect — a brief without the ground rules is the failure this exists to prevent. |
 | `CODING_BUILD_CMD` | `coding-build-phase.sh` | default for `--build-cmd` |
 | `CODING_COMMIT_SCOPE` | `coding-build-phase.sh` | conventional-commit scope (default: repo dir basename) |
-| `AGY_MODEL` | `coding-dispatch.sh` | agy model for edit dispatches (default `gemini-3.8-flash-medium` in `bin/lib/agy-models.sh`) |
+| `AGY_MODEL` | `coding-dispatch.sh` | agy model for edit dispatches (default: coding pin in `bin/lib/agy-models.sh`) |
 | `DISPATCH_NO_VENV` | `gate-run.sh` via `lib/gate-env.sh` | any value = same as `--no-venv` |
 | `DISPATCH_GATE_ADVISORY_TTL_SECS` | `coding-dispatch.sh` | `3600` — how long a "your build-cmd skips gate-target X" advisory is deduplicated |
 | `DISPATCH_REVIEW_PIN_TTL_SECS` | `review-pin.sh` | `14400` — after this a pin is stale and auto-removed |
@@ -614,3 +617,7 @@ FAIL. So an `--install` that skipped an entrypoint (a foreign symlink it refused
 | `AGY_FORM_PROBE_TIMEOUT`, `AGY_BIN` | `coding-preflight.sh` probes | `30s`; the agy binary to probe |
 | `DCS_BOOT_MAX`, `DCS_SETTLE_MAX`, `DCS_STABLE`, `DCS_INTERVAL`, `DCS_COLS`, `DCS_ROWS`, `DCS_KILL`, `DCS_CLOSE` | the drive scripts | see above |
 | `TMPDIR`, `XDG_CACHE_HOME` | several | honoured for temp files, gate logs, and review-worktree fallbacks |
+
+`review-gate cross-model --model <id>` forwards a one-off model override.
+Exit 9 means model not offered in `dispatch-worker`; in `coding-dispatch.sh` and
+`coding-build-phase.sh` it means review-pin refusal.

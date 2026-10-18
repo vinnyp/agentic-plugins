@@ -96,3 +96,9 @@ once to warm the helper, and check macOS quarantine/Gatekeeper on the codex cask
 binaries. A recent reinstall may be involved, but quarantine is an unconfirmed cause.
 `CODEX_EXEC_PROBE_TIMEOUT` raises the default `120s` bound for slow environments;
 `CODING_PREFLIGHT_CODEX_PROBE=0` skips the probe for repeated scripted preflights.
+
+Exit 9 is binary-specific: `dispatch-worker` means the agy model is not offered
+(fix `bin/lib/agy-models.sh` or pass `--model`, then re-run);
+`coding-dispatch.sh` and `coding-build-phase.sh` mean review-pin refusal.
+An unparseable model list warns and skips validation. Model names are matched
+case-insensitively; tierless IDs warn that agy chooses the tier.

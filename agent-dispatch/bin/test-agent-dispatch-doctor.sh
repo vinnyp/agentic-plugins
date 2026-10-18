@@ -16,6 +16,9 @@ BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck disable=SC1091
 . "$BIN_DIR/lib/test-env-reset.sh"
 reset_dispatch_env  # neutralize any operator-exported dispatch vars before the suite runs
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "$0")" && pwd)/lib/agy-models.sh"
+export AGY_TEST_CODING_PIN="$AGY_MODEL_CODING_DEFAULT" AGY_TEST_REVIEW_PIN="$AGY_MODEL_REVIEW_DEFAULT"
 DOCTOR_BIN="$BIN_DIR/agent-dispatch-doctor"
 RUN_TESTS_BIN="$BIN_DIR/run-tests.sh"
 
@@ -181,8 +184,9 @@ printf '#!/usr/bin/env bash\nexit 0\n' > "$FAKE_RUNTIME_BIN/shellcheck"
 cat > "$FAKE_RUNTIME_BIN/agy" <<'EOF'
 #!/usr/bin/env bash
 if [ "${1:-}" = "models" ]; then
-  [ "${DOCTOR_DROP_MODEL:-}" = coding ] || printf 'gemini-3.8-flash-medium\tCoding\n'
-  [ "${DOCTOR_DROP_MODEL:-}" = review ] || printf 'gemini-4-argon-high\tReview\n'
+  if [ "${DOCTOR_UNPARSEABLE:-}" = 1 ]; then echo "format drift"; exit 0; fi
+  [ "${DOCTOR_DROP_MODEL:-}" = coding ] || printf '%s\tCoding\n' "$AGY_TEST_CODING_PIN"
+  [ "${DOCTOR_DROP_MODEL:-}" = review ] || printf '%s\tReview\n' "$AGY_TEST_REVIEW_PIN"
   exit 0
 fi
 exit 0
@@ -212,6 +216,21 @@ for role in coding review; do
     fail "missing $role pin did not fail doctor: $verify_out"
   fi
 done
+
+verify_out="$(DOCTOR_UNPARSEABLE=1 PATH="$FAKE_RUNTIME_BIN:$BIN_DIR:$PATH" "$DOCTOR_BIN" 2>&1)"; verify_rc=$?
+if [ "$verify_rc" -eq 2 ] && printf '%s\n' "$verify_out" | grep -q 'WARN.*unparseable agy models'; then
+  pass "unparseable models warn rather than report missing pins"
+else
+  fail "unparseable models should warn: $verify_out"
+fi
+mkdir -p "$TMP/broken-install"
+cp "$DOCTOR_BIN" "$TMP/broken-install/agent-dispatch-doctor"
+verify_out="$("$TMP/broken-install/agent-dispatch-doctor" 2>&1)"; verify_rc=$?
+if [ "$verify_rc" -eq 1 ] && printf '%s\n' "$verify_out" | grep -q 'broken install'; then
+  pass "missing model library reports broken install"
+else
+  fail "missing model library diagnostic: $verify_out"
+fi
 
 # ---------------------------------------------------------------------------
 # Test 6: run-tests.sh aggregate runner behavior

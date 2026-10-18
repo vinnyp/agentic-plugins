@@ -82,6 +82,13 @@ contains() {
   return 1
 }
 
+# shellcheck disable=SC1091
+. "$BIN_DIR/lib/agy-models.sh"
+model_pattern='Gemini [0-9]|gemini-[a-z0-9.]+-|claude-(opus|sonnet|haiku)-|gpt-oss-'
+for pin in "$AGY_MODEL_CODING_DEFAULT" "$AGY_MODEL_REVIEW_DEFAULT"; do
+  printf '%s\n' "$pin" | grep -Eq "$model_pattern" || fail "model literal guard positive control: $pin"
+done
+
 scan_targets=()
 # bin/ AND bin/lib/ — the top-level-only walk was a structural blind spot: a helper
 # under bin/lib/ that read a dispatch knob would have been invisible to this scan,
@@ -91,8 +98,8 @@ for candidate in "$BIN_DIR"/* "$BIN_DIR"/lib/*; do
   case "$(basename "$candidate")" in
     test-*.sh) continue ;;
   esac
-  if [ "$candidate" != "$BIN_DIR/lib/agy-models.sh" ] && grep -Eq 'Gemini [0-9]|gemini-[a-z0-9]+-' "$candidate"; then
-    fail "agy model literal outside lib/agy-models.sh: $candidate"
+  if [ "$candidate" != "$BIN_DIR/lib/agy-models.sh" ] && { grep -Eq "$model_pattern" "$candidate" || grep -Fq "$AGY_MODEL_CODING_DEFAULT" "$candidate" || grep -Fq "$AGY_MODEL_REVIEW_DEFAULT" "$candidate"; }; then
+    fail "model literal in non-test bin/ and bin/lib/ outside lib/agy-models.sh: $candidate"
   fi
   scan_targets+=("$candidate")
 done

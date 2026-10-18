@@ -35,6 +35,7 @@ while [ -L "$_src" ]; do
   case "$_src" in /*) ;; *) _src="$_dir/$_src" ;; esac
 done
 SCRIPT_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
+[ -r "$SCRIPT_DIR/lib/agy-models.sh" ] || { echo "dispatch-worker: broken install: cannot read $SCRIPT_DIR/lib/agy-models.sh" >&2; exit 3; }
 # shellcheck disable=SC1091
 . "$SCRIPT_DIR/lib/agy-models.sh"
 RUNTIME="${RUNTIME:-codex}"
@@ -456,9 +457,10 @@ dispatch_agy() {
   command -v agy >/dev/null || { echo "dispatch-worker: agy not on PATH (this runtime is a future case)" >&2; return 3; }
   # shellcheck disable=SC1091  # dynamic source path ($SCRIPT_DIR); resolved at runtime
   . "$SCRIPT_DIR/agy-auth-probe.sh"
-  local agy_model="$MODEL" agy_role="coding"
+  local agy_model="$MODEL" agy_role="coding" agy_source="--model/MODEL" model_rc=0
   [ "$REVIEW" = "1" ] && agy_role="review"
   if [ -z "$agy_model" ]; then
+    agy_source="default"
     if [ "$REVIEW" = "1" ]; then agy_model="$AGY_MODEL_REVIEW_DEFAULT"; else agy_model="$AGY_MODEL_CODING_DEFAULT"; fi
   fi
   local auth_rc=0
@@ -468,10 +470,13 @@ dispatch_agy() {
   set -e
   case "$auth_rc" in
     0)
-      if ! agy_model_present "$AGY_AUTH_PROBE_OUTPUT" "$agy_model"; then
-        echo "dispatch-worker: agy model '$agy_model' ($agy_role) not offered by installed agy — update bin/lib/agy-models.sh (or your --model/MODEL override); run 'agy models' for current IDs" >&2
-        return 9
-      fi
+      agy_model_present "$AGY_AUTH_PROBE_OUTPUT" "$agy_model" || model_rc=$?
+      case "$model_rc" in
+        1)
+          echo "dispatch-worker: agy model '$agy_model' ($agy_role, $agy_source) not offered by installed agy — update $SCRIPT_DIR/lib/agy-models.sh (or your --model/MODEL override); run 'agy models' for current IDs" >&2
+          return 9 ;;
+        2) echo "dispatch-worker: unparseable agy models — skipping model check; proceeding" >&2 ;;
+      esac
       ;;
     2) echo "dispatch-worker: agy auth probe inconclusive — skipping model check; proceeding" >&2 ;;
     7)
@@ -483,6 +488,7 @@ dispatch_agy() {
       return "$auth_rc"
       ;;
   esac
+  echo "dispatch-worker: agy model: $agy_model ($agy_role, $agy_source)" >&2
   if [ -n "$AGENT" ]; then
     local agent_roster agent_rc=0 roster_timeout=""
     if command -v timeout >/dev/null 2>&1; then

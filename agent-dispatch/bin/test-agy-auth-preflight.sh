@@ -5,6 +5,9 @@ SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck disable=SC1091
 . "$SELF_DIR/lib/test-env-reset.sh"
 reset_dispatch_env  # neutralize any operator-exported dispatch vars before the suite runs
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "$0")" && pwd)/lib/agy-models.sh"
+export AGY_TEST_CODING_PIN="$AGY_MODEL_CODING_DEFAULT" AGY_TEST_REVIEW_PIN="$AGY_MODEL_REVIEW_DEFAULT"
 PREFLIGHT="$SELF_DIR/coding-preflight.sh"
 DW="$SELF_DIR/dispatch-worker"
 TMP="$(mktemp -d)"
@@ -23,9 +26,11 @@ printf '%s\n' "$*" >> "$AGY_CALL_LOG"
 case "${1:-}" in
   models)
     case "${AGY_STUB_MODE:-healthy}" in
+      unparseable) echo 'format drift'; exit 0 ;;
+      review_missing) printf '%s\tCoding\r\ncustom-id\tCustom Display\r\ncustom-id-high\tTiered\r\n' "$AGY_TEST_CODING_PIN"; exit 0 ;;
       missing) printf 'custom-id\tCustom Display\n'; exit 0 ;;
       healthy)
-        printf 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ncustom-id\tCustom Display\n'
+        printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon (High)\ncustom-id\tCustom Display\n' "$AGY_TEST_CODING_PIN" "$AGY_TEST_REVIEW_PIN"
         exit 0
         ;;
       dead)
@@ -63,6 +68,7 @@ STUB
 
 cat > "$TMP/bin/timeout" <<'STUB'
 #!/usr/bin/env bash
+[ "${1:-}" != -k ] || shift 2
 shift
 # Scoped to the `agy models` call the auth probe makes (AGY_STUB_MODE=slow
 # simulates ONLY that call hanging) — a blanket match on every timeout invocation
@@ -253,7 +259,7 @@ done
 model_list="$(printf 'id-one\tDisplay One\tignored\r\n')"
 agy_model_present "$model_list" id-one || fail "CRLF ID did not match"
 agy_model_present "$model_list" 'Display One' || fail "CRLF display name did not match"
-for model in id 'Display' ignored; do
+for model in 'Display' ignored; do
   if agy_model_present "$model_list" "$model"; then fail "non-exact model matched: $model"; fi
 done
 AGY_STUB_MODE=healthy agy_auth_probe >/dev/null 2>&1
@@ -261,4 +267,62 @@ AGY_STUB_MODE=healthy agy_auth_probe >/dev/null 2>&1
 AGY_STUB_MODE=network agy_auth_probe >/dev/null 2>&1
 [ -z "$AGY_AUTH_PROBE_OUTPUT" ] || fail "inconclusive probe leaked stale model list"
 
+# Name and parser contracts, including literal backslashes through ENVIRON.
+for model in 'display one' ID-ONE; do
+  agy_model_present "$model_list" "$model" || fail "case-insensitive match: $model"
+done
+for model in '' "$(printf 'bad\nmodel')" "$(printf 'bad\tmodel')" 'literal\nmodel'; do
+  agy_model_present "$model_list" "$model"; rc=$?
+  [ "$rc" -eq 1 ] || fail "invalid/absent model accepted: $model ($rc)"
+done
+agy_model_present 'format drift' id-one; rc=$?
+[ "$rc" -eq 2 ] || fail "unparseable list must return 2"
+agy_model_present "$model_list" id >"$TMP/tier.out" 2>"$TMP/tier.err" || fail "tierless ID rejected"
+grep -q 'has no tier' "$TMP/tier.err" || fail "tierless warning missing"
+
+grep -qFx "CODING_MODEL=$AGY_MODEL_CODING_DEFAULT" "$TMP/preflight-healthy.out" || fail "default coding model missing"
+grep -qFx 'AGY_MODEL_CHECK=ok' "$TMP/preflight-healthy.out" || fail "check status missing"
+grep -qF -- "--model $AGY_MODEL_CODING_DEFAULT" "$TMP/preflight-healthy.out" || fail "invoke lacks model"
+AGY_STUB_MODE=healthy AGY_MODEL=bogus "$PREFLIGHT" agy >"$TMP/bogus.out" 2>&1; rc=$?
+[ "$rc" -eq 1 ] && grep -q "PREFLIGHT=error: agy model 'bogus'" "$TMP/bogus.out" || fail "bogus preflight override accepted"
+for mode in network unparseable review_missing; do
+  AGY_STUB_MODE="$mode" "$PREFLIGHT" agy >"$TMP/check.out" 2>&1; rc=$?
+  [ "$rc" -eq 0 ] || fail "preflight $mode should proceed"
+  if [ "$mode" != review_missing ]; then grep -q 'AGY_MODEL_CHECK=skipped:' "$TMP/check.out" || fail "skip not reported"; fi
+done
+for model in 'custom display' custom-id; do
+  AGY_STUB_MODE=review_missing AGY_MODEL="$model" "$PREFLIGHT" agy >"$TMP/name.out" 2>&1; rc=$?
+  [ "$rc" -eq 0 ] || fail "name form rejected: $model"
+done
+# All review tests use this suite's isolated workdir.
+for mode in network unparseable review_missing healthy; do
+  : >"$AGY_CALL_LOG"
+  AGY_STUB_MODE="$mode" AGY_MODEL_REVIEW_DEFAULT=bogus DISPATCH_MIN_REVIEW_BYTES=1 DISPATCH_REVIEW_REQUIRE_EVIDENCE=0 TIMEOUT=0 "$DW" --runtime agy --review --brief "$BRIEF" --workdir "$REVIEW_WORKDIR" >"$TMP/review.out" 2>"$TMP/review.err"; rc=$?
+  if [ "$mode" = review_missing ]; then
+    [ "$rc" -eq 9 ] || fail "missing review pin should return 9: $rc"
+    [ "$(wc -l <"$AGY_CALL_LOG" | tr -d ' ')" -eq 1 ] || fail "missing pin dispatched"
+  else
+    [ "$rc" -eq 0 ] || fail "review $mode should dispatch: $rc"
+    grep -qF "agy model: $AGY_MODEL_REVIEW_DEFAULT (review, default)" "$TMP/review.err" || fail "pin overridden or source diagnostic missing"
+    if [ "$mode" != healthy ]; then grep -q 'skipping model check' "$TMP/review.err" || fail "worker skip note missing"; fi
+  fi
+done
+AGY_STUB_MODE=review_missing TIMEOUT=0 "$DW" --runtime agy --brief "$BRIEF" --workdir "$REVIEW_WORKDIR" >"$TMP/edit.out" 2>&1; rc=$?
+[ "$rc" -eq 0 ] || fail "review-only missing pin blocked edit"
+: >"$AGY_CALL_LOG"
+AGY_STUB_MODE=healthy TIMEOUT=0 "$DW" --runtime agy --model bogus --brief "$BRIEF" --workdir "$REVIEW_WORKDIR" >"$TMP/dw-bogus.out" 2>&1; rc=$?
+[ "$rc" -eq 9 ] || fail "bogus worker override should return 9"
+[ "$(wc -l <"$AGY_CALL_LOG" | tr -d ' ')" -eq 1 ] || fail "bogus worker override dispatched"
+grep -qF -- '--model/MODEL' "$TMP/dw-bogus.out" || fail "override source missing"
+for model in 'custom display' custom-id; do
+  AGY_STUB_MODE=review_missing TIMEOUT=0 "$DW" --runtime agy --model "$model" --brief "$BRIEF" --workdir "$REVIEW_WORKDIR" >"$TMP/dw-name.out" 2>&1; rc=$?
+  [ "$rc" -eq 0 ] || fail "worker rejected name form $model"
+  if [ "$model" = custom-id ]; then grep -q 'has no tier' "$TMP/dw-name.out" && fail "exact ID should win over tierless prefix"; fi
+done
+AGY_STUB_MODE=review_missing TIMEOUT=0 "$DW" --runtime agy --model custom --brief "$BRIEF" --workdir "$REVIEW_WORKDIR" >"$TMP/dw-tier.out" 2>&1; rc=$?
+[ "$rc" -eq 0 ] && grep -q 'has no tier' "$TMP/dw-tier.out" || fail "worker tierless override/warning failed"
+mkdir -p "$TMP/broken-install"
+cp "$DW" "$TMP/broken-install/dispatch-worker"
+"$TMP/broken-install/dispatch-worker" --help >"$TMP/broken.out" 2>&1; rc=$?
+[ "$rc" -eq 3 ] && grep -q 'broken install' "$TMP/broken.out" || fail "missing worker model library diagnostic"
 echo "ALL PASS"
