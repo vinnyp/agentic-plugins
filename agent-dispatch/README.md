@@ -162,6 +162,11 @@ run `agy models` and edit that file, or use `--model`/`MODEL` on dispatch-worker
 `AGY_MODEL` for coding as a one-off override. Inconclusive auth probes warn and skip
 the model check. See [commands](docs/commands.md) for details.
 
+The codex preflight shell probe hashes a nonce in a private cache repository and
+reports `CODEX_EXEC_PROBE=ok|inconclusive|skipped`. Its default bound is 75s plus
+a 10s kill grace; see [commands](docs/commands.md) for overrides and
+[data flow](docs/safety-and-data-flow.md) for provider context and retained artifacts.
+
 ## License
 
 MIT.

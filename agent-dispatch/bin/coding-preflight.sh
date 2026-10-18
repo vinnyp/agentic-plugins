@@ -38,6 +38,7 @@ case "$agent" in
     auth="$("$bin" login status 2>&1 | head -1)"
     case "$auth" in *"Logged in"*) : ;; *) fail "codex not logged in ($auth) — run: codex login" ;; esac
     if [ "${CODING_PREFLIGHT_CODEX_PROBE:-}" = 0 ]; then
+      echo "CODEX_EXEC_PROBE=skipped"
       note "codex exec probe: skipped (CODING_PREFLIGHT_CODEX_PROBE=0)"
     else
       # shellcheck disable=SC1091
@@ -46,8 +47,8 @@ case "$agent" in
       probe_rc=$?
       CODEX_EXEC_PROBE_REASON="${CODEX_EXEC_PROBE_REASON##*$'\n'}"
       case "$probe_rc" in
-        0) : ;;
-        2) note "codex exec probe inconclusive, proceeding: $CODEX_EXEC_PROBE_REASON" ;;
+        0) echo "CODEX_EXEC_PROBE=ok" ;;
+        2) echo "CODEX_EXEC_PROBE=inconclusive"; note "codex exec probe inconclusive, proceeding: $CODEX_EXEC_PROBE_REASON" ;;
         *) fail "$CODEX_EXEC_PROBE_REASON" ;;
       esac
     fi

@@ -37,7 +37,7 @@ human notes on stderr. Run it once when you opt into a runtime, before delegatin
 
 * **codex**: binary present; not already inside a codex sandbox (`CODEX_SANDBOX` /
   `CODEX_SESSION_ID`); `codex login status` reports logged in; reports the model from
-  `~/.codex/config.toml`. A one-turn exec probe verifies that its shell tool copies a
+  `~/.codex/config.toml`. A one-turn exec probe verifies that its shell tool hashes a
   nonce in a disposable git repository before reporting ready. Shell failures and timeouts
   fail closed; unavailable probe prerequisites are inconclusive and proceed with a note.
 * **agy**: binary present; not already inside an agy session (`ANTIGRAVITY_SESSION` /
@@ -49,7 +49,12 @@ Stdout on success ends with `PREFLIGHT=ok`. Exit codes: `0` ready, `1` not ready
 (`PREFLIGHT=error: <reason>` on stdout), `2` unknown agent.
 
 Env: `AGY_FORM_PROBE_TIMEOUT` (default `30s`) bounds the live prompt-form probe.
-`CODEX_EXEC_PROBE_TIMEOUT` (default `120s`, with a `10s` kill grace) bounds the codex probe.
+`CODEX_EXEC_PROBE_TIMEOUT` (default `75s`, with a `10s` kill grace) bounds the codex probe.
+The probe usually takes tens of seconds. Allow at least 120s in the calling agent's
+tool timeout; when raising the probe bound, also allow its 10s kill grace and preflight overhead.
+The bound must match `^[1-9][0-9]*[smh]?$`; invalid values (including zero)
+fall back to 75s with a stderr note. Stdout reports
+`CODEX_EXEC_PROBE=ok|inconclusive|skipped`.
 Only `CODING_PREFLIGHT_CODEX_PROBE=0` skips it, for repeated scripted preflights.
 If the probe reports a code-mode host error, run `codex-code-mode-host --help` once
 and check macOS quarantine/Gatekeeper on the codex cask binaries.
@@ -613,7 +618,7 @@ FAIL. So an `--install` that skipped an entrypoint (a foreign symlink it refused
 | `DISPATCH_REVIEW_WT_DIR` | `dispatch-worker` | preferred parent directory for isolated review worktrees |
 | `DISPATCH_ALLOW_DIRTY` | `dispatch-worker` | `1` = warn instead of refusing when a review brief names an uncommitted path |
 | `DISPATCH_LIMIT_NOOP_BYTES` | `dispatch-worker` | `200` — stdout below this, plus a rate-limit signature, is read as a limit no-op (exit 6) |
-| `CODING_PREFLIGHT_CODEX_PROBE`, `CODEX_EXEC_PROBE_TIMEOUT` | `coding-preflight.sh codex` | enabled unless exactly `0`; `120s` timeout |
+| `CODING_PREFLIGHT_CODEX_PROBE`, `CODEX_EXEC_PROBE_TIMEOUT` | `coding-preflight.sh codex` | enabled unless exactly `0`; `75s` timeout |
 | `AGY_FORM_PROBE_TIMEOUT`, `AGY_BIN` | `coding-preflight.sh` probes | `30s`; the agy binary to probe |
 | `DCS_BOOT_MAX`, `DCS_SETTLE_MAX`, `DCS_STABLE`, `DCS_INTERVAL`, `DCS_COLS`, `DCS_ROWS`, `DCS_KILL`, `DCS_CLOSE` | the drive scripts | see above |
 | `TMPDIR`, `XDG_CACHE_HOME` | several | honoured for temp files, gate logs, and review-worktree fallbacks |
