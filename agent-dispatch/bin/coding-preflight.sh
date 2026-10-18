@@ -37,6 +37,20 @@ case "$agent" in
     ver="$("$bin" --version 2>/dev/null | head -1)"
     auth="$("$bin" login status 2>&1 | head -1)"
     case "$auth" in *"Logged in"*) : ;; *) fail "codex not logged in ($auth) — run: codex login" ;; esac
+    if [ "${CODING_PREFLIGHT_CODEX_PROBE:-}" = 0 ]; then
+      note "codex exec probe: skipped (CODING_PREFLIGHT_CODEX_PROBE=0)"
+    else
+      # shellcheck disable=SC1091
+      . "$SCRIPT_DIR/codex-exec-probe.sh"
+      CODEX_EXEC_PROBE_REASON="$(CODEX_BIN="$bin" codex_exec_probe)"
+      probe_rc=$?
+      CODEX_EXEC_PROBE_REASON="${CODEX_EXEC_PROBE_REASON##*$'\n'}"
+      case "$probe_rc" in
+        0) : ;;
+        2) note "codex exec probe inconclusive, proceeding: $CODEX_EXEC_PROBE_REASON" ;;
+        *) fail "$CODEX_EXEC_PROBE_REASON" ;;
+      esac
+    fi
     # Model + reasoning effort inherit from ~/.codex/config.toml; never pin -m / -c.
     model="$(grep -E '^[[:space:]]*model[[:space:]]*=' "$HOME/.codex/config.toml" 2>/dev/null | head -1 | sed -E 's/.*=[[:space:]]*"?([^"]+)"?.*/\1/')"
     [ -z "$model" ] && model="codex default"

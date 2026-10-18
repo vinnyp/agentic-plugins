@@ -104,7 +104,7 @@ else
   while IFS= read -r name || [ -n "$name" ]; do
     [ -n "$name" ] || continue
     found_names+=("$name")
-  done < <(grep -rhoE '\bCODING_[A-Z_]+\b|\bDISPATCH_[A-Z_]+\b|\bAGY_MODEL\b' "${scan_targets[@]}" 2>/dev/null | sort -u)
+  done < <(grep -rhoE '\bCODING_[A-Z_]+\b|\bDISPATCH_[A-Z_]+\b|\bAGY_MODEL\b|\bCODEX_EXEC_PROBE_TIMEOUT\b|\bAGY_FORM_PROBE_TIMEOUT\b' "${scan_targets[@]}" 2>/dev/null | sort -u)
 
   if [ "${#found_names[@]}" -eq 0 ]; then
     fail "completeness: grep found zero CODING_*/DISPATCH_*/AGY_MODEL hits across ${#scan_targets[@]} entrypoints — that's suspicious (the scan is probably broken), not a real all-clear"

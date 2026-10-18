@@ -87,3 +87,12 @@ the running instance and invoke from there.
 **A TUI drive reads stale or empty output.** That is render lag, not an empty reply. Both drive
 scripts re-capture until the screen stabilises; if you are scripting a TUI yourself, never act on
 the first capture after a keystroke, and never send prompt text and Enter in a single call.
+
+**codex empty diff / code-mode host timeout.** If even shell commands fail with
+`timed out negotiating with the code-mode host`, codex may still exit zero and leave
+an empty diff. Preflight now tests a real shell command and fails closed on this error,
+including when a fallback writes the expected file. Run `codex-code-mode-host --help`
+once to warm the helper, and check macOS quarantine/Gatekeeper on the codex cask
+binaries. A recent reinstall may be involved, but quarantine is an unconfirmed cause.
+`CODEX_EXEC_PROBE_TIMEOUT` raises the default `120s` bound for slow environments;
+`CODING_PREFLIGHT_CODEX_PROBE=0` skips the probe for repeated scripted preflights.

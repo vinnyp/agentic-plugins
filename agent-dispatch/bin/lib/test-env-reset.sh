@@ -22,6 +22,9 @@
 # such var it finds is covered here (directly or via an explicit opt-out) —
 # extend this list first if that check ever fails.
 DISPATCH_ENV_VARS=(
+  CODING_PREFLIGHT_CODEX_PROBE
+  CODEX_EXEC_PROBE_TIMEOUT
+  AGY_FORM_PROBE_TIMEOUT
   CODING_DISPATCH_TIMEOUT
   CODING_DISPATCH_WORKTREE
   CODING_DISPATCH_RM_ON_FAIL

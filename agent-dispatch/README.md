@@ -38,6 +38,11 @@ your first run:
 | Scope gate (`--allow-path`) | yes | no |
 | Hard revert on failure | yes | **no** |
 
+Codex preflight now verifies a real shell-tool invocation in a disposable cache
+repository before reporting ready. Shell failures and hangs fail closed; see the
+[preflight command reference](docs/commands.md#coding-preflightsh) for timeout,
+opt-out, and code-mode-host troubleshooting.
+
 So an edit through `coding-dispatch.sh` either leaves reviewable changes in the tree (or a salvaged
 diff in `--worktree` mode) or hard-resets to the pre-dispatch commit. Anything through
 `dispatch-worker` is bounded and classified, but **never reverted**: a partial or failed edit stays
