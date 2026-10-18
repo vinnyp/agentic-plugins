@@ -391,6 +391,58 @@ wait "$disp_pid"; rc=$?
 [ ! -d "$WT" ] || fail "(d) trap should remove the fresh empty worktree (no test-side prune)"
 echo "test (d) TERM fires trap, removes empty worktree PASS"
 
+# TERM must stop the live worker before reverting or salvaging its output.
+mkdir -p "$TMP/signalbin"
+cat > "$TMP/signalbin/codex" <<'STUB'
+#!/usr/bin/env bash
+wd=""
+while [ $# -gt 0 ]; do
+  if [ "$1" = -C ]; then wd="$2"; shift 2; else shift; fi
+done
+cd "$wd" || exit 1
+echo interrupted > signal-work.txt
+if [ "${SIGNAL_COMMIT:-0}" = 1 ]; then
+  git add signal-work.txt
+  git commit -qm 'worker checkpoint'
+fi
+echo "$$" > "$SIGNAL_PID_FILE"
+exec sleep 30
+STUB
+chmod +x "$TMP/signalbin/codex"
+for signal_mode in inplace worktree tdd; do
+  P="$TMP/signal-$signal_mode"; new_parent "$P"
+  signal_args=()
+  signal_target="$P"
+  if [ "$signal_mode" = worktree ]; then
+    signal_args=(--worktree)
+    signal_target="$(expected_wt "$P" signal-worker)"
+  fi
+  signal_commit=0
+  [ "$signal_mode" != tdd ] || signal_commit=1
+  started_at=$SECONDS
+  PATH="$TMP/signalbin:$PATH" SIGNAL_PID_FILE="$TMP/worker.pid" SIGNAL_COMMIT="$signal_commit" \
+    CODING_DISPATCH_WORKTREE=signal-worker bash "$CD" ${signal_args[@]+"${signal_args[@]}"} codex "$P" "$TMP/prompt" true >"$TMP/signal.out" 2>&1 &
+  disp_pid=$!
+  for _ in $(seq 1 100); do [ -s "$TMP/worker.pid" ] && break; sleep 0.1; done
+  [ -s "$TMP/worker.pid" ] || fail "$signal_mode worker did not start"
+  worker_pid="$(cat "$TMP/worker.pid")"
+  kill -TERM "$disp_pid"
+  wait "$disp_pid"; rc=$?
+  [ "$rc" -eq 143 ] || fail "$signal_mode signal exit was $rc"
+  [ "$((SECONDS - started_at))" -lt 10 ] || fail "$signal_mode interruption waited for worker sleep"
+  kill -0 "$worker_pid" 2>/dev/null && fail "$signal_mode orphaned worker $worker_pid"
+  grep -q 'DISPATCH=fail: interrupted (signal)' "$TMP/signal.out" || fail "$signal_mode missing interrupted line"
+  if [ "$signal_mode" = inplace ]; then
+    [ -z "$(git -C "$P" status --porcelain)" ] || fail "signal did not revert in-place tree"
+  else
+    [ -f "$signal_target/signal-work.txt" ] || fail "$signal_mode lost worker output"
+  fi
+  signal_patch="$(git -C "$signal_target" rev-parse --absolute-git-dir)/coding-dispatch-last-fail.patch"
+  grep -q '+interrupted' "$signal_patch" || fail "$signal_mode missing salvaged patch"
+  rm -f "$TMP/worker.pid"
+  echo "test TERM stops worker and handles $signal_mode tree PASS"
+done
+
 # (d2) SIGKILL the script (untrappable) → orphan dir remains → next same-slug run REUSES (not die).
 mkdir -p "$TMP/slowbin2"
 printf '#!/usr/bin/env bash\nsleep 5\n' > "$TMP/slowbin2/codex"; chmod +x "$TMP/slowbin2/codex"

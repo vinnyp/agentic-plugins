@@ -415,20 +415,7 @@ if [ "$WORKTREE" -eq 1 ]; then
     cd "$WT_DIR" || die "cannot enter new worktree $WT_DIR"
   fi
   BASE="$(git rev-parse HEAD)"
-  # shellcheck disable=SC2329 # invoked indirectly by the signal trap below
-  cleanup_signal() {
-    trap - INT TERM EXIT
-    cd "$PARENT_ROOT" 2>/dev/null || true   # never operate from a dir we may remove
-    if [ "$CREATED_HERE" -eq 1 ] && [ -z "$(git -C "$WT_DIR" status --porcelain 2>/dev/null)" ] \
-       && [ "$(git -C "$WT_DIR" rev-parse HEAD 2>/dev/null)" = "$BASE" ]; then
-      git -C "$PARENT_ROOT" worktree remove --force "$WT_DIR" 2>/dev/null
-      note "↩ signal: removed empty worktree $WT_DIR"
-    else
-      note "↩ signal: salvageable work left in $WT_DIR (branch $SLUG) — remove with: git -C $PARENT_ROOT worktree remove --force $WT_DIR"
-    fi
-    exit 143
-  }
-  trap cleanup_signal INT TERM
+
 else
   # In-place mode: require a clean tree — the revert net hard-resets to HEAD, which would
   # also nuke pre-existing uncommitted work. Plan execution commits per task, so this holds.
@@ -532,42 +519,11 @@ if [ "$agent" = "agy" ]; then
 fi
 note "▶ dispatching to $agent in $target (timeout $TIMEOUT, base ${BASE:0:12})…"
 
-case "$agent" in
-  codex)
-    if [ -n "$TIMEOUT_BIN" ]; then
-      "$TIMEOUT_BIN" -k 30s "$TIMEOUT" codex exec --dangerously-bypass-approvals-and-sandbox -C "$target" - < "$_effective_prompt"
-    else
-      note "⚠ no timeout/gtimeout binary — codex hang cannot be externally bounded (brew install coreutils)"
-      codex exec --dangerously-bypass-approvals-and-sandbox -C "$target" - < "$_effective_prompt"
-    fi
-    ;;
-  agy)
-    # BARE STDIN is the only form agy 1.1.22 accepts. Do NOT reintroduce --print: it now
-    # takes the NEXT TOKEN as its prompt, so `--print --dangerously-skip-permissions` makes
-    # agy treat the flag as the prompt and IGNORE stdin entirely (rc=2). `exec` and a bare
-    # `-` are rejected as unexpected positionals. Verified against agy 1.1.22, 2026-08-27.
-    # The _coding-result.json marker (not stdout) is the success signal — this sidesteps
-    # agy's empty-stdout caveat in restricted environments. agy's OWN --print-timeout has
-    # proven UNRELIABLE (observed hanging 6.5h past a 15m setting) and is tied to --print,
-    # so the EXTERNAL timeout (separate process, own clock) is the real bound, as for codex.
-    if [ -n "$TIMEOUT_BIN" ]; then
-      "$TIMEOUT_BIN" -k 30s "$TIMEOUT" agy --model "$agy_model" --dangerously-skip-permissions --add-dir "$target" < "$_effective_prompt"
-    else
-      note "⚠ no timeout/gtimeout binary — agy hang cannot be externally bounded (brew install coreutils)"
-      agy --model "$agy_model" --dangerously-skip-permissions --add-dir "$target" < "$_effective_prompt"
-    fi
-    ;;
-esac
-agent_rc=$?
-if [ "$agent" = "agy" ] && { [ "$agent_rc" -eq 124 ] || [ "$agent_rc" -eq 137 ]; }; then
-  note "agy timed out (rc=$agent_rc) — switch to a faster agy model (AGY_MODEL='$AGY_MODEL_CODING_DEFAULT') or raise CODING_DISPATCH_TIMEOUT (current $TIMEOUT); a wedged agy may need: pkill -9 -f agy"
-fi
 
 # revert() is only safe when the worker left changes uncommitted (HEAD == BASE). In TDD mode
 # the worker committed per-task; a hard-reset would discard those commits. Guard callers.
 _tdd_mode() { [ "$(git rev-parse HEAD 2>/dev/null)" != "$BASE" ]; }
 revert() { git reset --hard "$BASE" >/dev/null 2>&1; git clean -fd >/dev/null 2>&1; }
-marker_status="$(jq -r '.status // empty' _coding-result.json 2>/dev/null || true)"
 
 # #118: every gate failure below snapshots the diff BEFORE any revert/clean, so a discarded or
 # salvaged build stays inspectable. MUST be `git diff "$BASE"` (diffs the current working tree
@@ -652,6 +608,74 @@ report_fail() {
     _emit "DISPATCH=fail: $label — tree reverted to ${BASE:0:12}; patch: $patch_path"
   fi
 }
+
+
+# Bash runs signal traps promptly while waiting on an asynchronous worker. Keep the
+# EXIT prompt-file cleanup installed, and stop the worker before inspecting its tree.
+child=""
+# shellcheck disable=SC2329 # invoked by the signal trap
+cleanup_signal() {
+  trap '' INT TERM
+  if [ -n "$child" ]; then
+    kill -TERM "$child" 2>/dev/null || true
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      kill -0 "$child" 2>/dev/null || break
+      sleep 0.1
+    done
+    kill -KILL "$child" 2>/dev/null || true
+    wait "$child" 2>/dev/null || true
+  fi
+  if [ "$WORKTREE" -eq 1 ] && [ "$CREATED_HERE" -eq 1 ] \
+     && [ -z "$(git status --porcelain 2>/dev/null)" ] && ! _tdd_mode; then
+    cd "$PARENT_ROOT" || exit 143
+    git worktree remove --force "$WT_DIR" 2>/dev/null
+    note "DISPATCH=fail: interrupted (signal) — removed empty worktree $WT_DIR"
+  else
+    report_fail "interrupted (signal)" err
+  fi
+  exit 143
+}
+trap cleanup_signal INT TERM
+
+case "$agent" in
+  codex)
+    if [ -n "$TIMEOUT_BIN" ]; then
+      "$TIMEOUT_BIN" -k 30s "$TIMEOUT" codex exec --dangerously-bypass-approvals-and-sandbox -C "$target" - < "$_effective_prompt" &
+      child=$!
+    else
+      note "⚠ no timeout/gtimeout binary — codex hang cannot be externally bounded (brew install coreutils)"
+      codex exec --dangerously-bypass-approvals-and-sandbox -C "$target" - < "$_effective_prompt" &
+      child=$!
+    fi
+    ;;
+  agy)
+    # BARE STDIN is the only form agy 1.1.22 accepts. Do NOT reintroduce --print: it now
+    # takes the NEXT TOKEN as its prompt, so `--print --dangerously-skip-permissions` makes
+    # agy treat the flag as the prompt and IGNORE stdin entirely (rc=2). `exec` and a bare
+    # `-` are rejected as unexpected positionals. Verified against agy 1.1.22, 2026-08-27.
+    # The _coding-result.json marker (not stdout) is the success signal — this sidesteps
+    # agy's empty-stdout caveat in restricted environments. agy's OWN --print-timeout has
+    # proven UNRELIABLE (observed hanging 6.5h past a 15m setting) and is tied to --print,
+    # so the EXTERNAL timeout (separate process, own clock) is the real bound, as for codex.
+    if [ -n "$TIMEOUT_BIN" ]; then
+      "$TIMEOUT_BIN" -k 30s "$TIMEOUT" agy --model "$agy_model" --dangerously-skip-permissions --add-dir "$target" < "$_effective_prompt" &
+      child=$!
+    else
+      note "⚠ no timeout/gtimeout binary — agy hang cannot be externally bounded (brew install coreutils)"
+      agy --model "$agy_model" --dangerously-skip-permissions --add-dir "$target" < "$_effective_prompt" &
+      child=$!
+    fi
+    ;;
+esac
+wait "$child"
+agent_rc=$?
+child=""
+if [ "$agent" = "agy" ] && { [ "$agent_rc" -eq 124 ] || [ "$agent_rc" -eq 137 ]; }; then
+  note "agy timed out (rc=$agent_rc) — switch to a faster agy model (AGY_MODEL='$AGY_MODEL_CODING_DEFAULT') or raise CODING_DISPATCH_TIMEOUT (current $TIMEOUT); a wedged agy may need: pkill -9 -f agy"
+fi
+
+marker_status="$(jq -r '.status // empty' _coding-result.json 2>/dev/null || true)"
+
 
 # Validation order (authoritative gates first; marker is belt-and-suspenders, NOT required):
 #   1. non-empty change: either uncommitted diff OR HEAD advanced past BASE (TDD commits)

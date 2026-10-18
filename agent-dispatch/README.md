@@ -50,6 +50,11 @@ exactly where the agent left it. See
 [What this does NOT protect](docs/safety-and-data-flow.md#what-this-does-not-protect) for what a
 git-level revert cannot undo.
 
+On INT/TERM, `coding-dispatch.sh` stops its worker before cleanup and reports
+`DISPATCH=fail: interrupted (signal)`. In-place changes are reverted unless
+`--keep-on-fail` applies or the worker committed changes; worktree changes and
+commits are salvaged with a failure patch. Fresh empty worktrees are removed.
+
 It is **not** an agent, a model, or a sandbox. It does not write code, choose a model for you, or
 contain the agent it launches.
 
