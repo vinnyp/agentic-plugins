@@ -24,9 +24,11 @@ esac
 printf '%s\n' "$4" > "$LOG.dir"
 [ -d "$4/.git" ] && echo git > "$LOG.git"
 cat > "$LOG.stdin"
+# Execute only the command requested by the probe.
+sed -i.bak 's/^Using only your shell tool, run exactly: //' "$LOG.stdin"
 cd "$4" || exit 91
 case "$BEHAVIOR" in
-  copy) shasum -a 256 nonce.in > nonce.out ;;
+  copy) bash -e "$LOG.stdin" ;;
   wrong) echo wrong > nonce.out ;;
   empty) : ;;
   failure) echo bad request; exit 42 ;;
@@ -149,21 +151,51 @@ case "$(cat "$LOG.dir")" in "$HOME"/.cache/agent-dispatch/codex-probe.*) : ;; *)
 [ ! -d "$HOME/.cache/agent-dispatch/codex-probe.stale" ] || fail 'stale directory retained'
 [ -d "$HOME/.cache/agent-dispatch/codex-probe.fresh" ] || fail 'fresh directory removed'
 export XDG_CACHE_HOME="$TMP/cache"
-# TERM targets the function subshell; only its bounded child is signalled.
-export BEHAVIOR=term CODEX_EXEC_PROBE_TIMEOUT=60s
-rm -f "$LOG.pid"
-bash -c '. "$1"; codex_exec_probe; exit $?' _ "$BIN_DIR/codex-exec-probe.sh" > "$TMP/out" 2> "$TMP/err" &
-launcher=$!
-# The function is a subshell of this launcher.
-for ((i=0; i<100; i++)); do
-  [ ! -f "$LOG.pid" ] || break
-  sleep 0.05
+# Signals target the function subshell; only its bounded child is signalled.
+for signal in TERM HUP; do
+  export BEHAVIOR=term CODEX_EXEC_PROBE_TIMEOUT=60s
+  rm -f "$LOG.pid"
+  bash -c '. "$1"; codex_exec_probe; exit $?' _ "$BIN_DIR/codex-exec-probe.sh" > "$TMP/out" 2> "$TMP/err" &
+  launcher=$!
+  # The function is a subshell of this launcher.
+  for ((i=0; i<100; i++)); do
+    [ ! -f "$LOG.pid" ] || break
+    sleep 0.05
+  done
+  [ -f "$LOG.pid" ] || fail "$signal stub not started"
+  probe_pid="$(ps -o ppid= -p "$(ps -o ppid= -p "$(cat "$LOG.pid")" | tr -d ' ')" | tr -d ' ')"
+  signal_start=$SECONDS
+  kill -"$signal" "$probe_pid"
+  wait "$launcher"
+  rc=$?
+  expected=143
+  [ "$signal" != HUP ] || expected=129
+  [ "$rc" -eq "$expected" ] || fail "$signal status: $rc"
+  [ "$((SECONDS - signal_start))" -le 5 ] || fail "$signal exceeded 5s"
+  ! kill -0 "$(cat "$LOG.pid")" 2>/dev/null || fail "$signal left child"
+  [ ! -e "$(cat "$LOG.dir")" ] || fail "$signal left directory"
 done
-[ -f "$LOG.pid" ] || fail 'TERM stub not started'
-probe_pid="$(ps -o ppid= -p "$(ps -o ppid= -p "$(cat "$LOG.pid")" | tr -d ' ')" | tr -d ' ')"
-kill -TERM "$probe_pid"
-wait "$launcher"
-[ "$?" -eq 143 ] || fail 'TERM status'
-! kill -0 "$(cat "$LOG.pid")" 2>/dev/null || fail 'TERM left child'
-[ ! -e "$(cat "$LOG.dir")" ] || fail 'TERM left directory'
+# A private PATH exposes exactly one digest tool, and no codex binary.
+mkdir -p "$TMP/isolated-bin" "$HOME/.local/bin"
+cp "$TMP/bin/codex" "$HOME/.local/bin/codex"
+for utility in bash cat sed mkdir stat id find mktemp git grep tail awk head tr dirname readlink rm; do
+  ln -s "$(command -v "$utility")" "$TMP/isolated-bin/$utility"
+done
+ln -s "$TMP/bin/timeout" "$TMP/isolated-bin/timeout"
+export BEHAVIOR=copy
+for digest_tool in shasum sha256sum; do
+  digest_path="$(command -v "$digest_tool")"
+  ln -s "$digest_path" "$TMP/isolated-bin/$digest_tool"
+  PATH="$TMP/isolated-bin" bash "$BIN_DIR/coding-preflight.sh" codex > "$TMP/out" 2> "$TMP/err"
+  rc=$?
+  [ "$rc" -eq 0 ] || fail "off-PATH codex / $digest_tool preflight: $(cat "$TMP/err")"
+  grep -q '^CODEX_EXEC_PROBE=ok$' "$TMP/out" || fail 'off-PATH probe did not run'
+  grep -qFx "CODING_BIN=$HOME/.local/bin/codex" "$TMP/out" || fail 'fallback binary not selected'
+  case "$digest_tool" in
+    shasum) command_text='shasum -a 256' ;;
+    sha256sum) command_text=sha256sum ;;
+  esac
+  grep -qFx "$command_text nonce.in > nonce.out" "$LOG.stdin" || fail "digest prompt: $digest_tool"
+  rm "$TMP/isolated-bin/$digest_tool"
+done
 echo 'ALL PASS: codex exec probe and preflight'

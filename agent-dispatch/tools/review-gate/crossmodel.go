@@ -44,14 +44,14 @@ func rcMeaning(rc int) string {
 
 func isInfrastructureRC(rc int) bool {
 	switch rc {
-	// rc 9 is a model configuration refusal: fix the pin/override and re-run.
-	// It must preserve the infrastructure disposition even with an empty review.
 	// rc 3 is dispatch-worker's "the review could not physically run" — the runtime
 	// binary is not on PATH, or no isolated review worktree could be allocated. Passing
 	// it through matters: without it, reviewDispositionRC would remap a short/empty body
 	// on rc 3 to disposition 8 ("empty review - do NOT retry"), a wrong diagnosis that
 	// tells the operator to fall back to a local reviewer when the real fix is to install
 	// the binary or free up a worktree dir.
+	// rc 9 is a model configuration refusal: fix the pin/override and re-run.
+	// It must preserve the infrastructure disposition even with an empty review.
 	case 2, 3, 4, 5, 6, 7, 9, 124:
 		return true
 	default:

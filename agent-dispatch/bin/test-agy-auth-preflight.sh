@@ -68,6 +68,7 @@ STUB
 
 cat > "$TMP/bin/timeout" <<'STUB'
 #!/usr/bin/env bash
+printf '%s\n' "$*" >> "$AGY_CALL_LOG.timeout"
 [ "${1:-}" != -k ] || shift 2
 shift
 # Scoped to the `agy models` call the auth probe makes (AGY_STUB_MODE=slow
@@ -126,6 +127,7 @@ reset_calls
 AGY_STUB_MODE=network agy_auth_probe >"$TMP/probe-network.out" 2>"$TMP/probe-network.err"; rc=$?
 [ "$rc" -eq 2 ] || fail "network probe should be advisory rc2, got $rc"
 assert_called "models"
+grep -qE '^-k 2s 5s .*agy models$' "$AGY_CALL_LOG.timeout" || fail "auth timeout argv"
 echo "test probe 1 (network error advisory) PASS"
 
 reset_calls
@@ -271,7 +273,7 @@ AGY_STUB_MODE=network agy_auth_probe >/dev/null 2>&1
 for model in 'display one' ID-ONE; do
   agy_model_present "$model_list" "$model" || fail "case-insensitive match: $model"
 done
-for model in '' "$(printf 'bad\nmodel')" "$(printf 'bad\tmodel')" 'literal\nmodel'; do
+for model in '' '   ' "$(printf 'bad\nmodel')" "$(printf 'bad\tmodel')" 'literal\nmodel'; do
   agy_model_present "$model_list" "$model"; rc=$?
   [ "$rc" -eq 1 ] || fail "invalid/absent model accepted: $model ($rc)"
 done
@@ -293,6 +295,11 @@ done
 for model in 'custom display' custom-id; do
   AGY_STUB_MODE=review_missing AGY_MODEL="$model" "$PREFLIGHT" agy >"$TMP/name.out" 2>&1; rc=$?
   [ "$rc" -eq 0 ] || fail "name form rejected: $model"
+done
+model_list="$(printf 'gemini-4-argon-high\tGemini Argon\ncustom-id-high\tCustom\n')"
+for model in gemini gemini-4 cust; do
+  agy_model_present "$model_list" "$model"; rc=$?
+  [ "$rc" -eq 1 ] || fail "family prefix accepted: $model ($rc)"
 done
 # All review tests use this suite's isolated workdir.
 for mode in network unparseable review_missing healthy; do

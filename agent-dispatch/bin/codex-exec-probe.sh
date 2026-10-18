@@ -4,7 +4,7 @@
 codex_exec_probe() (
   local codex_bin="${CODEX_BIN:-codex}"
   local probe_timeout="${CODEX_EXEC_PROBE_TIMEOUT-75s}"
-  local timeout_bin dir="" rc nonce digest digest_bin child="" cache owner_mode
+  local timeout_bin dir="" rc nonce digest digest_bin digest_command child="" cache owner_mode
   if ! [[ "$probe_timeout" =~ ^[1-9][0-9]*[smh]?$ ]]; then
     printf '%s\n' "codex exec probe: invalid timeout '$probe_timeout'; using 75s" >&2
     probe_timeout=75s
@@ -13,6 +13,7 @@ codex_exec_probe() (
   # Bash 3.2 can unwind locals before EXIT on a signal: clean up here too.
   trap '[ -z "$child" ] || { kill -TERM "$child" 2>/dev/null; wait "$child"; }; [ -z "$dir" ] || rm -rf "$dir"; exit 130' INT
   trap '[ -z "$child" ] || { kill -TERM "$child" 2>/dev/null; wait "$child"; }; [ -z "$dir" ] || rm -rf "$dir"; exit 143' TERM
+  trap '[ -z "$child" ] || { kill -TERM "$child" 2>/dev/null; wait "$child"; }; [ -z "$dir" ] || rm -rf "$dir"; exit 129' HUP
   unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 
   if ! command -v "$codex_bin" >/dev/null 2>&1; then
@@ -51,7 +52,7 @@ codex_exec_probe() (
   read -r owner mode <<< "$owner_mode"
   if [ "$owner" != "$(id -u)" ] || ! [[ "$mode" =~ ^[0-7]{3,4}$ ]] ||
      (( (8#$mode & 8#022) != 0 )); then
-    printf '%s\n' 'codex exec probe: cache must be owned by current user and not group/world-writable'
+    printf '%s\n' "codex exec probe: cache must be owned by current user and not group/world-writable; run: chmod 700 '$cache'"
     return 2
   fi
   find "$cache" -name 'codex-probe.*' -type d -mmin +1440 -prune -exec rm -rf {} +
@@ -63,9 +64,14 @@ codex_exec_probe() (
     printf '%s\n' 'codex exec probe: cannot initialize probe repository'
     return 2
   fi
+  if [ "$digest_bin" = shasum ]; then
+    digest_command='shasum -a 256'
+  else
+    digest_command=sha256sum
+  fi
   nonce="CODEX_PROBE_$$_${RANDOM}_${RANDOM}"
   if ! printf '%s\n' "$nonce" > "$dir/nonce.in" ||
-     ! printf '%s\n' 'Using only your shell tool, run exactly: shasum -a 256 nonce.in > nonce.out' > "$dir/.prompt"; then
+     ! printf '%s\n' "Using only your shell tool, run exactly: $digest_command nonce.in > nonce.out" > "$dir/.prompt"; then
     printf '%s\n' 'codex exec probe: cannot write probe inputs'
     return 2
   fi

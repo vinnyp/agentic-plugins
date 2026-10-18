@@ -482,8 +482,16 @@ func readFile(t *testing.T, p string) string {
 	return string(b)
 }
 
-func TestModelMissingIsInfrastructure(t *testing.T) {
-	if !isInfrastructureRC(9) {
-		t.Fatal("model refusal must remain an infrastructure failure")
+func TestCrossModelOmitsEmptyModel(t *testing.T) {
+	for _, args := range [][]string{nil, {"--model", ""}} {
+		callLog := stubDispatchWorker(t, strings.Repeat("review details ", 200), 0)
+		b := writeBrief(t, "default-model.md")
+		rc, _ := runCapt(t, append([]string{"cross-model", "--runtime", "agy", "--brief", b}, args...)...)
+		if rc != 0 {
+			t.Fatalf("rc=%d", rc)
+		}
+		if calls := readFile(t, callLog); strings.Contains(calls, "--model") {
+			t.Fatalf("empty model must inherit dispatch-worker default: %q", calls)
+		}
 	}
 }

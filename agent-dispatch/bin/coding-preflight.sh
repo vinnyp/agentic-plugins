@@ -83,6 +83,7 @@ case "$agent" in
           0) echo "AGY_MODEL_CHECK=ok" ;;
           1) fail "agy model '$agy_model' (coding) not offered by installed agy — update $SCRIPT_DIR/lib/agy-models.sh (or your AGY_MODEL override); run 'agy models' for current IDs" ;;
           2) echo "AGY_MODEL_CHECK=skipped:unparseable models"; note "unparseable agy models — skipping model check" ;;
+          *) echo "AGY_MODEL_CHECK=skipped:rc=$model_rc" ;;
         esac
         ;;
       2) echo "AGY_MODEL_CHECK=skipped:inconclusive auth"; note "⚠ agy auth probe inconclusive — skipping model check; proceeding" ;;

@@ -13,14 +13,14 @@ agy_model_present() {
     BEGIN {
       m=ENVIRON["AGY_MODEL_MATCH"]
       check=m; gsub(/ /, "", check)
-      invalid=(m == "" || check ~ /[[:space:][:cntrl:]]/)
+      invalid=(check == "" || check ~ /[[:space:][:cntrl:]]/)
       if (invalid) exit 1
       m=tolower(m)
     }
     { gsub(/\r/, ""); if (NF < 2) next; parsed=1
       id=tolower($1)
       if (id == m || tolower($2) == m) found=1
-      if (index(id, m "-") == 1) offered=offered (offered ? ", " : "") $1
+      if (index(id, m "-") == 1 && substr(id, length(m)+2) ~ /^[^-]+$/) offered=offered (offered ? ", " : "") $1
     }
     END {
       if (invalid) exit 1

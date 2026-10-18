@@ -177,3 +177,9 @@ a 10s kill grace; see [commands](docs/commands.md) for overrides and
 ## License
 
 MIT.
+
+The codex shell probe requests the digest tool available on PATH (`shasum -a 256`
+or `sha256sum`) and cleans up on HUP, INT, or TERM. If its cache directory has
+unsafe permissions, set that directory to mode 700 as shown in the diagnostic.
+Model overrides may omit only the final tier segment of an offered ID; family
+prefixes such as `gemini` or `gemini-4` do not select a model.
