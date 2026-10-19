@@ -71,9 +71,9 @@ for it, or `review-pin.sh release <workdir>`. A pin left behind by a SIGKILLed r
 after 4h, and any `status`/`pin` call removes a stale one.
 
 **`DISPATCH=fail: empty diff`.** The agent changed nothing. Common causes: the brief was
-unactionable; the agent planned and stopped (the agy preamble exists to prevent this); or it hit a
-usage limit and exited 0 — check for exit 6 from `dispatch-worker`, or run it again and read the
-output.
+unactionable, or the agent planned and stopped (the agy preamble exists to prevent this).
+A capacity or limit failure now reports `DISPATCH=fail: agent unavailable` with exit 6,
+including when the agent exits 0 without producing changes.
 
 **A build gate fails that passes by hand.** Read the `gate-env: python=… ruff=…` line. The gate
 runs with `<workdir>/.venv/bin` prepended when that directory exists; a global tool of a different

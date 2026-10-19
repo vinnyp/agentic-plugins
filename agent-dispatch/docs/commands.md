@@ -94,6 +94,7 @@ synthesized marker rather than a false failure.
 | `0` | success. `DISPATCH=ok …` — changes left in the tree (or worktree) for you to review and commit. `DISPATCH=ok-noop` means a resume dispatch found the work already done. |
 | `1` | failure. Non-worktree: tree hard-reset to the pre-dispatch commit (unless `--keep-on-fail`). Worktree: diff salvaged in the worktree, or the worktree removed with `CODING_DISPATCH_RM_ON_FAIL=1` (the patch still survives). |
 | `2` | usage or environment error; nothing was done |
+| `6` | agent unavailable (capacity/rate limit); no work attempted |
 | `9` | a review pin is active on the workdir (see [`review-pin.sh`](#review-pinsh)) |
 | `143` | killed by INT/TERM mid-dispatch; a fresh empty worktree is removed, a partial diff is left for salvage |
 
@@ -144,7 +145,8 @@ it in the delegation contract, dispatches it, and commits on success. Stops at t
 (the dispatch has already reverted or salvaged). `--build-cmd` is required — set `CODING_BUILD_CMD`
 instead if you prefer. Commit scope defaults to the repo directory's basename
 (`CODING_COMMIT_SCOPE` overrides). Exit codes: `0` phase complete, `1` a task failed
-(`PHASE=stopped-at:<id>`), `2` usage/plan error, `9` review pin active.
+(`PHASE=stopped-at:<id>`), `2` usage/plan error, `6` agent unavailable
+(`PHASE=blocked-unavailable:<id>`), `9` review pin active.
 
 Given a plan with `### Task 1: …`, `### Task 2: …` headings, run a whole phase — one dispatch per
 task, each committed in the worktree on success, stopping at the first failure:

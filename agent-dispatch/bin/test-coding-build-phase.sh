@@ -112,4 +112,17 @@ git -C "$PARENT" worktree list --porcelain | grep -Fxq -- "worktree $WT_PRINTED"
 git -C "$PARENT" worktree remove --force "$WT_PRINTED" 2>/dev/null || true
 echo "test (phase --worktree: 2 commits off-main + path identity) PASS"
 
+
+# #234: unavailable agents block either phase mode without committing.
+printf '#!/usr/bin/env bash\nexit 6\n' > "$TMP/bin/coding-dispatch.sh"
+for mode234 in in-place worktree; do
+  repo234="$TMP/phase234-$mode234"; new_phase_repo "$repo234"
+  head234="$(git -C "$repo234" rev-parse HEAD)"
+  args234=(); [ "$mode234" != worktree ] || args234=(--worktree)
+  out="$(PATH="$TMP/bin:$PATH" "$SELF_DIR/coding-build-phase.sh" codex "$TMP/plan.md" "$repo234" 1 ${args234[@]+"${args234[@]}"} --build-cmd true 2>&1)"; rc=$?
+  [ "$rc" -eq 6 ] && printf '%s\n' "$out" | grep -qF 'PHASE=blocked-unavailable:1' || { echo "FAIL: #234 $mode234 rc=$rc $out"; exit 1; }
+  [ "$(git -C "$repo234" rev-parse HEAD)" = "$head234" ] && [ "$(git -C "$repo234" rev-list --all --count)" -eq 1 ] || { echo 'FAIL: #234 phase committed'; exit 1; }
+  echo "test #234 $mode234 PASS"
+done
+
 echo "ALL PASS"

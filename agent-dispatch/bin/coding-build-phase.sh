@@ -145,6 +145,10 @@ for tid in ${task_ids[@]+"${task_ids[@]}"}; do
     if [ "$_dispatch_rc" -eq 0 ]; then
       ( cd "$WT_DIR" && git add -A && git commit -q -m "feat($SCOPE): Task $tid via $agent" )
       echo "✓ Task $tid committed in worktree ($(git -C "$WT_DIR" rev-parse --short HEAD))"
+    elif [ "$_dispatch_rc" -eq 6 ]; then
+      echo "✗ Task $tid BLOCKED: agent unavailable (capacity/rate limit) — per AGENTS.md, finish this task locally, then resume the phase at the next task."
+      echo "PHASE=blocked-unavailable:$tid"
+      exit 6
     elif [ "$_dispatch_rc" -eq 9 ]; then
       echo "PHASE=refused: review pin active on $repo" >&2
       exit 9
@@ -159,6 +163,10 @@ for tid in ${task_ids[@]+"${task_ids[@]}"}; do
     if [ "$_dispatch_rc" -eq 0 ]; then
       ( cd "$repo" && git add -A && git commit -q -m "feat($SCOPE): Task $tid via $agent" )
       echo "✓ Task $tid committed ($(git -C "$repo" rev-parse --short HEAD))"
+    elif [ "$_dispatch_rc" -eq 6 ]; then
+      echo "✗ Task $tid BLOCKED: agent unavailable (capacity/rate limit) — per AGENTS.md, finish this task locally, then resume the phase at the next task."
+      echo "PHASE=blocked-unavailable:$tid"
+      exit 6
     elif [ "$_dispatch_rc" -eq 9 ]; then
       echo "PHASE=refused: review pin active on $repo" >&2
       exit 9
