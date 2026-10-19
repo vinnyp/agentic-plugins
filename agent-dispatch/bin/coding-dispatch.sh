@@ -53,6 +53,7 @@
 #            FINDING 2 — which covers committed TDD work too) so a reverted/discarded/removed
 #            build stays inspectable — see #118.
 # Exit 2   = usage / environment error: no changes made.
+# Exit 6   = agent unavailable (capacity/rate limit), no work attempted.
 #
 # DISPATCH=ok-noop (exit 0): a RESUME dispatch found the prior work already complete — rc=0,
 # empty diff, but a present + parseable _coding-result.json marker. Distinct from
@@ -77,6 +78,8 @@ SCRIPT_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 . "$SCRIPT_DIR/lib/agy-models.sh"
 # shellcheck disable=SC1091  # dynamic source path ($SCRIPT_DIR); resolved at runtime
 . "$SCRIPT_DIR/lib/hash.sh"
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/lib/agent-unavailable.sh"
 
 die() { printf 'DISPATCH=error: %s\n' "$1" >&2; exit 2; }
 note() { printf '%s\n' "$*" >&2; }
@@ -467,7 +470,7 @@ _injected_prompt="$(mktemp -t coding-dispatch-brief.XXXXXX)"
   cat "$prompt_file"
 } > "$_injected_prompt"
 _effective_prompt="$_injected_prompt"
-trap 'rm -f "$_injected_prompt"' EXIT
+trap 'rm -f "$_injected_prompt"; [ -n "${_cap_dir:-}" ] && rm -rf "$_cap_dir"' EXIT
 
 if command -v shasum >/dev/null 2>&1; then
   _brief_hash="$(shasum -a 256 "$prompt_file" 2>/dev/null | cut -c1-12)"
@@ -622,6 +625,9 @@ report_fail() {
 # Bash runs signal traps promptly while waiting on an asynchronous worker. Keep the
 # EXIT prompt-file cleanup installed, and stop the worker before inspecting its tree.
 child=""
+_cap_dir=""
+_tee_out=""
+_tee_err=""
 # shellcheck disable=SC2329 # invoked by the signal trap
 cleanup_signal() {
   trap '' HUP INT TERM
@@ -646,6 +652,9 @@ cleanup_signal() {
     fi
     wait "$child" 2>/dev/null || true
   fi
+  [ -z "$_tee_out" ] || kill "$_tee_out" 2>/dev/null || true
+  [ -z "$_tee_err" ] || kill "$_tee_err" 2>/dev/null || true
+  [ -z "$_cap_dir" ] || rm -rf "$_cap_dir"
   if [ "$WORKTREE" -eq 1 ] && [ "$CREATED_HERE" -eq 1 ] \
      && [ -z "$(git status --porcelain 2>/dev/null)" ] && ! _tdd_mode; then
     cd "$PARENT_ROOT" || exit 143
@@ -658,14 +667,19 @@ cleanup_signal() {
 }
 trap cleanup_signal HUP INT TERM
 
+_cap_dir="$(mktemp -d -t coding-dispatch-cap.XXXXXX)"
+mkfifo "$_cap_dir/out.fifo" "$_cap_dir/err.fifo"
+tee -a "$_cap_dir/out.log" < "$_cap_dir/out.fifo" & _tee_out=$!
+tee -a "$_cap_dir/err.log" < "$_cap_dir/err.fifo" >&2 & _tee_err=$!
+
 case "$agent" in
   codex)
     if [ -n "$TIMEOUT_BIN" ]; then
-      "$TIMEOUT_BIN" -k 30s "$TIMEOUT" codex exec --dangerously-bypass-approvals-and-sandbox -C "$target" - < "$_effective_prompt" &
+      "$TIMEOUT_BIN" -k 30s "$TIMEOUT" codex exec --dangerously-bypass-approvals-and-sandbox -C "$target" - < "$_effective_prompt" > "$_cap_dir/out.fifo" 2> "$_cap_dir/err.fifo" &
       child=$!
     else
       note "⚠ no timeout/gtimeout binary — codex hang cannot be externally bounded (brew install coreutils)"
-      codex exec --dangerously-bypass-approvals-and-sandbox -C "$target" - < "$_effective_prompt" &
+      codex exec --dangerously-bypass-approvals-and-sandbox -C "$target" - < "$_effective_prompt" > "$_cap_dir/out.fifo" 2> "$_cap_dir/err.fifo" &
       child=$!
     fi
     ;;
@@ -679,18 +693,21 @@ case "$agent" in
     # proven UNRELIABLE (observed hanging 6.5h past a 15m setting) and is tied to --print,
     # so the EXTERNAL timeout (separate process, own clock) is the real bound, as for codex.
     if [ -n "$TIMEOUT_BIN" ]; then
-      "$TIMEOUT_BIN" -k 30s "$TIMEOUT" agy --model "$agy_model" --dangerously-skip-permissions --add-dir "$target" < "$_effective_prompt" &
+      "$TIMEOUT_BIN" -k 30s "$TIMEOUT" agy --model "$agy_model" --dangerously-skip-permissions --add-dir "$target" < "$_effective_prompt" > "$_cap_dir/out.fifo" 2> "$_cap_dir/err.fifo" &
       child=$!
     else
       note "⚠ no timeout/gtimeout binary — agy hang cannot be externally bounded (brew install coreutils)"
-      agy --model "$agy_model" --dangerously-skip-permissions --add-dir "$target" < "$_effective_prompt" &
+      agy --model "$agy_model" --dangerously-skip-permissions --add-dir "$target" < "$_effective_prompt" > "$_cap_dir/out.fifo" 2> "$_cap_dir/err.fifo" &
       child=$!
     fi
     ;;
 esac
 wait "$child"
 agent_rc=$?
+wait "$_tee_out" "$_tee_err" 2>/dev/null || true
 child=""
+_tee_out=""
+_tee_err=""
 if [ "$agent" = "agy" ] && { [ "$agent_rc" -eq 124 ] || [ "$agent_rc" -eq 137 ]; }; then
   note "agy timed out (rc=$agent_rc) — switch to a faster agy model (AGY_MODEL='$AGY_MODEL_CODING_DEFAULT') or raise CODING_DISPATCH_TIMEOUT (current $TIMEOUT); a wedged agy may need: pkill -9 -f agy"
 fi
@@ -735,9 +752,14 @@ if [ -z "$(git status --porcelain)" ]; then
     fi
     # True no-op: no uncommitted changes, HEAD has not moved, and no valid completion marker.
     rm -f _coding-result.json
+    _empty_rc=1
     _empty_reason="empty diff (agent changed nothing, rc=$agent_rc)"
     if [ "$agent_rc" -eq 124 ]; then
       _empty_reason="TIMEOUT — agent exceeded the $TIMEOUT cap (CODING_DISPATCH_TIMEOUT), rc=124, no changes produced"
+    fi
+    if [ "$agent_rc" -ne 124 ] && _unavail_line="$(agent_unavailable_match "$_cap_dir/out.log" "$_cap_dir/err.log")"; then
+      _empty_reason="agent unavailable (capacity/rate limit) — rc=$agent_rc, no work attempted: $_unavail_line"
+      _empty_rc=6
     fi
     if [ "$WORKTREE" -eq 1 ]; then
       trap - HUP INT TERM
@@ -745,10 +767,10 @@ if [ -z "$(git status --porcelain)" ]; then
         cd "$PARENT_ROOT" && git worktree remove --force "$WT_DIR" 2>/dev/null
       fi
       printf 'DISPATCH=fail: %s — worktree cleaned\n' "$_empty_reason"
-      exit 1
+      exit "$_empty_rc"
     fi
     printf 'DISPATCH=fail: %s — nothing to revert\n' "$_empty_reason"
-    exit 1
+    exit "$_empty_rc"
   else
     # Clean tree AND HEAD moved off BASE: either a genuine stray self-commit, OR legitimate
     # TDD work. These are NOT distinguishable by git status alone: _coding-result.json is

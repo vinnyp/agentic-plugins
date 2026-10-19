@@ -420,7 +420,7 @@ echo "test early-window TERM removes empty worktree PASS"
 
 # Private PATH deliberately excludes timeout/gtimeout on every platform.
 mkdir -p "$TMP/no-timeout-bin"
-for utility in git bash basename dirname tr cut mkdir rm sed paste mktemp cat cksum awk wc head sleep cp diff grep find date tail sort uniq touch jq; do
+for utility in mkfifo tee git bash basename dirname tr cut mkdir rm sed paste mktemp cat cksum awk wc head sleep cp diff grep find date tail sort uniq touch jq; do
   ln -s "$(command -v "$utility")" "$TMP/no-timeout-bin/$utility"
 done
 for utility in md5 md5sum openssl; do
@@ -987,7 +987,9 @@ wd=""; while [ $# -gt 0 ]; do [ "$1" = "-C" ] && { wd="$2"; shift 2; continue; }
 printf '{"status":"complete","files_written":[],"timestamp":"2026-01-01T00:00:00Z"}\n' > "$wd/_coding-result.json"
 STUB
 chmod +x "$TMP/bin/codex"
-bash "$CD" codex "$P_noop" "$TMP/prompt" "true" >"$TMP/out_noop" 2>&1; rc=$?
+mkdir -p "$TMP/cap128b"
+TMPDIR="$TMP/cap128b" bash "$CD" codex "$P_noop" "$TMP/prompt" "true" >"$TMP/out_noop" 2>&1; rc=$?
+[ -z "$(find "$TMP/cap128b" -name 'coding-dispatch-cap.*')" ] || fail "#128b leaked capture dir"
 [ "$rc" -eq 0 ] || { cat "$TMP/out_noop"; fail "#128b legit no-op (gitignored marker, rc=0, valid marker) should exit 0, got $rc"; }
 grep -q "DISPATCH=ok-noop" "$TMP/out_noop" || { cat "$TMP/out_noop"; fail "#128b legit no-op should emit DISPATCH=ok-noop"; }
 echo "test #128b DISPATCH=ok-noop on legitimate no-op PASS"
@@ -1462,5 +1464,85 @@ bash "$CD" codex "$P_187_working" "$TMP/prompt" "true # make test" >"$TMP/out_18
 ! grep -qF "HEAD-derived build command will not include the worker's uncommitted changes" "$TMP/out_187_working" \
   || { cat "$TMP/out_187_working"; fail "#187 ordinary working-tree gate warned noisily"; }
 echo "test #187 targeted HEAD-derived gate warning and negative control PASS"
+
+
+# #234: capacity verdict, stream capture, timeout priority and signal cleanup.
+mkdir -p "$TMP/cap234"
+for case234 in a a-wt h b c d e f i j; do
+  p234="$TMP/parent234-$case234"; new_parent "$p234"
+  cat > "$TMP/bin/codex" <<'STUB'
+#!/usr/bin/env bash
+wd=""; while [ $# -gt 0 ]; do [ "$1" = "-C" ] && { wd="$2"; shift 2; continue; }; shift; done
+case "$CASE234" in
+  a|a-wt) echo 'Selected model is at capacity' >&2; exit 1 ;;
+  h) echo 'session id: 0199f429-a1b2-4c3d'; echo 'HEAD is at a429b1c'; exit 1 ;;
+  b) echo 'something broke'; exit 1 ;;
+  c) printf '   Too many requests. Please try again later.   \nrate limited again\n'; exit 0 ;;
+  d) echo OUT-LINE; echo ERR-LINE >&2; exit 1 ;;
+  e) echo changed > "$wd/change.txt"; echo 'at capacity'; echo '{"status":"complete"}' > "$wd/_coding-result.json" ;;
+  f) echo 'at capacity'; exit 1 ;;
+  i) printf 'at capacity '; printf '%0288d\n' 0 | tr '0' x; exit 1 ;;
+  j) printf 'garbage\0bytes\nSelected model is at capacity\n' >&2; exit 1 ;;
+esac
+STUB
+  chmod +x "$TMP/bin/codex"
+  extra234=(); [ "$case234" != a-wt ] || extra234=(--worktree)
+  path234="$TMP/bin:$PATH"
+  if [ "$case234" = f ]; then
+    mkdir -p "$TMP/timeout234"
+    printf '#!/usr/bin/env bash\nshift 3\n"$@"\nexit 124\n' > "$TMP/timeout234/timeout"
+    chmod +x "$TMP/timeout234/timeout"
+    path234="$TMP/timeout234:$path234"
+  fi
+  TMPDIR="$TMP/cap234" CASE234="$case234" PATH="$path234" bash "$CD" codex "$p234" "$TMP/prompt" true ${extra234[@]+"${extra234[@]}"} > "$TMP/out234" 2> "$TMP/err234"; rc=$?
+  [ -z "$(find "$TMP/cap234" -name 'coding-dispatch-cap.*')" ] || fail "#234$case234 leaked capture dir"
+  out="$(cat "$TMP/out234" "$TMP/err234")"
+  case "$case234" in
+    a|a-wt)
+      [ "$rc" -eq 6 ] || fail "#234$case234 expected 6, got $rc: $out"
+      suffix234='nothing to revert'; [ "$case234" != a-wt ] || suffix234='worktree cleaned'
+      grep -qF "DISPATCH=fail: agent unavailable (capacity/rate limit) — rc=1, no work attempted: Selected model is at capacity — $suffix234" "$TMP/out234" || fail "#234$case234 verdict: $out"
+      ! grep -qF 'empty diff (agent changed nothing' "$TMP/out234" || fail '#234 capacity labeled empty'
+      if [ "$case234" = a-wt ]; then
+        wt234="$(printf '%s\n' "$out" | sed -n 's/.*dispatching to codex in \(.*\) (timeout .*/\1/p' | head -1)"
+        [ "$(git -C "$p234" worktree list --porcelain | grep -c '^worktree ')" -eq 1 ] || fail '#234a-wt registration remains'
+        [ -n "$wt234" ] && [ ! -d "$wt234" ] || fail '#234a-wt directory remains'
+      fi ;;
+    h|b) [ "$rc" -eq 1 ] && grep -qF 'empty diff (agent changed nothing, rc=1)' "$TMP/out234" || fail "#234$case234 negative: $out" ;;
+    c) [ "$rc" -eq 6 ] || fail "#234c expected 6, got $rc"
+      grep -qF 'rc=0, no work attempted: Too many requests. Please try again later. — nothing to revert' "$TMP/out234" || fail "#234c first trimmed diagnostic: $out" ;;
+    d)
+      grep -qx OUT-LINE "$TMP/out234" && ! grep -q ERR-LINE "$TMP/out234" && grep -qx ERR-LINE "$TMP/err234" && ! grep -q OUT-LINE "$TMP/err234" || fail '#234d streams crossed' ;;
+    e) [ "$rc" -eq 0 ] && grep -q 'DISPATCH=ok' "$TMP/out234" || fail "#234e changes must win: $out" ;;
+    f) [ "$rc" -eq 1 ] && grep -q TIMEOUT "$TMP/out234" && ! grep -q 'agent unavailable' "$TMP/out234" || fail '#234f timeout priority' ;;
+    i) [ "$rc" -eq 6 ] || fail "#234i expected 6, got $rc"
+      diagnostic234="$(sed -n 's/.*no work attempted: \(.*\) — nothing to revert/\1/p' "$TMP/out234")"
+      [ "${#diagnostic234}" -eq 200 ] || fail "#234i diagnostic length: ${#diagnostic234}" ;;
+    j) [ "$rc" -eq 6 ] && ! grep -aFq 'Binary file' "$TMP/out234" "$TMP/err234" || fail '#234j binary output verdict' ;;
+  esac
+  echo "test #234$case234 PASS"
+done
+
+mkdir -p "$TMP/cap234g"
+p234="$TMP/parent234g"; new_parent "$p234"
+cat > "$TMP/bin/codex" <<'STUB'
+#!/usr/bin/env bash
+echo $$ > "$PID234"
+sleep 30
+STUB
+chmod +x "$TMP/bin/codex"
+TMPDIR="$TMP/cap234g" PID234="$TMP/pid234g" bash "$CD" codex "$p234" "$TMP/prompt" true > "$TMP/out234g" 2>&1 &
+dispatch234=$!
+for ((i234=0; i234<100; i234++)); do [ ! -f "$TMP/pid234g" ] || break; sleep 0.1; done
+[ -f "$TMP/pid234g" ] || fail '#234g agent never started'
+kill -TERM "$dispatch234"
+for ((i234=0; i234<150; i234++)); do kill -0 "$dispatch234" 2>/dev/null || break; sleep 0.1; done
+! kill -0 "$dispatch234" 2>/dev/null || fail '#234g dispatch did not terminate'
+wait "$dispatch234"; rc=$?
+[ "$rc" -eq 143 ] && grep -qF 'DISPATCH=fail: interrupted (signal)' "$TMP/out234g" || fail '#234g interruption verdict'
+! kill -0 "$(cat "$TMP/pid234g")" 2>/dev/null || fail '#234g agent survived'
+[ -z "$(find "$TMP/cap234g" -name 'coding-dispatch-cap.*')" ] || fail '#234g capture remains'
+! pgrep -f "tee.*$TMP/cap234g" >/dev/null || fail '#234g tee survived'
+echo 'test #234g PASS'
 
 echo "ALL PASS"
