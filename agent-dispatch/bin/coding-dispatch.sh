@@ -706,6 +706,8 @@ wait "$child"
 agent_rc=$?
 wait "$_tee_out" "$_tee_err" 2>/dev/null || true
 child=""
+_tee_out=""
+_tee_err=""
 if [ "$agent" = "agy" ] && { [ "$agent_rc" -eq 124 ] || [ "$agent_rc" -eq 137 ]; }; then
   note "agy timed out (rc=$agent_rc) — switch to a faster agy model (AGY_MODEL='$AGY_MODEL_CODING_DEFAULT') or raise CODING_DISPATCH_TIMEOUT (current $TIMEOUT); a wedged agy may need: pkill -9 -f agy"
 fi

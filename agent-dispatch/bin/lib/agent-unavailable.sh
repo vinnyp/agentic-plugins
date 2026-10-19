@@ -6,7 +6,7 @@ agent_unavailable_match() {
   local f line
   for f in "$@"; do
     [ -f "$f" ] || continue
-    if line="$(grep -ihE "$AGENT_UNAVAILABLE_RE" "$f")"; then
+    if line="$(grep -iahE "$AGENT_UNAVAILABLE_RE" "$f")"; then
       printf '%s\n' "$line" | sed -n '1{s/^[[:space:]]*//;s/[[:space:]]*$//;p;}' | cut -c1-200
       return 0
     fi
