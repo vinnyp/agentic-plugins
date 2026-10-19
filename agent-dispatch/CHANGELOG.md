@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.1](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.8.0...agent-dispatch-v1.8.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* **agent-dispatch:** distinct verdict when the agent is at capacity ([#53](https://github.com/vinnyp/agentic-plugins/issues/53)) ([c8bf416](https://github.com/vinnyp/agentic-plugins/commit/c8bf416c4d5db84e8e91cb3f075da275b6036056))
+
 ## [1.8.0](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.7.3...agent-dispatch-v1.8.0) (2026-10-19)
 
 
