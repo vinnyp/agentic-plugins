@@ -418,17 +418,18 @@ fi
 exec sleep 30
 STUB
 chmod +x "$TMP/signalbin/codex"
-for signal_mode in inplace worktree tdd worktree-commit fallback; do
+for signal_mode in inplace worktree tdd worktree-commit fallback worktree-commit-clean; do
   P="$TMP/signal-$signal_mode"; new_parent "$P"
   signal_args=()
   signal_target="$P"
-  if [ "$signal_mode" = worktree ] || [ "$signal_mode" = worktree-commit ]; then
+  if [ "$signal_mode" = worktree ] || [ "$signal_mode" = worktree-commit ] || [ "$signal_mode" = worktree-commit-clean ]; then
     signal_args=(--worktree)
     signal_target="$(expected_wt "$P" signal-worker)"
   fi
   signal_commit=0
-  [ "$signal_mode" != tdd ] && [ "$signal_mode" != worktree-commit ] || signal_commit=1
+  [ "$signal_mode" != tdd ] && [ "$signal_mode" != worktree-commit ] && [ "$signal_mode" != worktree-commit-clean ] || signal_commit=1
   signal_stubborn=1
+  [ "$signal_mode" != worktree-commit-clean ] || signal_stubborn=0
   signal_path="$TMP/signalbin:$PATH"
   if [ "$signal_mode" = fallback ]; then
     signal_stubborn=2
@@ -452,6 +453,20 @@ for signal_mode in inplace worktree tdd worktree-commit fallback; do
   signal_name=TERM
   [ "$signal_mode" != worktree ] || signal_name=HUP
   kill -"$signal_name" "$disp_pid"
+  signal_deadline=$((SECONDS + 20))
+  while kill -0 "$disp_pid" 2>/dev/null; do
+    if [ "$SECONDS" -ge "$signal_deadline" ]; then
+      kill -KILL "$disp_pid" 2>/dev/null || true
+      for pid_file in "$TMP/worker.pid" "$TMP/helper.pid"; do
+        if [ -s "$pid_file" ]; then
+          kill -KILL "$(cat "$pid_file")" 2>/dev/null || true
+        fi
+      done
+      wait "$disp_pid" 2>/dev/null
+      fail "$signal_mode interruption hung"
+    fi
+    sleep 0.1
+  done
   wait "$disp_pid"; rc=$?
   [ "$rc" -eq 143 ] || fail "$signal_mode signal exit was $rc"
   [ "$((SECONDS - started_at))" -lt 10 ] || fail "$signal_mode interruption waited for worker sleep"
@@ -471,16 +486,26 @@ for signal_mode in inplace worktree tdd worktree-commit fallback; do
   else
     [ -f "$signal_target/signal-work.txt" ] || fail "$signal_mode lost worker output"
   fi
-  signal_patch="$(git -C "$signal_target" rev-parse --absolute-git-dir)/coding-dispatch-last-fail.patch"
-  grep -q '+interrupted' "$signal_patch" || fail "$signal_mode missing salvaged patch"
-  if [ "$signal_mode" = worktree ] || [ "$signal_mode" = worktree-commit ]; then
-    git -C "$signal_target" add -N .
-    git -C "$signal_target" diff "$signal_base" > "$TMP/final.patch"
-    diff -u "$TMP/final.patch" "$signal_patch" || fail "salvaged patch differs from final tree"
-  fi
-  if [ "$signal_mode" = worktree-commit ]; then
-    [ "$(git -C "$signal_target" rev-parse HEAD)" != "$signal_base" ] || fail "worker commit lost"
-    grep -q 'diff SALVAGED' "$TMP/signal.out" || fail "worker commit salvage line missing"
+  if [ "$signal_mode" = worktree-commit-clean ]; then
+    [ -d "$signal_target" ] || fail "$signal_mode lost worktree"
+    [ -z "$(git -C "$signal_target" status --porcelain)" ] || fail "$signal_mode tree is dirty"
+    [ "$(git -C "$signal_target" rev-parse HEAD)" != "$signal_base" ] || fail "$signal_mode worker commit lost"
+    [ "$(git -C "$signal_target" log -1 --format=%s)" = 'worker checkpoint' ] || fail "$signal_mode checkpoint missing"
+    if grep -q 'removed empty worktree' "$TMP/signal.out"; then
+      fail "$signal_mode removed committed worktree"
+    fi
+  else
+    signal_patch="$(git -C "$signal_target" rev-parse --absolute-git-dir)/coding-dispatch-last-fail.patch"
+    grep -q '+interrupted' "$signal_patch" || fail "$signal_mode missing salvaged patch"
+    if [ "$signal_mode" = worktree ] || [ "$signal_mode" = worktree-commit ]; then
+      git -C "$signal_target" add -N .
+      git -C "$signal_target" diff "$signal_base" > "$TMP/final.patch"
+      diff -u "$TMP/final.patch" "$signal_patch" || fail "salvaged patch differs from final tree"
+    fi
+    if [ "$signal_mode" = worktree-commit ]; then
+      [ "$(git -C "$signal_target" rev-parse HEAD)" != "$signal_base" ] || fail "worker commit lost"
+      grep -q 'diff SALVAGED' "$TMP/signal.out" || fail "worker commit salvage line missing"
+    fi
   fi
   rm -f "$TMP/worker.pid" "$TMP/helper.pid"
   echo "test TERM stops worker and handles $signal_mode tree PASS"
