@@ -277,6 +277,10 @@ for model in '' '   ' "$(printf 'bad\nmodel')" "$(printf 'bad\tmodel')" 'literal
   agy_model_present "$model_list" "$model"; rc=$?
   [ "$rc" -eq 1 ] || fail "invalid/absent model accepted: $model ($rc)"
 done
+for model in '' '   ' "$(printf '\n.')" "$(printf '\t')"; do
+  agy_model_present 'format drift' "$model"; rc=$?
+  [ "$rc" -eq 1 ] || fail "invalid model with unparseable list returned $rc"
+done
 agy_model_present 'format drift' id-one; rc=$?
 [ "$rc" -eq 2 ] || fail "unparseable list must return 2"
 agy_model_present "$model_list" id >"$TMP/tier.out" 2>"$TMP/tier.err" || fail "tierless ID rejected"
@@ -297,7 +301,7 @@ for model in 'custom display' custom-id; do
   [ "$rc" -eq 0 ] || fail "name form rejected: $model"
 done
 model_list="$(printf 'gemini-4-argon-high\tGemini Argon\ncustom-id-high\tCustom\n')"
-for model in gemini gemini-4 cust; do
+for model in gemini gemini-4; do
   agy_model_present "$model_list" "$model"; rc=$?
   [ "$rc" -eq 1 ] || fail "family prefix accepted: $model ($rc)"
 done

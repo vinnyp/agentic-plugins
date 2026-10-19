@@ -153,9 +153,16 @@ case "$(cat "$LOG.dir")" in "$HOME"/.cache/agent-dispatch/codex-probe.*) : ;; *)
 export XDG_CACHE_HOME="$TMP/cache"
 # Signals target the function subshell; only its bounded child is signalled.
 for signal in TERM HUP; do
+  probe_launcher=()
+  if command -v perl >/dev/null 2>&1; then
+    probe_launcher=("$(command -v perl)" -e '$SIG{HUP}="DEFAULT"; exec @ARGV')
+  elif [ "$signal" = HUP ]; then
+    echo "SKIP HUP signal reset requires perl"
+    continue
+  fi
   export BEHAVIOR=term CODEX_EXEC_PROBE_TIMEOUT=60s
   rm -f "$LOG.pid"
-  bash -c '. "$1"; codex_exec_probe; exit $?' _ "$BIN_DIR/codex-exec-probe.sh" > "$TMP/out" 2> "$TMP/err" &
+  ${probe_launcher[@]+"${probe_launcher[@]}"} bash -c '. "$1"; codex_exec_probe; exit $?' _ "$BIN_DIR/codex-exec-probe.sh" > "$TMP/out" 2> "$TMP/err" &
   launcher=$!
   # The function is a subshell of this launcher.
   for ((i=0; i<100; i++)); do

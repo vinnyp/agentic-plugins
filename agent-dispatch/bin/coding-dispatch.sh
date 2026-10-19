@@ -416,6 +416,7 @@ if [ "$WORKTREE" -eq 1 ]; then
       trap '' HUP INT TERM
       cd "$PARENT_ROOT" || exit 143
       git worktree remove --force "$WT_DIR" 2>/dev/null
+      note "DISPATCH=fail: interrupted (signal) — removed empty worktree $WT_DIR"
       exit 143
     }
     trap cleanup_early_worktree HUP INT TERM

@@ -6,7 +6,9 @@ The per-command exit-code tables live in the [command reference](commands.md).
 A HUP, INT, or TERM to `coding-dispatch.sh` stops the worker before reverting or
 salvaging changes and exits 143. With timeout available, escalation kills the worker's
 process group after about five seconds. Without timeout, only the worker PID is signalled.
-In-place mode defers a trapped signal during a foreground build gate until that gate returns.
+Both in-place and worktree modes defer a trapped signal during a foreground build gate
+until that gate returns. A supervisor that escalates to SIGKILL during a long gate kills
+the script without cleanup; the next in-place run then fails closed on the dirty tree.
 
 ## Operating rules
 

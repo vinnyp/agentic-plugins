@@ -174,12 +174,13 @@ reports `CODEX_EXEC_PROBE=ok|inconclusive|skipped`. Its default bound is 75s plu
 a 10s kill grace; see [commands](docs/commands.md) for overrides and
 [data flow](docs/safety-and-data-flow.md) for provider context and retained artifacts.
 
-## License
-
-MIT.
-
 The codex shell probe requests the digest tool available on PATH (`shasum -a 256`
 or `sha256sum`) and cleans up on HUP, INT, or TERM. If its cache directory has
 unsafe permissions, set that directory to mode 700 as shown in the diagnostic.
-Model overrides may omit only the final tier segment of an offered ID; family
-prefixes such as `gemini` or `gemini-4` do not select a model.
+Model overrides may omit only the final hyphen segment of an offered ID (normally
+its tier), e.g. `gemini-4-argon` for `gemini-4-argon-high`. With today's IDs,
+`gemini` or `gemini-4` match nothing.
+
+## License
+
+MIT.

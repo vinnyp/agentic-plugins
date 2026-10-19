@@ -374,6 +374,64 @@ CODING_DISPATCH_WORKTREE="slugX" bash "$CD" --worktree codex "$P" "$TMP/prompt" 
 [ "$rc" -eq 2 ] || fail "(clobber) pre-existing branch should fail-loud (exit 2), got $rc"
 echo "test (clobber guard fails loud) PASS"
 
+# The fingerprint runs after worktree creation, before the main signal trap.
+mkdir -p "$TMP/earlybin"
+cat > "$TMP/earlybin/shasum" <<'STUB'
+#!/usr/bin/env bash
+echo "$$" > "$EARLY_PID"
+touch "$EARLY_MARKER"
+# Bash defers the trap until the foreground fingerprint completes.
+exec sleep 3
+STUB
+chmod +x "$TMP/earlybin/shasum"
+P="$TMP/early-parent"; new_parent "$P"
+WT="$(expected_wt "$P" early-worker)"
+PATH="$TMP/earlybin:$PATH" EARLY_PID="$TMP/early.pid" EARLY_MARKER="$TMP/early.marker"   CODING_DISPATCH_WORKTREE=early-worker bash "$CD" --worktree codex "$P" "$TMP/prompt" true >"$TMP/early.out" 2>&1 &
+disp_pid=$!
+for ((i=0; i<100; i++)); do
+  [ ! -f "$TMP/early.marker" ] || break
+  sleep 0.1
+done
+[ -f "$TMP/early.marker" ] || fail "early fingerprint did not start"
+kill -TERM "$disp_pid"
+early_deadline=$((SECONDS + 8))
+while kill -0 "$disp_pid" 2>/dev/null; do
+  if [ "$SECONDS" -ge "$early_deadline" ]; then
+    kill -KILL "$disp_pid" "$(cat "$TMP/early.pid")" 2>/dev/null || true
+    wait "$disp_pid" 2>/dev/null
+    fail "early interruption hung"
+  fi
+  sleep 0.1
+done
+wait "$disp_pid"; rc=$?
+early_orphan=0
+if kill -0 "$(cat "$TMP/early.pid")" 2>/dev/null; then
+  kill -KILL "$(cat "$TMP/early.pid")" 2>/dev/null || true
+  early_orphan=1
+fi
+[ "$early_orphan" = 0 ] || fail "early interruption orphaned fingerprint"
+[ "$rc" -eq 143 ] || fail "early signal exit was $rc"
+[ ! -d "$WT" ] || fail "early trap left worktree directory"
+if git -C "$P" worktree list --porcelain | grep -Fxq "worktree $WT"; then
+  fail "early trap left worktree registration"
+fi
+grep -Fq "DISPATCH=fail: interrupted (signal) — removed empty worktree $WT" "$TMP/early.out" || fail "early cleanup message missing"
+echo "test early-window TERM removes empty worktree PASS"
+
+# Private PATH deliberately excludes timeout/gtimeout on every platform.
+mkdir -p "$TMP/no-timeout-bin"
+for utility in git bash basename dirname tr cut mkdir rm sed paste mktemp cat cksum awk wc head sleep cp diff grep find date tail sort uniq touch jq; do
+  ln -s "$(command -v "$utility")" "$TMP/no-timeout-bin/$utility"
+done
+for utility in md5 md5sum openssl; do
+  utility_path="$(command -v "$utility" || true)"
+  [ -z "$utility_path" ] || ln -s "$utility_path" "$TMP/no-timeout-bin/$utility"
+done
+signal_launcher=()
+if command -v perl >/dev/null 2>&1; then
+  signal_launcher=("$(command -v perl)" -e '$SIG{INT}="DEFAULT"; $SIG{HUP}="DEFAULT"; exec @ARGV')
+fi
+
 # (d) a TERM to the dispatch SCRIPT mid-run fires the trap and removes the fresh empty worktree.
 mkdir -p "$TMP/slowbin"
 printf '#!/usr/bin/env bash\nsleep 5\n' > "$TMP/slowbin/codex"; chmod +x "$TMP/slowbin/codex"
@@ -405,6 +463,11 @@ if [ "${SIGNAL_COMMIT:-0}" = 1 ]; then
   git add signal-work.txt
   git commit -qm 'worker checkpoint'
 fi
+if [ "${SIGNAL_STUBBORN:-0}" = 3 ]; then
+  trap 'sleep 1; echo finished > "$SIGNAL_GRACE_FILE"; exit 0' TERM
+  echo "$$" > "$SIGNAL_PID_FILE"
+  while :; do sleep 0.1; done
+fi
 echo "$$" > "$SIGNAL_PID_FILE"
 if [ "${SIGNAL_STUBBORN:-0}" = 1 ]; then
   trap '' TERM
@@ -418,7 +481,11 @@ fi
 exec sleep 30
 STUB
 chmod +x "$TMP/signalbin/codex"
-for signal_mode in inplace worktree tdd worktree-commit fallback worktree-commit-clean; do
+for signal_mode in inplace worktree tdd worktree-commit fallback worktree-commit-clean grace grace-fallback int; do
+  if [ "${#signal_launcher[@]}" -eq 0 ] && { [ "$signal_mode" = int ] || [ "$signal_mode" = worktree ]; }; then
+    echo "SKIP $signal_mode signal reset requires perl"
+    continue
+  fi
   P="$TMP/signal-$signal_mode"; new_parent "$P"
   signal_args=()
   signal_target="$P"
@@ -431,15 +498,16 @@ for signal_mode in inplace worktree tdd worktree-commit fallback worktree-commit
   signal_stubborn=1
   [ "$signal_mode" != worktree-commit-clean ] || signal_stubborn=0
   signal_path="$TMP/signalbin:$PATH"
-  if [ "$signal_mode" = fallback ]; then
+  if [ "$signal_mode" = fallback ] || [ "$signal_mode" = grace-fallback ]; then
     signal_stubborn=2
-    signal_path="$TMP/signalbin:/usr/bin:/bin"
+    signal_path="$TMP/signalbin:$TMP/no-timeout-bin"
   fi
   mkdir -p "$TMP/signal-tmp"
   signal_base="$(git -C "$P" rev-parse HEAD)"
-  started_at=$SECONDS
-  PATH="$signal_path" TMPDIR="$TMP/signal-tmp" SIGNAL_STUBBORN="$signal_stubborn" SIGNAL_HELPER_FILE="$TMP/helper.pid" SIGNAL_PID_FILE="$TMP/worker.pid" SIGNAL_COMMIT="$signal_commit" \
-    CODING_DISPATCH_WORKTREE=signal-worker bash "$CD" ${signal_args[@]+"${signal_args[@]}"} codex "$P" "$TMP/prompt" true >"$TMP/signal.out" 2>&1 &
+  case "$signal_mode" in grace|grace-fallback) signal_stubborn=3 ;; esac
+  rm -f "$TMP/grace.marker"
+  PATH="$signal_path" TMPDIR="$TMP/signal-tmp" SIGNAL_STUBBORN="$signal_stubborn" SIGNAL_HELPER_FILE="$TMP/helper.pid" SIGNAL_PID_FILE="$TMP/worker.pid" SIGNAL_COMMIT="$signal_commit" SIGNAL_GRACE_FILE="$TMP/grace.marker" \
+    CODING_DISPATCH_WORKTREE=signal-worker ${signal_launcher[@]+"${signal_launcher[@]}"} bash "$CD" ${signal_args[@]+"${signal_args[@]}"} codex "$P" "$TMP/prompt" true >"$TMP/signal.out" 2>&1 &
   disp_pid=$!
   for _ in $(seq 1 100); do [ -s "$TMP/worker.pid" ] && break; sleep 0.1; done
   [ -s "$TMP/worker.pid" ] || fail "$signal_mode worker did not start"
@@ -452,8 +520,10 @@ for signal_mode in inplace worktree tdd worktree-commit fallback worktree-commit
   fi
   signal_name=TERM
   [ "$signal_mode" != worktree ] || signal_name=HUP
+  [ "$signal_mode" != int ] || signal_name=INT
+  started_at=$SECONDS
   kill -"$signal_name" "$disp_pid"
-  signal_deadline=$((SECONDS + 20))
+  signal_deadline=$((started_at + 8))
   while kill -0 "$disp_pid" 2>/dev/null; do
     if [ "$SECONDS" -ge "$signal_deadline" ]; then
       kill -KILL "$disp_pid" 2>/dev/null || true
@@ -469,7 +539,7 @@ for signal_mode in inplace worktree tdd worktree-commit fallback worktree-commit
   done
   wait "$disp_pid"; rc=$?
   [ "$rc" -eq 143 ] || fail "$signal_mode signal exit was $rc"
-  [ "$((SECONDS - started_at))" -lt 10 ] || fail "$signal_mode interruption waited for worker sleep"
+  [ "$((SECONDS - started_at))" -le 8 ] || fail "$signal_mode interruption waited for worker sleep"
   orphaned=0
   for pid in "$worker_pid" ${helper_pid:+"$helper_pid"}; do
     if kill -0 "$pid" 2>/dev/null; then
@@ -478,9 +548,16 @@ for signal_mode in inplace worktree tdd worktree-commit fallback worktree-commit
     fi
   done
   [ "$orphaned" = 0 ] || fail "$signal_mode orphaned worker/helper"
+  if [ "$signal_stubborn" = 3 ]; then
+    [ -f "$TMP/grace.marker" ] || fail "$signal_mode TERM grace marker missing"
+  fi
+  case "$signal_mode" in fallback|grace-fallback)
+    grep -q 'no timeout/gtimeout binary' "$TMP/signal.out" || fail "$signal_mode used timeout"
+    ;;
+  esac
   [ -z "$(find "$TMP/signal-tmp" -name 'coding-dispatch-brief.*' -print)" ] || fail "TERM leaked prompt file"
   grep -q 'DISPATCH=fail: interrupted (signal)' "$TMP/signal.out" || fail "$signal_mode missing interrupted line"
-  if [ "$signal_mode" = inplace ] || [ "$signal_mode" = fallback ]; then
+  if [ "$signal_mode" = inplace ] || [ "$signal_mode" = fallback ] || [ "$signal_mode" = grace ] || [ "$signal_mode" = grace-fallback ] || [ "$signal_mode" = int ]; then
     sleep 5
     [ -z "$(git -C "$P" status --porcelain)" ] || fail "signal did not keep in-place tree clean"
   else
@@ -728,7 +805,8 @@ printf '%s\n' "$*" >> "$AGY_INVOKE_FILE"
 exit 0
 STUB
 chmod +x "$TMP/bin/agy"
-PATH="$TMP/bin:/usr/bin:/bin" bash "$CD" agy "$P_to" "$TMP/prompt" "true" >/dev/null 2>&1 || true
+PATH="$TMP/bin:$TMP/no-timeout-bin" bash "$CD" agy "$P_to" "$TMP/prompt" "true" >"$TMP/21b.out" 2>&1 || true
+grep -q "no timeout/gtimeout binary" "$TMP/21b.out" || fail "#21b used timeout"
 [ -s "$AGY_INVOKE_FILE" ] || fail "#21b no-timeout fallback never invoked agy — that branch is unasserted"
 assert_agy_bare_stdin "no-timeout fallback" "$(tail -n1 "$AGY_INVOKE_FILE")"
 echo "test #21 agy invocation uses bare stdin in both branches (no --print/exec/bare-dash) PASS"
