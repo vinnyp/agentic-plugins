@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.0](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.7.3...agent-dispatch-v1.8.0) (2026-10-19)
+
+
+### Features
+
+* **agent-dispatch:** role-based agy model defaults + codex exec probe in preflight ([#50](https://github.com/vinnyp/agentic-plugins/issues/50)) ([1bb04a5](https://github.com/vinnyp/agentic-plugins/commit/1bb04a5ab9b944ea9edf6d062a17b7a562292af2))
+
 ## [1.7.3](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.7.2...agent-dispatch-v1.7.3) (2026-10-10)
 
 
