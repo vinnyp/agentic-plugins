@@ -4,6 +4,9 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CD="$SCRIPT_DIR/coding-dispatch.sh"
 # shellcheck disable=SC1091
+. "$SCRIPT_DIR/lib/test-env-reset.sh"
+reset_dispatch_env
+# shellcheck disable=SC1091
 . "$SCRIPT_DIR/lib/hash.sh"
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 

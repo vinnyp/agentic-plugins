@@ -35,6 +35,9 @@ while [ -L "$_src" ]; do
   case "$_src" in /*) ;; *) _src="$_dir/$_src" ;; esac
 done
 SCRIPT_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
+[ -r "$SCRIPT_DIR/lib/agy-models.sh" ] || { echo "dispatch-worker: broken install: cannot read $SCRIPT_DIR/lib/agy-models.sh" >&2; exit 3; }
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/lib/agy-models.sh"
 RUNTIME="${RUNTIME:-codex}"
 SHAPE="mechanical"
 BRIEF=""
@@ -119,10 +122,9 @@ dispatch-worker — dispatch a worker brief to a runtime.
                      only the exact value 0 disables it. DISPATCH_REVIEW_WT_DIR sets
                      the preferred parent for isolated review worktrees.
   --model M          Model to pass to agy (--model M). Multi-word names with spaces/parens
-                     are kept intact as a single argument. Defaults (agy only, each its own
-                     sentence so a fragment grep can't cross-attribute them): in --review
-                     mode the default is "Gemini 3.1 Pro (High)" (review-grade). In
-                     edit/coding mode the default is "Gemini 3.8 Flash (Medium)" (cheaper).
+                     are kept intact as a single argument. Role defaults are defined in
+                     bin/lib/agy-models.sh: review "$AGY_MODEL_REVIEW_DEFAULT";
+                     edit/coding "$AGY_MODEL_CODING_DEFAULT".
                      An explicit --model always overrides the default. For codex, threaded
                      as 'codex exec -m M'; unset lets codex pick its config model.
   --agent NAME       Installed agy persona to dispatch as. agy-only; the name is
@@ -151,6 +153,8 @@ from a real build failure and NOT retry it as a build):
       (rc=124/137) also failed on retry —
       regardless of how many bytes the timed-out attempt wrote (a long partial is
       still truncated, not complete). Fall back to a LOCAL reviewer.
+  9   agy effective model missing from live models; update bin/lib/agy-models.sh
+      or pass --model (MODEL). No dispatch was started.
   124 the external --timeout bound killed a hung peer agent (treat as BLOCKED). For
       agy --review specifically, a single 124/137 is retried once internally and only
       surfaces as rc 8 (not a bare 124) if the retry ALSO times out; other runtimes/
@@ -453,14 +457,28 @@ dispatch_agy() {
   command -v agy >/dev/null || { echo "dispatch-worker: agy not on PATH (this runtime is a future case)" >&2; return 3; }
   # shellcheck disable=SC1091  # dynamic source path ($SCRIPT_DIR); resolved at runtime
   . "$SCRIPT_DIR/agy-auth-probe.sh"
+  local agy_model="$MODEL" agy_role="coding" agy_source="--model/MODEL" model_rc=0
+  [ "$REVIEW" = "1" ] && agy_role="review"
+  if [ -z "$agy_model" ]; then
+    agy_source="default"
+    if [ "$REVIEW" = "1" ]; then agy_model="$AGY_MODEL_REVIEW_DEFAULT"; else agy_model="$AGY_MODEL_CODING_DEFAULT"; fi
+  fi
   local auth_rc=0
   set +e
   agy_auth_probe
   auth_rc=$?
   set -e
   case "$auth_rc" in
-    0) : ;;
-    2) echo "dispatch-worker: agy auth probe inconclusive — proceeding" >&2 ;;
+    0)
+      agy_model_present "$AGY_AUTH_PROBE_OUTPUT" "$agy_model" || model_rc=$?
+      case "$model_rc" in
+        1)
+          echo "dispatch-worker: agy model '$agy_model' ($agy_role, $agy_source) not offered by installed agy — update $SCRIPT_DIR/lib/agy-models.sh (or your --model/MODEL override); run 'agy models' for current IDs" >&2
+          return 9 ;;
+        2) echo "dispatch-worker: unparseable agy models — skipping model check; proceeding" >&2 ;;
+      esac
+      ;;
+    2) echo "dispatch-worker: agy auth probe inconclusive — skipping model check; proceeding" >&2 ;;
     7)
       echo "dispatch-worker: agy not authenticated — re-authenticate agy: run 'agy' and sign in." >&2
       return 7
@@ -470,6 +488,7 @@ dispatch_agy() {
       return "$auth_rc"
       ;;
   esac
+  echo "dispatch-worker: agy model: $agy_model ($agy_role, $agy_source)" >&2
   if [ -n "$AGENT" ]; then
     local agent_roster agent_rc=0 roster_timeout=""
     if command -v timeout >/dev/null 2>&1; then
@@ -670,10 +689,6 @@ dispatch_agy() {
       printf '%s\n' "---- TASK BRIEF BELOW ----"
       cat "$BRIEF"
     } > "$agy_brief"
-  fi
-  local agy_model="$MODEL"
-  if [ -z "$agy_model" ]; then
-    if [ "$REVIEW" = "1" ]; then agy_model="Gemini 3.1 Pro (High)"; else agy_model="Gemini 3.8 Flash (Medium)"; fi
   fi
   local -a model_args=()
   [ -n "$agy_model" ] && model_args=(--model "$agy_model")

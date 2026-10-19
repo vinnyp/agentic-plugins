@@ -85,12 +85,22 @@ CLI you chose sends, on your account:
 
 `coding-preflight.sh agy` additionally sends one **sentinel prompt** ("Reply with exactly this
 token and nothing else: …") to verify the invocation form still round-trips. `agent-dispatch-doctor`
-runs `agy models`, which contacts the agy backend.
+runs `agy models`, which contacts the agy backend. `coding-preflight.sh codex` sends
+one short prompt to OpenAI asking its shell tool to run
+`shasum -a 256 nonce.in > nonce.out`. The probe uses a random nonce in a disposable
+local git repository. Codex also sends its standard context: system prompt, global
+`AGENTS.md`, and environment context including the home path. It probably leaves
+a rollout under `~/.codex/sessions`. The probe ignores a relative `XDG_CACHE_HOME`
+and requires its cache parent to be owned by the current user without group/world
+write permission. Cleanup cannot survive SIGKILL; probe directories older than
+one day are removed on a later probe.
 
 Local artifacts, where they land, and how long they live:
 
 | Artifact | Path | Lifetime |
 |---|---|---|
+| Codex exec probe repository, prompt and output | `${XDG_CACHE_HOME:-~/.cache}/agent-dispatch/codex-probe.*` | removed on return or INT/TERM; SIGKILL leftovers removed after a day |
+| Codex probe rollout | `~/.codex/sessions` | probably retained by codex; not removed by probe cleanup |
 | Failure diff | `<git-dir>/coding-dispatch-last-fail.patch` | overwritten by the next failure; delete when done |
 | Failure diff (worktree removed) | `<parent-git-dir>/coding-dispatch-fail-patches/<slug>.patch` | kept, keyed by slug |
 | Gate advisory marker | `<git-dir>/gate-advisory` | rewritten; TTL-based dedupe only |
@@ -108,5 +118,5 @@ Recommended `.gitignore` in any repo you dispatch into:
 _coding-result.json
 ```
 
-Everything else lives under `.git/` or `$TMPDIR`, outside the working tree, so nothing else needs
+Other artifacts live under `.git/`, `$TMPDIR`, or the cache directory, outside the working tree, so nothing else needs
 ignoring.

@@ -33,6 +33,8 @@ func rcMeaning(rc int) string {
 		return "agy not authenticated - run `agy` to sign in; NOT a build failure"
 	case 8:
 		return "empty/short review - do NOT retry; fall back to a LOCAL (Claude) reviewer"
+	case 9:
+		return "agy model not offered: fix lib/agy-models.sh or pass a model, then re-run; NOT a build failure"
 	case 124:
 		return "timeout - BLOCKED"
 	default:
@@ -48,7 +50,9 @@ func isInfrastructureRC(rc int) bool {
 	// on rc 3 to disposition 8 ("empty review - do NOT retry"), a wrong diagnosis that
 	// tells the operator to fall back to a local reviewer when the real fix is to install
 	// the binary or free up a worktree dir.
-	case 2, 3, 4, 5, 6, 7, 124:
+	// rc 9 is a model configuration refusal: fix the pin/override and re-run.
+	// It must preserve the infrastructure disposition even with an empty review.
+	case 2, 3, 4, 5, 6, 7, 9, 124:
 		return true
 	default:
 		return false
@@ -85,6 +89,7 @@ func declaredBriefRepoRoot(brief string) (string, bool) {
 func cmdCrossModel(args []string) int {
 	fs := flag.NewFlagSet("cross-model", flag.ContinueOnError)
 	runtime := fs.String("runtime", "agy", "agy|codex (default agy - the capability-confirmed reviewer)")
+	model := fs.String("model", "", "model override passed to dispatch-worker")
 	timeout := fs.String("timeout", "14m", "per-brief external timeout")
 	workdir := fs.String("workdir", "", "checkout directory dispatch-worker reviews (default: each brief's declared repo root, else current working directory)")
 	var briefs repeated
@@ -129,6 +134,9 @@ func cmdCrossModel(args []string) int {
 			}
 		}
 		cmd := exec.Command("dispatch-worker", "--runtime", *runtime, "--review", "--brief", b, "--timeout", *timeout, "--workdir", briefWorkdir)
+		if *model != "" {
+			cmd.Args = append(cmd.Args, "--model", *model)
+		}
 		var stdout, stderr strings.Builder
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr

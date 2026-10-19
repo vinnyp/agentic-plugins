@@ -3,6 +3,13 @@
 The conventions the exit codes assume you follow, and how to read the failures when they don't.
 The per-command exit-code tables live in the [command reference](commands.md).
 
+A HUP, INT, or TERM to `coding-dispatch.sh` stops the worker before reverting or
+salvaging changes and exits 143. With timeout available, escalation kills the worker's
+process group after about five seconds. Without timeout, only the worker PID is signalled.
+Both in-place and worktree modes defer a trapped signal during a foreground build gate
+until that gate returns. A supervisor that escalates to SIGKILL during a long gate kills
+the script without cleanup; the next in-place run then fails closed on the dirty tree.
+
 ## Operating rules
 
 These are the rules the exit codes assume you are following. They are not enforced by code.
@@ -41,8 +48,10 @@ killed review, `review-pin.sh release <workdir>` clears it, and it expires on it
 
 **Start with the doctor.** `agent-dispatch-doctor` checks that every entrypoint is on PATH and
 executable, that `lib/` is *not* on PATH, that codex and agy are present, that `agy models` works,
-that the default agy model names still exist (if agy renames a model, `--model` fails silently at
-dispatch time — this catches it), and that the entrypoints are shellcheck-clean.
+that both pinned agy role models still exist (missing models fail loudly), and that the
+entrypoints are shellcheck-clean. If preflight, dispatch-worker or the doctor reports a
+missing model, run `agy models` and update `bin/lib/agy-models.sh`. Use `--model`/`MODEL`
+on dispatch-worker or `AGY_MODEL` for coding as a validated one-off override.
 
 **"agy not authenticated" (exit 7) when agy looks signed in.** Auth freshness is probed by a *live
 call*, not by reading a token expiry — a token file can look valid while the session is not. Run
@@ -85,3 +94,18 @@ the running instance and invoke from there.
 **A TUI drive reads stale or empty output.** That is render lag, not an empty reply. Both drive
 scripts re-capture until the screen stabilises; if you are scripting a TUI yourself, never act on
 the first capture after a keystroke, and never send prompt text and Enter in a single call.
+
+**codex empty diff / code-mode host timeout.** If even shell commands fail with
+`timed out negotiating with the code-mode host`, codex may still exit zero and leave
+an empty diff. Preflight now tests a real shell command and fails closed on this error,
+including when a fallback writes the expected file. Run `codex-code-mode-host --help`
+once to warm the helper, and check macOS quarantine/Gatekeeper on the codex cask
+binaries. A recent reinstall may be involved, but quarantine is an unconfirmed cause.
+`CODEX_EXEC_PROBE_TIMEOUT` raises the default `75s` bound for slow environments;
+`CODING_PREFLIGHT_CODEX_PROBE=0` skips the probe for repeated scripted preflights.
+
+Exit 9 is binary-specific: `dispatch-worker` means the agy model is not offered
+(fix `bin/lib/agy-models.sh` or pass `--model`, then re-run);
+`coding-dispatch.sh` and `coding-build-phase.sh` mean review-pin refusal.
+An unparseable model list warns and skips validation. Model names are matched
+case-insensitively; tierless IDs warn that agy chooses the tier.

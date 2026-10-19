@@ -19,6 +19,8 @@ while [ -L "$_src" ]; do
   case "$_src" in /*) ;; *) _src="$_dir/$_src" ;; esac
 done
 SCRIPT_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/lib/agy-models.sh"
 agent="${1:-}"
 note() { printf '%s\n' "$*" >&2; }
 fail() { printf 'PREFLIGHT=error: %s\n' "$1"; note "✗ ${agent:-?} preflight: $1"; exit 1; }
@@ -35,6 +37,21 @@ case "$agent" in
     ver="$("$bin" --version 2>/dev/null | head -1)"
     auth="$("$bin" login status 2>&1 | head -1)"
     case "$auth" in *"Logged in"*) : ;; *) fail "codex not logged in ($auth) — run: codex login" ;; esac
+    if [ "${CODING_PREFLIGHT_CODEX_PROBE:-}" = 0 ]; then
+      echo "CODEX_EXEC_PROBE=skipped"
+      note "codex exec probe: skipped (CODING_PREFLIGHT_CODEX_PROBE=0)"
+    else
+      # shellcheck disable=SC1091
+      . "$SCRIPT_DIR/codex-exec-probe.sh"
+      CODEX_EXEC_PROBE_REASON="$(CODEX_BIN="$bin" codex_exec_probe)"
+      probe_rc=$?
+      CODEX_EXEC_PROBE_REASON="${CODEX_EXEC_PROBE_REASON##*$'\n'}"
+      case "$probe_rc" in
+        0) echo "CODEX_EXEC_PROBE=ok" ;;
+        2) echo "CODEX_EXEC_PROBE=inconclusive"; note "codex exec probe inconclusive, proceeding: $CODEX_EXEC_PROBE_REASON" ;;
+        *) fail "$CODEX_EXEC_PROBE_REASON" ;;
+      esac
+    fi
     # Model + reasoning effort inherit from ~/.codex/config.toml; never pin -m / -c.
     model="$(grep -E '^[[:space:]]*model[[:space:]]*=' "$HOME/.codex/config.toml" 2>/dev/null | head -1 | sed -E 's/.*=[[:space:]]*"?([^"]+)"?.*/\1/')"
     [ -z "$model" ] && model="codex default"
@@ -58,8 +75,18 @@ case "$agent" in
     AGY_BIN="$bin" agy_auth_probe
     auth_rc=$?
     case "$auth_rc" in
-      0) : ;;
-      2) note "⚠ agy auth probe inconclusive — proceeding" ;;
+      0)
+        agy_model="${AGY_MODEL:-$AGY_MODEL_CODING_DEFAULT}"
+        model_rc=0
+        agy_model_present "$AGY_AUTH_PROBE_OUTPUT" "$agy_model" || model_rc=$?
+        case "$model_rc" in
+          0) echo "AGY_MODEL_CHECK=ok" ;;
+          1) fail "agy model '$agy_model' (coding) not offered by installed agy — update $SCRIPT_DIR/lib/agy-models.sh (or your AGY_MODEL override); run 'agy models' for current IDs" ;;
+          2) echo "AGY_MODEL_CHECK=skipped:unparseable models"; note "unparseable agy models — skipping model check" ;;
+          *) echo "AGY_MODEL_CHECK=skipped:rc=$model_rc" ;;
+        esac
+        ;;
+      2) echo "AGY_MODEL_CHECK=skipped:inconclusive auth"; note "⚠ agy auth probe inconclusive — skipping model check; proceeding" ;;
       7) fail "agy not signed in — run: agy (launch once to sign in)" ;;
       *) fail "agy auth probe failed unexpectedly (rc=$auth_rc)" ;;
     esac
@@ -77,8 +104,8 @@ case "$agent" in
     esac
     echo "CODING_AGENT=agy"
     echo "CODING_BIN=$bin"
-    echo "CODING_MODEL=agy default (Antigravity)"
-    echo "CODING_INVOKE=agy < brief   (prompt on bare stdin; the _coding-result.json marker is the success signal, NOT stdout)"
+    echo "CODING_MODEL=${AGY_MODEL:-$AGY_MODEL_CODING_DEFAULT}"
+    echo "CODING_INVOKE=agy --model ${AGY_MODEL:-$AGY_MODEL_CODING_DEFAULT} < brief   (prompt on bare stdin; the _coding-result.json marker is the success signal, NOT stdout)"
     echo "PREFLIGHT=ok"
     note "✓ agy ready + authed — $bin"
     ;;

@@ -220,6 +220,7 @@ pass**; say so in the tier-rationale log entry (Phase 2).
   briefs — so read the per-brief rc from the summary, not just `$?`. Each rc has a defined
   orchestrator action:
 
+  - **9** — agy model not offered → fix the pin or pass `--model` to `review-gate cross-model`, then re-run; do NOT fall back to a Claude reviewer.
   - **5/6** — codex auth or rate limit → **not a build failure**. Fix the auth/ratelimit and re-run
     `cross-model` for that lens.
   - **7** — agy not authenticated, **8** — empty/short or evidence-free review, **124** — BLOCKED
@@ -235,8 +236,8 @@ pass**; say so in the tier-rationale log entry (Phase 2).
   rc with an empty body (rc 1 has been observed twice) gets the same treatment — a lens that
   returned nothing has not been reviewed, whatever it exited with. Read the per-brief **body
   length** from the run summary and apply the rule mechanically; never read a non-enumerated rc as
-  "no prescribed action". Exception: rc 5/6 keep their distinct "not a build failure, fix the
-  auth/ratelimit and re-run" handling.
+  "no prescribed action". Exception: rc 5/6/9 keep their distinct "not a build failure, fix the
+  auth/ratelimit/model pin and re-run" handling.
 
 ### 5. Verify-the-reviewer
 

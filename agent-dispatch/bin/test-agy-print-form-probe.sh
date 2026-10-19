@@ -6,6 +6,9 @@
 set -uo pipefail
 
 SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "$0")" && pwd)/lib/agy-models.sh"
+export AGY_TEST_CODING_PIN="$AGY_MODEL_CODING_DEFAULT" AGY_TEST_REVIEW_PIN="$AGY_MODEL_REVIEW_DEFAULT"
 PROBE="$SELF_DIR/agy-print-form-probe.sh"
 PREFLIGHT="$SELF_DIR/coding-preflight.sh"
 TMP="$(mktemp -d)"
@@ -43,7 +46,7 @@ emit_mode() {
 case "\${1:-}" in
   models)
     case "\${AGY_STUB_MODE:-healthy}" in
-      healthy) printf '%s\n' 'Gemini 3.1 Pro (High)'; exit 0 ;;
+      healthy) printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon (High)\ncustom-id\tCustom Display\n' "$AGY_TEST_CODING_PIN" "$AGY_TEST_REVIEW_PIN"; exit 0 ;;
       dead)    printf '%s\n' 'Error: Please sign in to view available models. Launch the CLI without arguments to sign in.' >&2; exit 1 ;;
     esac
     ;;

@@ -232,6 +232,7 @@ func TestCrossModelInfraCodesPreserveEmptyBodyDisposition(t *testing.T) {
 		rc   int
 		want string
 	}{
+		{name: "model_missing", rc: 9, want: "agy model not offered: fix lib/agy-models.sh or pass a model, then re-run; NOT a build failure"},
 		{name: "timeout", rc: 124, want: "timeout - BLOCKED"},
 		{name: "codex_auth", rc: 5, want: "codex auth rejected"},
 		{name: "dispatch_worker", rc: 2, want: "dispatch-worker usage error or dirty-tree refusal"},
@@ -264,12 +265,12 @@ exit `+strconv.Itoa(tc.rc)+`
 func TestCrossModelThreadsFlags(t *testing.T) {
 	callLog := stubDispatchWorker(t, strings.Repeat("review details ", 200), 0)
 	b := writeBrief(t, "b1.md")
-	rc, _ := runCapt(t, "cross-model", "--runtime", "codex", "--timeout", "9m", "--brief", b)
+	rc, _ := runCapt(t, "cross-model", "--runtime", "codex", "--timeout", "9m", "--model", "custom-id", "--brief", b)
 	if rc != 0 {
 		t.Fatalf("rc=%d", rc)
 	}
 	calls := readFile(t, callLog)
-	for _, want := range []string{"--runtime codex", "--timeout 9m", "--review", "--brief"} {
+	for _, want := range []string{"--runtime codex", "--timeout 9m", "--model custom-id", "--review", "--brief"} {
 		if !strings.Contains(calls, want) {
 			t.Fatalf("call log missing %q: %q", want, calls)
 		}
@@ -479,4 +480,18 @@ func readFile(t *testing.T, p string) string {
 		t.Fatal(err)
 	}
 	return string(b)
+}
+
+func TestCrossModelOmitsEmptyModel(t *testing.T) {
+	for _, args := range [][]string{nil, {"--model", ""}} {
+		callLog := stubDispatchWorker(t, strings.Repeat("review details ", 200), 0)
+		b := writeBrief(t, "default-model.md")
+		rc, _ := runCapt(t, append([]string{"cross-model", "--runtime", "agy", "--brief", b}, args...)...)
+		if rc != 0 {
+			t.Fatalf("rc=%d", rc)
+		}
+		if calls := readFile(t, callLog); strings.Contains(calls, "--model") {
+			t.Fatalf("empty model must inherit dispatch-worker default: %q", calls)
+		}
+	}
 }

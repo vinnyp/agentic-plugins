@@ -260,6 +260,10 @@ jobs:
         run: |
           set -e
           strip_ansi() { sed -E 's/\x1b\[[0-9;]*m//g'; }
+          # agy <=1.4.1 prints "skills: N processed"; agy 1.4.2 prints one summary
+          # line, "skills N · agents N · …". count_re matches either form, and the
+          # trailing anchor keeps "agents 8" from matching "agents 80".
+          count_re() { printf '%s([[:space:]]*:[[:space:]]*|[[:space:]]+)%s([[:space:]]+processed|[[:space:]]+·|[[:space:]]*$)' "$1" "$2"; }
 
           echo "::group::agy plugin validate agent-dispatch"
           timeout 60 agy plugin validate agent-dispatch 2>&1 | strip_ansi | tee agy-agent-dispatch.out
@@ -270,26 +274,26 @@ jobs:
           # So assert only that skills are processed at all (nonzero). The agent
           # counts below ARE stable: agents/ dirs are flat (one .md per agent), so
           # both counting modes agree.
-          grep -Eq 'skills[[:space:]]*:[[:space:]]*[1-9][0-9]* processed' agy-agent-dispatch.out \
+          grep -Eq "$(count_re skills '[1-9][0-9]*')" agy-agent-dispatch.out \
             || { echo "agy: expected agent-dispatch skills line with a nonzero processed count, got:"; cat agy-agent-dispatch.out; exit 1; }
 
           echo "::group::agy plugin validate operator-agents"
           timeout 60 agy plugin validate operator-agents 2>&1 | strip_ansi | tee agy-operator-agents.out
           echo "::endgroup::"
-          grep -Eq 'agents[[:space:]]*:[[:space:]]*8 processed' agy-operator-agents.out \
+          grep -Eq "$(count_re agents 8)" agy-operator-agents.out \
             || { echo "agy: expected operator-agents agents count == 8, got:"; cat agy-operator-agents.out; exit 1; }
           # operator-agents ships three skills; assert they're processed at all
           # (nonzero) so a silently-unloaded skill fails CI instead of shipping
           # invisible, same rationale as agent-dispatch above. Nonzero is all this
           # can assert — the count is not environment-stable (see above) — so the
           # per-skill roster gate is the "Skill contract" step earlier in this job.
-          grep -Eq 'skills[[:space:]]*:[[:space:]]*[1-9][0-9]* processed' agy-operator-agents.out \
+          grep -Eq "$(count_re skills '[1-9][0-9]*')" agy-operator-agents.out \
             || { echo "agy: expected operator-agents skills line with a nonzero processed count, got:"; cat agy-operator-agents.out; exit 1; }
 
           echo "::group::agy plugin validate peer-reviewer-agents"
           timeout 60 agy plugin validate peer-reviewer-agents 2>&1 | strip_ansi | tee agy-peer-reviewer-agents.out
           echo "::endgroup::"
-          grep -Eq 'agents[[:space:]]*:[[:space:]]*19 processed' agy-peer-reviewer-agents.out \
+          grep -Eq "$(count_re agents 19)" agy-peer-reviewer-agents.out \
             || { echo "agy: expected peer-reviewer-agents agents count == 19, got:"; cat agy-peer-reviewer-agents.out; exit 1; }
 
           # The per-plugin counts above are asserted against agy's own output; the

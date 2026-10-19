@@ -38,12 +38,24 @@ your first run:
 | Scope gate (`--allow-path`) | yes | no |
 | Hard revert on failure | yes | **no** |
 
+Codex preflight now verifies a real shell-tool invocation in a disposable cache
+repository before reporting ready. Shell failures and hangs fail closed; see the
+[preflight command reference](docs/commands.md#coding-preflightsh) for timeout,
+opt-out, and code-mode-host troubleshooting.
+
 So an edit through `coding-dispatch.sh` either leaves reviewable changes in the tree (or a salvaged
 diff in `--worktree` mode) or hard-resets to the pre-dispatch commit. Anything through
 `dispatch-worker` is bounded and classified, but **never reverted**: a partial or failed edit stays
 exactly where the agent left it. See
 [What this does NOT protect](docs/safety-and-data-flow.md#what-this-does-not-protect) for what a
 git-level revert cannot undo.
+
+On INT/TERM, `coding-dispatch.sh` stops its worker before cleanup and reports
+`DISPATCH=fail: interrupted (signal)`. HUP is handled alongside INT/TERM; with timeout
+available, cleanup escalates TERM to KILL for the worker process group after about five seconds.
+Foreground build gates defer trapped signals until they return. In-place changes are reverted unless
+`--keep-on-fail` applies or the worker committed changes; worktree changes and
+commits are salvaged with a failure patch. Fresh empty worktrees are removed.
 
 It is **not** an agent, a model, or a sandbox. It does not write code, choose a model for you, or
 contain the agent it launches.
@@ -149,6 +161,25 @@ Issues and pull requests are welcome. Keep `bin/run-tests.sh` green, keep shellc
 `--severity=warning`, and add a test that fails when your change is reverted — the suite's
 convention is to assert the observable effect (what the child process saw, what is on disk, what
 the exit code was), not that a line of code exists.
+
+agy role defaults live in [`bin/lib/agy-models.sh`](bin/lib/agy-models.sh): coding uses
+Flash Medium and review uses Argon High. Preflight and dispatch-worker validate the
+effective model against live `agy models`; the doctor checks both pins. On drift,
+run `agy models` and edit that file, or use `--model`/`MODEL` on dispatch-worker or
+`AGY_MODEL` for coding as a one-off override. Inconclusive auth probes warn and skip
+the model check. See [commands](docs/commands.md) for details.
+
+The codex preflight shell probe hashes a nonce in a private cache repository and
+reports `CODEX_EXEC_PROBE=ok|inconclusive|skipped`. Its default bound is 75s plus
+a 10s kill grace; see [commands](docs/commands.md) for overrides and
+[data flow](docs/safety-and-data-flow.md) for provider context and retained artifacts.
+
+The codex shell probe requests the digest tool available on PATH (`shasum -a 256`
+or `sha256sum`) and cleans up on HUP, INT, or TERM. If its cache directory has
+unsafe permissions, set that directory to mode 700 as shown in the diagnostic.
+Model overrides may omit only the final hyphen segment of an offered ID (normally
+its tier), e.g. `gemini-4-argon` for `gemini-4-argon-high`. With today's IDs,
+`gemini` or `gemini-4` match nothing.
 
 ## License
 
