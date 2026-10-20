@@ -34,6 +34,7 @@ LIB_DIR="$(cd "$BIN_DIR/../lib" 2>/dev/null && pwd || echo "$BIN_DIR/../lib")"
 # Entrypoint allowlist — agent-facing commands; test-*.sh files excluded.
 # ---------------------------------------------------------------------------
 ENTRYPOINTS=(
+  repo-state-check
   dispatch-worker
   coding-dispatch.sh
   coding-preflight.sh

@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -uo pipefail
+_src="${BASH_SOURCE[0]}"
+while [ -L "$_src" ]; do
+  _dir="$(cd -P "$(dirname "$_src")" && pwd)"
+  _src="$(readlink "$_src")"
+  case "$_src" in /*) ;; *) _src="$_dir/$_src" ;; esac
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
+# shellcheck source=agent-dispatch/bin/lib/repo-state.sh
+. "$SCRIPT_DIR/lib/repo-state.sh"
+case "${1:-}" in
+  snapshot)
+    [ "$#" -eq 3 ] || exit 64
+    repo_state_snapshot "$2" "$3"
+    exit $? ;;
+  compare)
+    [ "$#" -eq 3 ] || exit 64
+    changes=$(mktemp "${TMPDIR:-/tmp}/repo-state-changes.XXXXXX") || exit 2
+    trap 'rm -f "$changes"' EXIT
+    rc=0
+    repo_state_compare "$2" "$3" "$changes" || rc=$?
+    cat "$changes"
+    exit "$rc" ;;
+  *) echo 'usage: repo-state-check snapshot <repo> <file> | compare <before> <after>' >&2; exit 64 ;;
+esac
