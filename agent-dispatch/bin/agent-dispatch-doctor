@@ -45,6 +45,7 @@ ENTRYPOINTS=(
   mutation-verify.sh
   gate-run.sh
   review-pin.sh
+  review-clone.sh
   review-log-status
   wrap-merge-body.sh
   agent-dispatch-doctor
