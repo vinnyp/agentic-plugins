@@ -130,6 +130,62 @@ out="$(PATH="$TMP/inplacebin:$PATH" "$SELF_DIR/coding-build-phase.sh" codex "$TM
 echo "test #242 commit subjects PASS"
 
 
+# foundry#237: every task prompt carries the plan preamble (goal, spec path, global
+# constraints) ahead of its task spec; the orchestrator banner is dropped; no preamble
+# means no block; an over-cap preamble is cut with a visible note.
+mkdir -p "$TMP/ctxbin"
+cat > "$TMP/ctxbin/coding-dispatch.sh" <<'STUB'
+#!/usr/bin/env bash
+for a in "$@"; do case "$a" in *.prompt) n=$(( $(find "$CTX_DIR" -type f | wc -l) + 1 )); cp "$a" "$CTX_DIR/$n";; esac; done
+STUB
+chmod +x "$TMP/ctxbin/coding-dispatch.sh"
+cat > "$TMP/plan-ctx.md" <<'PLAN'
+# Widget Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: use subagent-driven-development.
+
+**Goal:** GOAL-237 ship the widget
+**Spec:** docs/specs/widget-design.md
+
+## Global Constraints
+- RULE-237 never use innerHTML
+
+### Task 1: first
+BODY-ONE
+### Task 2: second
+BODY-TWO
+PLAN
+repo237="$TMP/phase237"; new_phase_repo "$repo237"
+export CTX_DIR="$TMP/ctx237"; mkdir -p "$CTX_DIR"
+out="$(PATH="$TMP/ctxbin:$PATH" "$SELF_DIR/coding-build-phase.sh" codex "$TMP/plan-ctx.md" "$repo237" 1 2 --build-cmd true 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] || { echo "$out"; echo "FAIL: #237 phase should exit 0, got $rc"; exit 1; }
+[ -f "$CTX_DIR/1" ] && [ -f "$CTX_DIR/2" ] || { ls "$CTX_DIR"; echo "FAIL: #237 expected two captured prompts"; exit 1; }
+for n237 in 1 2; do
+  f237="$CTX_DIR/$n237"
+  for want237 in "PLAN CONTEXT" "GOAL-237" "docs/specs/widget-design.md" "RULE-237"; do
+    grep -qF "$want237" "$f237" || { cat "$f237"; echo "FAIL: #237 task $n237 prompt missing '$want237'"; exit 1; }
+  done
+  ! grep -qF "For agentic workers" "$f237" || { cat "$f237"; echo "FAIL: #237 orchestrator banner leaked into task $n237"; exit 1; }
+  rule_line="$(grep -nF "RULE-237" "$f237" | head -1 | cut -d: -f1)"
+  spec_line="$(grep -nF "TASK SPEC" "$f237" | head -1 | cut -d: -f1)"
+  [ "$rule_line" -lt "$spec_line" ] || { cat "$f237"; echo "FAIL: #237 plan context must precede the task spec"; exit 1; }
+done
+grep -qF "BODY-ONE" "$CTX_DIR/1" && ! grep -qF "BODY-TWO" "$CTX_DIR/1" || { echo "FAIL: #237 task 1 prompt should carry only its own body"; exit 1; }
+grep -qF "BODY-TWO" "$CTX_DIR/2" && ! grep -qF "BODY-ONE" "$CTX_DIR/2" || { echo "FAIL: #237 task 2 prompt should carry only its own body"; exit 1; }
+rm -f "$CTX_DIR"/*
+out="$(PATH="$TMP/ctxbin:$PATH" "$SELF_DIR/coding-build-phase.sh" codex "$TMP/plan.md" "$repo237" 1 --build-cmd true 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] && [ -f "$CTX_DIR/1" ] || { echo "$out"; echo "FAIL: #237 no-preamble phase should dispatch"; exit 1; }
+! grep -qF "PLAN CONTEXT" "$CTX_DIR/1" || { cat "$CTX_DIR/1"; echo "FAIL: #237 a plan with no preamble must not get a PLAN CONTEXT block"; exit 1; }
+rm -f "$CTX_DIR"/*
+out="$(PATH="$TMP/ctxbin:$PATH" CODING_BUILD_PLAN_CONTEXT_MAX=40 "$SELF_DIR/coding-build-phase.sh" codex "$TMP/plan-ctx.md" "$repo237" 1 --build-cmd true 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] && [ -f "$CTX_DIR/1" ] || { echo "$out"; echo "FAIL: #237 capped phase should dispatch"; exit 1; }
+grep -qF "[plan context truncated: first 40 of" "$CTX_DIR/1" || { cat "$CTX_DIR/1"; echo "FAIL: #237 over-cap preamble needs a truncation note"; exit 1; }
+! grep -qF "RULE-237" "$CTX_DIR/1" || { cat "$CTX_DIR/1"; echo "FAIL: #237 cap was not applied"; exit 1; }
+out="$(PATH="$TMP/ctxbin:$PATH" CODING_BUILD_PLAN_CONTEXT_MAX=lots "$SELF_DIR/coding-build-phase.sh" codex "$TMP/plan-ctx.md" "$repo237" 1 --build-cmd true 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] || { echo "$out"; echo "FAIL: #237 a non-numeric cap should exit 2, got $rc"; exit 1; }
+unset CTX_DIR
+echo "test #237 plan context reaches every task prompt PASS"
+
 # #234: unavailable agents block either phase mode without committing.
 printf '#!/usr/bin/env bash\nexit 6\n' > "$TMP/bin/coding-dispatch.sh"
 for mode234 in in-place worktree; do

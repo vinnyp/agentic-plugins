@@ -5,7 +5,8 @@
 #   e.g. coding-build-phase.sh codex .../plan.md ~/Projects/myrepo 2 3 4 5 6 --build-cmd "pytest -q"
 #
 # For each task id: extract that task's block VERBATIM from the plan, wrap it with the
-# delegation contract, dispatch via coding-dispatch.sh (build gate + git net), and on
+# delegation contract and the plan's preamble (text above the first task: goal, spec path,
+# global constraints; capped by CODING_BUILD_PLAN_CONTEXT_MAX, default 12000 chars), dispatch via coding-dispatch.sh (build gate + git net), and on
 # success commit. Stops on the first failure (dispatch already reverted/salvaged the tree).
 # Honors phase-boundary checkpoints: the caller passes one phase's task ids per run.
 #
@@ -102,6 +103,28 @@ extract_task() {
   ' "$plan"
 }
 
+# extract_preamble: print the plan text above the first "### Task " heading — the plan's
+# Goal, spec path and Global Constraints, which no task block carries (vinnyp/foundry#237).
+# The superpowers "> **For agentic workers:**" execution banner is dropped: it tells the
+# ORCHESTRATOR which skill to run and would misdirect the worker.
+extract_preamble() {
+  awk '
+    /^### Task / {exit}
+    /^> \*\*For [Aa]gentic workers/ {next}
+    {print}
+  ' "$plan"
+}
+PLAN_CONTEXT_MAX="${CODING_BUILD_PLAN_CONTEXT_MAX:-12000}"
+case "$PLAN_CONTEXT_MAX" in ''|*[!0-9]*) echo "PHASE=error: CODING_BUILD_PLAN_CONTEXT_MAX must be a whole number of characters"; exit 2 ;; esac
+plan_context="$(extract_preamble)"
+# Whitespace-only preamble = no plan context block at all.
+case "$plan_context" in *[![:space:]]*) ;; *) plan_context="" ;; esac
+plan_context_note=""
+if [ "${#plan_context}" -gt "$PLAN_CONTEXT_MAX" ]; then
+  plan_context_note="[plan context truncated: first $PLAN_CONTEXT_MAX of ${#plan_context} characters shown — read the full plan at $plan]"
+  plan_context="${plan_context:0:$PLAN_CONTEXT_MAX}"
+fi
+
 strip_fences() {
   awk '
     /^```/ { in_fence = !in_fence; next }
@@ -133,6 +156,14 @@ for tid in ${task_ids[@]+"${task_ids[@]}"}; do
     echo "  repo root: {\"status\":\"complete\",\"files_written\":[...],\"timestamp\":\"<ISO8601 UTC>\"}"
     echo "  If anything fails, do NOT write that file."
     echo
+    if [ -n "$plan_context" ]; then
+      echo "PLAN CONTEXT (shared by every task — goal, spec and global constraints; the task spec"
+      echo "below wins on any conflict, and the touch-only constraint above still applies):"
+      echo "======================================================================"
+      printf '%s\n' "$plan_context"
+      [ -z "$plan_context_note" ] || printf '%s\n' "$plan_context_note"
+      echo
+    fi
     echo "TASK SPEC (verbatim from the plan — follow it exactly, including the code blocks):"
     echo "======================================================================"
     printf '%s\n' "$body"

@@ -31,6 +31,8 @@ DISPATCH_ENV_VARS=(
   CODING_DISPATCH_CHILD_ENV
   # Registered 2026-10-20. coding-dispatch.sh reads it to skip mutation-suite paths in the marker guard (foundry#236); an operator value would change which tests fail.
   CODING_DISPATCH_MUT_EXEMPT
+  # Registered 2026-10-20. coding-build-phase.sh reads it to cap the PLAN CONTEXT block (foundry#237); an operator value would change every generated task prompt.
+  CODING_BUILD_PLAN_CONTEXT_MAX
   # Registered with the dispatch preamble. coding-dispatch.sh reads it to locate
   # docs/dispatch-preamble.md, so an operator value pointing at a stale or empty
   # copy would change what every brief in a test run carries.
