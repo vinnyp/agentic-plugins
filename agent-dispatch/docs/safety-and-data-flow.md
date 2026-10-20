@@ -42,7 +42,9 @@ What the `coding-dispatch.sh` net covers:
 6. **Reviews cannot silently pass.** Empty, short, or evidence-free agy reviews are exit 8.
 
 agy review clones share no config, refs or branches with the source; global Git config is a
-private copy and fetch/push are disabled. Unsuitable repos fall back to the live workspace
+private copy and origin's fetch and push URLs point at a disabled path. Other remotes and
+the operator's credential helper remain reachable, so the drift check, not the clone,
+detects source changes. Unsuitable repos fall back to the live workspace
 with permissions enforced. All review runtimes compare source state before and after:
 critical config, hooks or committer drift exits 10; refs and tree movement only warn.
 

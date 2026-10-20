@@ -199,7 +199,8 @@ pass**; say so in the tier-rationale log entry (Phase 2).
   and `repo-state-check compare <before> <after-snapshot>`. Treat compare exit 2 as
   rc 10: inspect and restore the named changes before committing, discard the review body
   unless every change is known concurrent work, and re-run. An unreadable after-snapshot
-  also requires stopping and inspection.
+  also requires stopping and inspection. Exits 3/64 mean "check failed: stop and investigate",
+  never clean; stop on snapshot failure too.
 
 - **Optional different-model pass (serialized)** for independence on load-bearing lenses (code,
   security and privacy are capability-confirmed on `agy`; standards and interface for public-bound
@@ -218,8 +219,10 @@ pass**; say so in the tier-rationale log entry (Phase 2).
   git rebase origin/main   # or: git log --oneline origin/main..HEAD to confirm it's current
   ```
 
-  The review clone mirrors the source's refs at dispatch time and cannot fetch, so rebase
-  or fetch in the source *before* dispatching. When in doubt, rebase first.
+  The review clone mirrors the source's refs at dispatch time; origin's fetch and push URLs
+  point at a disabled path. Other remotes and the operator's credential helper remain reachable,
+  so the drift check, not the clone, detects source changes. Rebase or fetch in the source
+  *before* dispatching. When in doubt, rebase first.
 
   ```bash
   "$RG" cross-model --runtime agy --brief /tmp/brief-code-xm.md --timeout 14m

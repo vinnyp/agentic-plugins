@@ -39,8 +39,8 @@ Because only **committed HEAD** is snapshotted, an uncommitted artifact — a sp
 must be committed first. The stderr warning about a dirty tree tells you changes are excluded; it
 does **not** tell you the whole repo is the wrong one.
 
-This is agy-specific. `--runtime codex` and `--runtime claude` build no clone and ignore
-`--workdir`, reading the caller's live cwd instead.
+`--runtime codex` builds no clone and honours `--workdir` by passing `-C`.
+`--runtime claude` runs in the caller's cwd, and the drift check watches that repo.
 
 ## Three load-bearing rules
 
@@ -124,5 +124,7 @@ plan- and design-scale gates.
 
 Exit **10** means the source repo changed during the review window. Inspect and restore the
 named changes before committing; discard the body unless every change is known concurrent
-work, then re-run. The clone mirrors refs at dispatch time and cannot fetch; fetch or rebase
-in the source before dispatching.
+work, then re-run. The clone mirrors refs at dispatch time; origin's fetch and push URLs
+point at a disabled path. Other remotes and the operator's credential helper remain reachable,
+so the drift check, not the clone, detects source changes. Fetch or rebase in the source
+before dispatching.

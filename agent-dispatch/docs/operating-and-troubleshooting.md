@@ -110,6 +110,10 @@ Exit 9 is binary-specific: `dispatch-worker` means the agy model is not offered
 An unparseable model list warns and skips validation. Model names are matched
 case-insensitively; tierless IDs warn that agy chooses the tier.
 
+**dispatch-worker broken install (exit 3).** Every runtime exits 3 when
+`lib/repo-state.sh` or `lib/review-clone.sh` is missing. Run `agent-dispatch-doctor`
+and repair the installation before retrying.
+
 ## Exit 10: the source repo changed during a review
 
 Stop before committing. Read the named `config`, `hooks`, `commit`, `ref`, `worktree` and
@@ -117,6 +121,13 @@ Stop before committing. Read the named `config`, `hooks`, `commit`, `ref`, `work
 the runtime result; attribution to the reviewer or a concurrent session is not assumed.
 Discard the review body unless every change is known concurrent work, restore unexpected
 changes, and re-run. Values may be redacted, so compare with your known intended settings.
+
+Known false-positive sources include `submodule.*` keys from a concurrent
+`git submodule update --init`, `core.repositoryformatversion`/`extensions.*` writes,
+a global write by `gh auth setup-git`, and a branch fetched directly from a URL or
+fork PR (`gh pr checkout`) whose commits have another committer. Known blind spots
+are commits pushed to a remote during the window and commits on a detached HEAD
+in a source worktree.
 
 For an accidental local key, use `git -C <repo> config --local --unset <key>` if it did not
 previously exist, or `git -C <repo> config --local --replace-all <key> <intended-value>` to

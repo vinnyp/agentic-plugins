@@ -229,7 +229,9 @@ default runtime**, so a bare `dispatch-worker --review` is the ungated path; pas
 if you want the review judged, or judge it yourself.
 
 The clone mirrors the source's local branches, remote-tracking refs and tags at dispatch time.
-Fetch and push URLs are disabled; fetch or rebase in the source before dispatching. Git config,
+Origin's fetch and push URLs point at a disabled path; fetch or rebase in the source before dispatching.
+Other remotes and the operator's credential helper remain reachable, so the drift check,
+not the clone, detects source changes. Git config,
 refs and branches are private, and the reviewer gets a mode-0600 flattened copy of global Git
 config via `GIT_CONFIG_GLOBAL`. Unsuitable repos (partial clones, filters, LFS or an invalid
 HEAD) fall back to the live workspace, naming the reason and enforcing permissions instead of
@@ -242,8 +244,9 @@ Unexpected config changes, hook changes, foreign committers on new local commits
 unreadable after-snapshot exit 10, overriding every post-launch result. Ref, worktree and
 working-tree movement only warn. stderr reports
 `DISPATCH_REVIEW_STATE=clean|warn(<n>)|critical(<n>)|skipped(<reason>) original_rc=<n>`:
-clean means no drift, warn counts noncritical changes, critical counts critical changes,
-and skipped explains why a before-snapshot could not be taken. `original_rc` is the runtime
+clean means no drift; `<n>` in both `warn(<n>)` and `critical(<n>)` counts all change lines.
+The closed skipped-reason set is `not-launched`, `not-a-git-repo`, `snapshot-failed`,
+and `not-checked`. `original_rc` is the runtime
 result before state classification; a runtime's native 10 is remapped to 1.
 
 A review pin is taken on the workdir for every `--review` regardless of runtime, and released on
@@ -662,7 +665,10 @@ review-clone.sh --remove <abs parent> <that path>
 
 Builds a disposable local clone detached at the supplied SHA (default source HEAD), with
 hardlinked objects where possible and no alternates. Mirrors local branches, remote-tracking
-refs and tags, then disables origin fetch and push. Config and refs are private. It verifies a
+refs and tags; origin's fetch and push URLs point at a disabled path. Other remotes and the
+operator's credential helper remain reachable, so the drift check, not the clone, detects
+source changes. Config and refs are private. On success it prints `<dest> <resolved-sha>`
+to stdout. It verifies a
 clean checkout and matching refs. Exit 0 means success; 3 refuses an unsuitable path or source;
 4 means a faithful checkout is unavailable (including filters, LFS, partial clones or invalid
 HEAD), allowing the dispatcher's non-hermetic fallback. Invalid CLI arguments exit 64.
@@ -671,6 +677,9 @@ without a trailing slash, and named `dispatch-review-wt.*` under an existing par
 Guarded removal requires an absolute,
 non-symlink path directly under the resolved parent, with no trailing slash and a basename
 matching `dispatch-review-wt.*`. Failed builds use guarded cleanup too.
+The clone does not mirror branch upstream config (`@{upstream}`), `stash@{n}`,
+`refs/notes/*`, `refs/replace/*` or reflog forms; brief authors should use explicit
+`origin/<x>` ranges.
 
 ## repo-state-check
 
@@ -684,8 +693,20 @@ worktrees, dirty paths and configured identity. Files are mode 0600; keep them i
 temp directory and remove them after inspection. Snapshot exits 0 on success or 3 for an
 empty, relative or invalid repository path; invalid CLI arguments exit 64.
 Compare prints named change lines and exits 0 for clean, 1 for warn-only drift or 2 for
-critical drift. Config changes are critical except benign branch, maintenance, new-remote,
-remote-fetch, editor and sparse-checkout bookkeeping; existing remote URL changes stay critical.
+critical drift. Config changes are critical except these benign keys: `branch.*.*`
+except `branch.*.pushremote` and a `branch.*.remote` naming a new remote;
+`remote.*.fetch`; `remote.*.gh-resolved`; a new remote's `url`/`fetch`/`gh-resolved`;
+`gc.*`; `maintenance.*`; `extensions.worktreeconfig`; `core.sparsecheckout`; and
+`core.sparsecheckoutcone`. Existing remote URL changes stay critical.
 Hook changes and new local-only commits with a committer different from the initial identity
 are critical. Ref, worktree and working-tree movement warn. Sensitive values are hashed in
-snapshots and output is redacted. Treat compare exit 2 as review rc 10.
+snapshots and output is redacted. Treat compare exit 2 as review rc 10; exits 3/64 mean
+check failed: stop and investigate, never clean.
+
+| Exit | Meaning |
+| --- | --- |
+| `0` | Snapshot succeeded, compare clean, or help printed |
+| `1` | Compare found warn-only drift |
+| `2` | Compare found critical drift (including an unreadable after-snapshot) |
+| `3` | Snapshot failure, broken install, unreadable before-snapshot or internal temp failure |
+| `64` | Usage error; unlike the usual house exit 2, which here means critical drift |

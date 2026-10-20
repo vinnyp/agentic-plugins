@@ -14,7 +14,9 @@ same safety wrapper: the timeout that the agent's own `--print-timeout` doesn't 
 and the exit code that tells an out-of-credit account apart from a failing build.
 
 **Review workspaces.** agy reviews use a disposable private clone with mirrored refs,
-disabled fetch and push, and private global Git config. Unsuitable repos fall back to the live
+private global Git config; origin's fetch and push URLs point at a disabled path.
+Other remotes and the operator's credential helper remain reachable, so the drift check,
+not the clone, detects source changes. Unsuitable repos fall back to the live
 workspace with permissions enforced. Every runtime's review checks source state before and after;
 critical drift exits 10 and stops the review gate. Inspect and restore the named changes before
 committing, then re-run. See [the command reference](docs/commands.md#dispatch-worker).
