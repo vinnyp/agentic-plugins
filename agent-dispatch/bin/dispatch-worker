@@ -70,6 +70,7 @@ REVIEW_WT_RM_PARENT=""
 REVIEW_WT_PARENT_CREATED=0
 REVIEW_SRC_TOP=""
 REVIEW_PIN_DIR=""
+REVIEW_STATE_DIR=""
 REVIEW_OUTFILE_TMP=""   # set only when WE mktemp'd the review file, so only that one is removed
 
 # Invoked by the EXIT trap.
@@ -88,6 +89,9 @@ cleanup_dispatch_worker() {
   fi
   if [ -n "${REVIEW_WT:-}" ]; then
     review_clone_guarded_rm "$REVIEW_WT_RM_PARENT" "$REVIEW_WT" 2>/dev/null || true
+  fi
+  if [ -n "${REVIEW_STATE_DIR:-}" ]; then
+    rm -rf "$REVIEW_STATE_DIR"
   fi
   # Only reclaim a parent this invocation created; operator-owned empty dirs survive.
   [ "${REVIEW_WT_PARENT_CREATED:-0}" = "1" ] && [ -n "${REVIEW_WT_PARENT:-}" ] && rmdir "$REVIEW_WT_PARENT" 2>/dev/null || true
@@ -466,7 +470,13 @@ $hit"
 
 run_agy_review_attempt() {
   REVIEW_RUNTIME_LAUNCHED=1
-  ( cd "$review_path" && run_with_timeout agy "${model_args[@]}" < "$agy_brief" ) | tee "$review_outfile"
+  (
+    cd "$review_path" || exit 1
+    if [ "$REVIEW_HERMETIC" = "1" ]; then
+      export GIT_CONFIG_GLOBAL="$REVIEW_STATE_DIR/global.gitconfig"
+    fi
+    run_with_timeout agy "${model_args[@]}" < "$agy_brief"
+  ) | tee "$review_outfile"
   return "${PIPESTATUS[0]}"
 }
 
@@ -728,6 +738,23 @@ dispatch_agy() {
       model_args+=(--dangerously-skip-permissions)
     else
       echo "dispatch-worker: warning: review is running non-hermetically and therefore read-only; the lens may be unable to complete an execution-dependent method." >&2
+    fi
+    if [ "$REVIEW_HERMETIC" = "1" ]; then
+      REVIEW_STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/dispatch-review-state.XXXXXX")" || return 3
+      local f="$REVIEW_STATE_DIR/global.gitconfig" record key value
+      (umask 077; : > "$f") || return 3
+      local global_records="$REVIEW_STATE_DIR/global.records"
+      if ! git -C "$REPO_STATE_SRC" config --global --includes --list -z > "$global_records"; then
+        : > "$global_records"
+      fi
+      while IFS= read -r -d '' record; do
+        case "$record" in
+          *$'\n'*) key="${record%%$'\n'*}"; value="${record#*$'\n'}" ;;
+          *) key="$record"; value=true ;;
+        esac
+        case "$key" in include.path|includeif.*) continue ;; esac
+        git config --file "$f" --add "$key" "$value" || return 3
+      done < "$global_records"
     fi
     local agy_rc=0
     run_agy_review_attempt || agy_rc=$?

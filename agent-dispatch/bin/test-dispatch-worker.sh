@@ -1523,6 +1523,60 @@ grep -qF "falling back to $review_pwd, where agy" "$TMP/cfg.err" || fail "last-r
 [ -z "$(find "$TMPDIR" -name 'dispatch-review-wt.*' -print)" ] || fail 'last-resort workspace leaked'
 echo 'test 43 (private clone, refs, environment and fallback) PASS'
 
+# V3. Global reads are flattened and every reviewer write stays private.
+r44="$TMP/repo44"; make_git_repo "$r44"
+git -C "$r44" branch feature
+git -C "$r44" remote add origin "$origin"
+cat > "$TMP/included.gitconfig" <<'CONFIG'
+[core]
+ editor = ed
+CONFIG
+cat > "$GIT_CONFIG_GLOBAL" <<CONFIG
+[user]
+ name = Review Test
+ email = review@example.invalid
+[include]
+ path = $TMP/included.gitconfig
+[x]
+ flag
+CONFIG
+cp "$GIT_CONFIG_GLOBAL" "$TMP/global.before"
+cp "$r44/.git/config" "$TMP/local.before"
+git -C "$r44" for-each-ref > "$TMP/refs.before"
+git -C "$r44" worktree list --porcelain > "$TMP/worktrees.before"
+cat > "$AGY_STUB_ACTIONS" <<'ACTIONS'
+{
+git config --global --get user.email
+git config --global --get core.editor
+git config --global --bool --get x.flag
+ls -l "$GIT_CONFIG_GLOBAL" | cut -c1-10
+} > "$AGY_ARGS_FILE.global"
+git config user.name x
+git config --global user.email x@x.invalid
+git branch scratch
+git branch -D feature
+git checkout -b other
+git push origin HEAD:refs/heads/evil >/dev/null 2>&1; echo push=$? > "$AGY_ARGS_FILE.push"
+ACTIONS
+run_cfg_review "$r44" || fail 'V3 launch failed'
+[ "$(sed -n '1p' "$AGY_ARGS_FILE.global")" = review@example.invalid ] || fail 'V3 global identity lost'
+[ "$(sed -n '2p' "$AGY_ARGS_FILE.global")" = ed ] || fail 'V3 included editor lost'
+[ "$(sed -n '3p' "$AGY_ARGS_FILE.global")" = true ] || fail 'V3 valueless flag lost'
+[ "$(sed -n '4p' "$AGY_ARGS_FILE.global")" = -rw------- ] || fail 'V3 global config permissions'
+cmp -s "$GIT_CONFIG_GLOBAL" "$TMP/global.before" || fail 'V3 global config changed'
+cmp -s "$r44/.git/config" "$TMP/local.before" || fail 'V3 source config changed'
+git -C "$r44" for-each-ref > "$TMP/refs.after"
+git -C "$r44" worktree list --porcelain > "$TMP/worktrees.after"
+cmp -s "$TMP/refs.before" "$TMP/refs.after" || fail 'V3 source refs changed'
+cmp -s "$TMP/worktrees.before" "$TMP/worktrees.after" || fail 'V3 source worktrees changed'
+grep -q '^push=[1-9][0-9]*$' "$AGY_ARGS_FILE.push" || fail 'V3 push enabled'
+[ -z "$(find "$TMPDIR" -name 'dispatch-review-state.*' -print)" ] || fail 'V3 state directory leaked'
+: > "$AGY_STUB_ACTIONS"
+GIT_CONFIG_GLOBAL="$TMP/missing-global" run_cfg_review "$r44" || fail 'missing global config launch failed'
+[ ! -e "$TMP/missing-global" ] || fail 'missing global config created outside review'
+[ -z "$(find "$TMPDIR" -name 'dispatch-review-state.*' -print)" ] || fail 'missing global state directory leaked'
+echo 'test 44 (private flattened global config and absent global config) PASS'
+
 # The file had 22 agy stubs before the four persona-specific controls above;
 # every definition must answer the roster subcommand instead of falling into cat.
 agy_stub_defs="$(grep -c 'cat > .*bin/ag[y].*STUB' "$0")"
