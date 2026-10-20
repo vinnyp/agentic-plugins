@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.2](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.8.1...agent-dispatch-v1.8.2) (2026-10-20)
+
+
+### Bug Fixes
+
+* **agent-dispatch:** isolate review workspaces in a private clone and fail on source-repo drift ([#57](https://github.com/vinnyp/agentic-plugins/issues/57)) ([cd59347](https://github.com/vinnyp/agentic-plugins/commit/cd59347b11257fb1c54ebfac0feaef4b9385fb03))
+
 ## [1.8.1](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.8.0...agent-dispatch-v1.8.1) (2026-10-19)
 
 
