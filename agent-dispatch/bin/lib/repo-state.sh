@@ -2,9 +2,26 @@
 # Sourceable repository config snapshots. No caller shell options are changed.
 _repo_state_git() (
   unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_PREFIX
+  # Git supplies the whitespace-separated names of its repository-local variables.
+  # shellcheck disable=SC2046
+  unset $(git rev-parse --local-env-vars 2>/dev/null)
   export GIT_OPTIONAL_LOCKS=0
   git "$@"
 )
+
+_repo_state_sha256() {
+  local digest
+  if command -v shasum >/dev/null 2>&1; then
+    digest=$(shasum -a 256) || return 1
+  elif command -v sha256sum >/dev/null 2>&1; then
+    digest=$(sha256sum) || return 1
+  else
+    return 1
+  fi
+  digest=${digest%% *}
+  [ -n "$digest" ] || return 1
+  printf '%s\n' "$digest"
+}
 
 _repo_state_encode() {
   local value=$1
@@ -24,10 +41,10 @@ _repo_state_configs() {
     lower=$(printf '%s' "$key" | LC_ALL=C tr '[:upper:]' '[:lower:]')
     case "$lower" in
       credential.*|*extraheader*|*token*|*pass*|*secret*|*proxy*)
-        value="sha256:$(printf '%s' "$value" | shasum -a 256 | cut -d ' ' -f 1)" ;;
+        value="sha256:$(printf '%s' "$value" | _repo_state_sha256)" ;;
       *)
         if [[ "$value" =~ ://[^/]*@ ]]; then
-          value="sha256:$(printf '%s' "$value" | shasum -a 256 | cut -d ' ' -f 1)"
+          value="sha256:$(printf '%s' "$value" | _repo_state_sha256)"
         fi ;;
     esac
     printf 'config\t%s\t%s\t%s\t%s\n' "$(_repo_state_encode "$scope")" \
@@ -53,14 +70,14 @@ _repo_state_hooks() {
       target=${target%$'\n'}
       content=dangling
       if [ -f "$file" ]; then
-        content=$(shasum -a 256 < "$file" | cut -d ' ' -f 1)
+        content=$(_repo_state_sha256 < "$file")
       fi
       mode='link'
-      digest=$(printf '%s\0%s' "$target" "$content" | shasum -a 256 | cut -d ' ' -f 1)
+      digest=$(printf '%s\0%s' "$target" "$content" | _repo_state_sha256)
     else
       [ -f "$file" ] || continue
       mode=$(stat -f '%Lp' "$file" 2>/dev/null) || mode=$(stat -c '%a' "$file")
-      digest=$(shasum -a 256 < "$file" | cut -d ' ' -f 1)
+      digest=$(_repo_state_sha256 < "$file")
     fi
     printf 'hooks\t%s\t%s\t%s\n' "$(_repo_state_encode "$prefix${file##*/}")" "$mode" "$digest"
   done
@@ -68,11 +85,11 @@ _repo_state_hooks() {
 
 _repo_state_tree() {
   local wt=$1 status=$2 record path skip
-  if [ ! -d "$wt" ] || ! _repo_state_git -C "$wt" status --porcelain=v2 -z --untracked-files=all > "$status" 2>/dev/null; then
+  if [ ! -d "$wt" ] || ! _repo_state_git -C "$wt" -c core.fsmonitor=false status --porcelain=v2 -z --untracked-files=all > "$status" 2>/dev/null; then
     printf 'tree\t%s\tunreadable\n' "$(_repo_state_encode "$wt")"
     return
   fi
-  printf 'tree\t%s\t%s\n' "$(_repo_state_encode "$wt")" "$(shasum -a 256 < "$status" | cut -d ' ' -f 1)"
+  printf 'tree\t%s\t%s\n' "$(_repo_state_encode "$wt")" "$(_repo_state_sha256 < "$status")"
   while IFS= read -r -d '' record; do
     case "$record" in
       '1 '*) skip=8 ;; '2 '*) skip=9 ;; 'u '*) skip=10 ;;
@@ -88,19 +105,19 @@ _repo_state_tree() {
 repo_state_snapshot() (
   umask 077
   local repo=${1:-} out=${2:-} top ident name email config wt hooks custom head branch record
+  _repo_state_sha256 </dev/null >/dev/null || return 3
   case "$repo" in /*) ;; *) return 3 ;; esac
   top=$(_repo_state_git -C "$repo" rev-parse --path-format=absolute --show-toplevel 2>/dev/null) || return 3
-  config=$(mktemp "${TMPDIR:-/tmp}/repo-state-config.XXXXXX") || return 3
+  config=$(mktemp "$(dirname "$out")/.repo-state.XXXXXX") || return 3
+  trap 'rm -f "$config" "$config.refs" "$config.status"' EXIT
   if ! _repo_state_git -C "$repo" config --list --show-scope --show-origin -z > "$config"; then
-    rm -f "$config"
     return 3
   fi
   if ! _repo_state_git -C "$repo" for-each-ref --format='ref%09%(refname)%09%(objectname)' > "$config.refs"; then
-    rm -f "$config" "$config.refs"
     return 3
   fi
-  : > "$out" || { rm -f "$config"; return 3; }
-  chmod 600 "$out" || { rm -f "$config"; return 3; }
+  : > "$out" || return 3
+  chmod 600 "$out" || return 3
   {
     printf 'repo\t%s\n' "$(_repo_state_encode "$top")"
     ident=$(_repo_state_git -C "$repo" var GIT_COMMITTER_IDENT 2>/dev/null) || ident=''
@@ -134,7 +151,6 @@ repo_state_snapshot() (
       fi
     done < <(_repo_state_git -C "$repo" worktree list --porcelain 2>/dev/null)
   } > "$out"
-  rm -f "$config" "$config.refs" "$config.status"
   return 0
 )
 

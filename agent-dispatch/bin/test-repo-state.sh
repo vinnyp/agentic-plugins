@@ -98,6 +98,28 @@ cp "$D/.git/config" "$TMP/decoy-config"
 (export GIT_DIR="$D/.git" GIT_INDEX_FILE="$D/index"; snap "$TMP/after")
 grep -qx "$(printf 'repo\t%s' "$R")" "$TMP/after"
 cmp "$D/.git/config" "$TMP/decoy-config"
+# Decoy configuration must not replace the requested repository's configuration.
+git -C "$D" config marker.decoy 1
+git -C "$R" config marker.real 1
+(export GIT_DIR="$D/.git"; snap "$TMP/after")
+grep -q 'marker.real' "$TMP/after"
+if grep -q 'marker.decoy' "$TMP/after"; then exit 1; fi
+git -C "$R" config --unset marker.real
+(export GIT_CONFIG_PARAMETERS="'marker.injected'='1'"; snap "$TMP/after")
+if grep -q 'marker.injected' "$TMP/after"; then exit 1; fi
+mkdir "$TMP/hash-shims" "$TMP/snapshot-tmp" "$TMP/snapshot-out"
+for hash in shasum sha256sum; do
+  printf '#!/bin/sh\nexit 127\n' > "$TMP/hash-shims/$hash"
+  chmod +x "$TMP/hash-shims/$hash"
+done
+(PATH="$TMP/hash-shims:$PATH"; rc_is 3 "$BIN/repo-state-check" snapshot "$R" "$TMP/hash-failed")
+if [ -f "$TMP/hash-failed" ] && grep -Eq 'sha256:$' "$TMP/hash-failed"; then exit 1; fi
+(TMPDIR="$TMP/snapshot-tmp"; export TMPDIR; snap "$TMP/snapshot-out/state")
+for dir in "$TMP/snapshot-tmp" "$TMP/snapshot-out"; do
+  for leftover in "$dir"/repo-state-config.* "$dir"/.repo-state.*; do
+    [ ! -e "$leftover" ] || { echo "leaked snapshot intermediate: $leftover" >&2; exit 1; }
+  done
+done
 rc_is 0 "$BIN/repo-state-check" snapshot "$R" "$TMP/after"
 rc_is 0 "$BIN/repo-state-check" compare "$TMP/before" "$TMP/after"
 rc_is 64 "$BIN/repo-state-check" nonsense
