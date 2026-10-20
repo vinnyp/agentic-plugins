@@ -1695,6 +1695,61 @@ AGY_MISSING_REVIEW=1 check_state_run 9
 grep -qF 'DISPATCH_REVIEW_STATE=skipped(not-launched) original_rc=9' "$TMP/cfg.err" || fail 'prelaunch state missing'
 echo 'test 45 (source state and critical precedence) PASS'
 
+# Task 9: every review runtime checks the source, including fallback paths.
+cat > "$TMP/bin/codex" <<'STUB'
+#!/usr/bin/env bash
+repo=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = -C ]; then repo="$2"; shift; fi
+  shift
+done
+cat >/dev/null
+if [ "${CODEX_STATE_DRIFT:-0}" = 1 ]; then
+  git -C "$repo" config user.email x@x.invalid || exit 99
+fi
+exit "${CODEX_STATE_RC:-0}"
+STUB
+cat > "$TMP/bin/claude" <<'STUB'
+#!/usr/bin/env bash
+cat >/dev/null
+git -C "$SRC" config user.name changed || exit 99
+STUB
+run_state_runtime() {
+  local runtime="$1" expected="$2" actual=0
+  TIMEOUT=0 "$DW" --runtime "$runtime" --review --brief "$BRIEF" --workdir "$SRC" > "$TMP/cfg.out" 2> "$TMP/cfg.err" || actual=$?
+  [ "$actual" -eq "$expected" ] || fail "$runtime state expected $expected, got $actual"
+}
+CODEX_STATE_DRIFT=1 CODEX_STATE_RC=124 run_state_runtime codex 10
+grep -qF 'DISPATCH_REVIEW_STATE=critical(1) original_rc=124' "$TMP/cfg.err" || fail 'codex drift/timeout state absent'
+cp "$TMP/state-config.before" "$SRC/.git/config"
+run_state_runtime claude 10
+grep -qF 'DISPATCH_REVIEW_STATE=critical(1) original_rc=0' "$TMP/cfg.err" || fail 'claude drift state absent'
+cp "$TMP/state-config.before" "$SRC/.git/config"
+CODEX_STATE_RC=10 run_state_runtime codex 1
+grep -qF 'DISPATCH_REVIEW_STATE=clean original_rc=10' "$TMP/cfg.err" || fail 'native 10 state absent'
+grep -qF 'dispatch-worker: runtime exited 10 natively; reported as 1 (10 is reserved for source-repo drift).' "$TMP/cfg.err" || fail 'native 10 note absent'
+git -C "$SRC" config filter.x.clean cat
+# shellcheck disable=SC2016 # Expanded by the generated action script.
+printf 'git -C "$SRC" config user.name changed\n' > "$AGY_STUB_ACTIONS"
+actual=0
+(cd "$TMP" && run_cfg_review "$SRC") || actual=$?
+[ "$actual" -eq 10 ] || fail "V9 fallback expected 10, got $actual"
+grep -qF 'unsuitable for a private clone' "$TMP/cfg.err" || fail 'V9 fallback reason absent'
+grep -qF 'DISPATCH_REVIEW_STATE=critical(1)' "$TMP/cfg.err" || fail 'V9 fallback source drift absent'
+cp "$TMP/state-config.before" "$SRC/.git/config"
+: > "$AGY_STUB_ACTIONS"
+mkdir "$TMP/non-git"
+for runtime in codex agy; do
+  actual=0
+  TIMEOUT=0 "$DW" --runtime "$runtime" --review --brief "$BRIEF" --workdir "$TMP/non-git" > "$TMP/cfg.out" 2> "$TMP/cfg.err" || actual=$?
+  [ "$actual" -eq 0 ] || fail "$runtime non-git review failed: $actual"
+  grep -qF 'DISPATCH_REVIEW_STATE=skipped(not-a-git-repo)' "$TMP/cfg.err" || fail "$runtime non-git state absent"
+done
+"$DW" --help > "$TMP/help"
+grep -qF "10  --review: the source repo's config" "$TMP/help" || fail 'help missing exit 10'
+grep -qF 'DISPATCH_REVIEW_STATE=' "$TMP/help" || fail 'help missing state line'
+echo 'test 46 (codex, claude, native 10, fallback and help) PASS'
+
 # The file had 22 agy stubs before the four persona-specific controls above;
 # every definition must answer the roster subcommand instead of falling into cat.
 agy_stub_defs="$(grep -c 'cat > .*bin/ag[y].*STUB' "$0")"

@@ -185,6 +185,8 @@ from a real build failure and NOT retry it as a build):
       still truncated, not complete). Fall back to a LOCAL reviewer.
   9   agy effective model missing from live models; update bin/lib/agy-models.sh
       or pass --model (MODEL). No dispatch was started.
+  10  --review: the source repo's config, hooks or commit identity changed during the review window (see DISPATCH_REVIEW_STATE)
+  DISPATCH_REVIEW_STATE=clean|warn(<n>)|critical(<n>)|skipped(<reason>) original_rc=<n> is emitted on stderr for every --review run.
   124 the external --timeout bound killed a hung peer agent (treat as BLOCKED). For
       agy --review specifically, a single 124/137 is retried once internally and only
       surfaces as rc 8 (not a bare 124) if the retry ALSO times out; other runtimes/
@@ -322,6 +324,27 @@ run_with_timeout() {
   return "$rc"
 }
 
+# Single-attempt runtimes share the same stored results consumed by the main tail.
+review_state_before_runtime() {
+  [ "$REVIEW" = 1 ] || return 0
+  REVIEW_STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/dispatch-review-state.XXXXXX")" || return 3
+  if [ -z "$REPO_STATE_SRC" ]; then
+    REVIEW_STATE_STATUS="skipped(not-a-git-repo)"
+  elif ! repo_state_snapshot "$REPO_STATE_SRC" "$REVIEW_STATE_DIR/before"; then
+    REVIEW_STATE_STATUS="skipped(snapshot-failed)"
+  else
+    REVIEW_STATE_CLASS=0
+  fi
+}
+
+review_state_after_runtime() {
+  [ "$REVIEW" = 1 ] && [ -n "$REVIEW_STATE_CLASS" ] || return 0
+  repo_state_snapshot "$REPO_STATE_SRC" "$REVIEW_STATE_DIR/after" || repo_state_mark_unreadable "$REVIEW_STATE_DIR/after"
+  REVIEW_STATE_CLASS=0
+  repo_state_compare "$REVIEW_STATE_DIR/before" "$REVIEW_STATE_DIR/after" "$REVIEW_STATE_DIR/changes" || REVIEW_STATE_CLASS=$?
+  REVIEW_STATE_N=$(wc -l < "$REVIEW_STATE_DIR/changes" | tr -d ' ')
+}
+
 dispatch_codex() {
   command -v codex >/dev/null || { echo "dispatch-worker: codex not on PATH" >&2; return 3; }
   [ -f "$BRIEF" ] || { echo "dispatch-worker: --brief required + readable" >&2; return 2; }
@@ -389,10 +412,12 @@ dispatch_codex() {
   # only that subshell. Explicitly exiting with PIPESTATUS[0] preserves codex's rc,
   # including timeout rc; under pipefail, the group would otherwise return the inner
   # tee's rightmost non-zero status if that tee failed.
+  review_state_before_runtime || return $?
   REVIEW_RUNTIME_LAUNCHED=1
   { run_with_timeout codex "${codex_args[@]}" < "$BRIEF" 2>&1 1>&3 3>&- \
       | tee -a "$errlog" >&2 3>&-; exit "${PIPESTATUS[0]}"; } 3>&1 | tee -a "$stdoutlog"
   rc=${PIPESTATUS[0]}
+  review_state_after_runtime
   if [ "$rc" -ne 0 ] && grep -qiE 'not supported when using Codex|with a ChatGPT account|no (supported )?models? (are )?available|all models? (were |are )?rejected' "$errlog" "$stdoutlog"; then
     echo "dispatch-worker: codex rejected the request at the auth/config layer (not a build failure) — every model was refused." >&2
     echo "dispatch-worker: fix codex auth/config, do NOT retry this as a build: run 'codex login' (ChatGPT) or set a valid OpenAI API key provider, and check ~/.codex/config.toml for a bad model_provider override or a stray Authorization header." >&2
@@ -889,8 +914,12 @@ dispatch_claude() {
   # Prompt on STDIN, not argv: `claude -p` reads it from a pipe (verified), and a brief on the
   # command line is visible to every other process on the machine via `ps`, and can exceed the
   # OS argument-length limit for a large brief. codex and agy already take the brief on stdin.
+  local rc=0
+  review_state_before_runtime || return $?
   REVIEW_RUNTIME_LAUNCHED=1
-  run_with_timeout claude "${flags[@]}" < "$BRIEF"
+  run_with_timeout claude "${flags[@]}" < "$BRIEF" || rc=$?
+  review_state_after_runtime
+  return "$rc"
 }
 
 dispatch_workflow() {
@@ -959,6 +988,10 @@ if [ "$REVIEW" = 1 ]; then
         if [ "$REVIEW_STATE_STATUS" = 'skipped(not-launched)' ]; then REVIEW_STATE_STATUS='skipped(not-checked)'; fi
       fi ;;
   esac
+  if [ "$REVIEW_STATE_CLASS" != 2 ] && [ "$rc" -eq 10 ]; then
+    echo "dispatch-worker: runtime exited 10 natively; reported as 1 (10 is reserved for source-repo drift)." >&2
+    rc=1
+  fi
 fi
 
 # Post-dispatch dep gate — only for runtimes that actually built in-process
