@@ -29,7 +29,7 @@ codes. Use it rather than calling `dispatch-worker` by hand.
 
 ## Which tree gets reviewed — run it from the right cwd
 
-An `agy` review runs inside a throwaway detached worktree created at the HEAD of the repo resolved
+An `agy` review runs inside a throwaway private clone detached at the HEAD of the repo resolved
 from the **launch cwd** (`--workdir`, defaulting to `$PWD`). Launch it from a shared checkout and
 you review the shared checkout's branch: the feature branch and its spec are invisible, and the
 reviewer returns confident false Blockers about work it never saw. So `cd` into the feature worktree
@@ -39,7 +39,7 @@ Because only **committed HEAD** is snapshotted, an uncommitted artifact — a sp
 must be committed first. The stderr warning about a dirty tree tells you changes are excluded; it
 does **not** tell you the whole repo is the wrong one.
 
-This is agy-specific. `--runtime codex` and `--runtime claude` build no worktree and ignore
+This is agy-specific. `--runtime codex` and `--runtime claude` build no clone and ignore
 `--workdir`, reading the caller's live cwd instead.
 
 ## Three load-bearing rules
@@ -121,3 +121,8 @@ plan- and design-scale gates.
   `--runtime agy` ↔ `--runtime codex`, keeping `--review` on either. Pairs well with
   verify-the-reviewer for a high-stakes pre-merge or pre-publish gate. (The capability test above
   was run on `agy`; codex-as-reviewer rides the same recipe but has not been capability-tested.)
+
+Exit **10** means the source repo changed during the review window. Inspect and restore the
+named changes before committing; discard the body unless every change is known concurrent
+work, then re-run. The clone mirrors refs at dispatch time and cannot fetch; fetch or rebase
+in the source before dispatching.

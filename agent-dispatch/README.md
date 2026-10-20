@@ -13,6 +13,12 @@ same safety wrapper: the timeout that the agent's own `--print-timeout` doesn't 
 "did it actually change anything?" check, the revert that doesn't eat a concurrent session's work,
 and the exit code that tells an out-of-credit account apart from a failing build.
 
+**Review workspaces.** agy reviews use a disposable private clone with mirrored refs,
+disabled fetch and push, and private global Git config. Unsuitable repos fall back to the live
+workspace with permissions enforced. Every runtime's review checks source state before and after;
+critical drift exits 10 and stops the review gate. Inspect and restore the named changes before
+committing, then re-run. See [the command reference](docs/commands.md#dispatch-worker).
+
 Installed Antigravity personas are reachable through
 `dispatch-worker --runtime agy --agent NAME`. The wrapper validates `NAME` against `agy agent`
 before launch, so a typo fails loudly instead of silently using the general assistant.

@@ -232,7 +232,7 @@ case "$agent" in codex|agy) ;; *) die "unknown agent '$agent' (use: codex|agy)";
 [ "$WORKTREE" -eq 1 ] || [ -z "$BASE_REF" ] || die "--base requires --worktree"
 [ "$WORKTREE" -eq 1 ] || [ "$ALLOW_STALE_BASE" -eq 0 ] || die "--allow-stale-base requires --worktree"
 
-# Dispatch preamble: the three clauses in docs/dispatch-preamble.md are
+# Dispatch preamble: the four clauses in docs/dispatch-preamble.md are
 # CONCATENATED into every brief (see the assembly below), not cited from it.
 # They used to be a rule each assembling path was expected to reference, which
 # is how two correct rules ended up unreachable — a citation register is not

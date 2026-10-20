@@ -41,6 +41,11 @@ What the `coding-dispatch.sh` net covers:
    never written into your working tree.
 6. **Reviews cannot silently pass.** Empty, short, or evidence-free agy reviews are exit 8.
 
+agy review clones share no config, refs or branches with the source; global Git config is a
+private copy and fetch/push are disabled. Unsuitable repos fall back to the live workspace
+with permissions enforced. All review runtimes compare source state before and after:
+critical config, hooks or committer drift exits 10; refs and tree movement only warn.
+
 ## What this does NOT protect
 
 Read this before pointing agent-dispatch at code you did not write.
@@ -49,7 +54,7 @@ Read this before pointing agent-dispatch at code you did not write.
   `codex exec --dangerously-bypass-approvals-and-sandbox` and
   `agy --dangerously-skip-permissions`. Those are the only forms it uses; there is no opt-out
   flag. The agy `--review` lane in `dispatch-worker` also passes
-  `--dangerously-skip-permissions` when it has a disposable worktree to run in. The agent has your
+  `--dangerously-skip-permissions` when it has a disposable private clone to run in. The agent has your
   full user privileges, your filesystem, your credentials on disk, and your network.
 * **The revert net covers the git working tree of the target repo. Nothing else.** Files written
   outside the repo, packages installed, credentials read, requests sent, and anything a
@@ -62,6 +67,9 @@ Read this before pointing agent-dispatch at code you did not write.
   concurrent session's uncommitted work in the shared checkout. It does **not** isolate the shared
   `.git` object store or refs: an agent inside the worktree can still move branches and tags
   visible everywhere.
+* **Detection is end-of-run.** Source changes are detected after execution, not in real time;
+  concurrent commits during the window can still take a changed identity. An orphaned process
+  can write after the final check. No check automatically restores the source.
 * **A review is still an agent execution.** `--review` prompts the model to stay read-only; it is
   a prompt, not a sandbox. Content in a repo or PR under review can attempt to instruct the agent
   (prompt injection), and an agent with permissions can act on it.
@@ -80,7 +88,7 @@ CLI you chose sends, on your account:
 | Runtime | Goes to | Content |
 |---|---|---|
 | `codex` | OpenAI | the brief (plus the injected scope constraint, if `--allow-path`) and whatever codex reads in the repo while working |
-| `agy` | Google | the brief plus the injected preamble, and whatever agy reads in the repo (the review worktree, in `--review`) |
+| `agy` | Google | the brief plus the injected preamble, and whatever agy reads in the repo (the private review clone, in `--review`) |
 | `claude` | Anthropic | the brief on stdin, and whatever claude reads while working |
 
 `coding-preflight.sh agy` additionally sends one **sentinel prompt** ("Reply with exactly this
@@ -106,7 +114,7 @@ Local artifacts, where they land, and how long they live:
 | Gate advisory marker | `<git-dir>/gate-advisory` | rewritten; TTL-based dedupe only |
 | Review pin | `<git-dir>/review-pinned` | released on exit; auto-expires (4h default) |
 | Dispatch worktrees | `<repo>/../.worktrees/<repo>_<hash>/<slug>/` | left for you on success and on salvage |
-| Review worktree | `<repo>/../.worktrees/dispatch-review-wt.XXXXXX` | removed on exit; stale ones (>6h) reaped on the next review |
+| Review clone | `<repo>/../.worktrees/dispatch-review-wt.XXXXXX` | removed on exit; stale clones (>6h) reaped on the next review, including sibling repos under a shared parent |
 | Review tee file | `$TMPDIR/dispatch-review.XXXXXX.md` | deleted on exit, unless you set `REVIEW_OUTFILE` |
 | Gate log | `${TMPDIR:-/tmp}/<label>-gate.XXXXXX` (or your `--log`) | kept — it is the record you poll |
 | Gate lock | `${TMPDIR:-/tmp}/run-long-gate-<key>.lock` | removed when the gate finishes |

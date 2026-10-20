@@ -36,14 +36,15 @@ else bad "the preamble block is empty or its markers moved"; fi
 C_CLEANUP="$(printf '%s\n' "$CLAUSES" | grep -o 'Never touch a file you did not create' | head -1)"
 C_DIRTY="$(printf '%s\n'   "$CLAUSES" | grep -o 'already dirty and are not yours'      | head -1)"
 C_GATE="$(printf '%s\n'    "$CLAUSES" | grep -o 'You do not run the long gate'         | head -1)"
-for c in "$C_CLEANUP" "$C_DIRTY" "$C_GATE"; do
+C_SCRATCH="Scratch repos fail closed"
+for c in "$C_CLEANUP" "$C_DIRTY" "$C_GATE" "$(printf '%s\n' "$CLAUSES" | grep -o "$C_SCRATCH" | head -1)"; do
   if [ -z "$c" ]; then
     bad "a required clause is missing from the shipped block — the rest of this suite cannot discriminate"
     echo "pass=$pass fail=$fail"
     exit 1
   fi
 done
-ok "all three clauses are present in the shipped block"
+ok "all four clauses are present in the shipped block"
 
 # Nothing private may ship in a public repository. The vendored block came from
 # a private source, so this asserts the copy carries none of that source's
@@ -88,6 +89,7 @@ if [ "$dispatch_rc" -eq 0 ] && [ -s "$CAPTURE" ]; then
   grep -qF -- "$C_CLEANUP" "$CAPTURE" || miss="$miss cleanup"
   grep -qF -- "$C_DIRTY"   "$CAPTURE" || miss="$miss dirty-paths"
   grep -qF -- "$C_GATE"    "$CAPTURE" || miss="$miss long-gate"
+  grep -qF -- "$C_SCRATCH" "$CAPTURE" || miss="$miss scratch"
   if [ -z "$miss" ]; then ok "the generated brief carries every clause"
   else bad "the generated brief is missing:$miss"; fi
   if grep -qF '{{DIRTY_PATHS}}' "$CAPTURE"; then
@@ -159,6 +161,7 @@ miss=""
 grep -qF -- "$C_CLEANUP" "$SKILL" || miss="$miss cleanup"
 grep -qF -- "$C_DIRTY"   "$SKILL" || miss="$miss dirty-paths"
 grep -qF -- "$C_GATE"    "$SKILL" || miss="$miss long-gate"
+grep -qF -- "$C_SCRATCH" "$SKILL" || miss="$miss scratch"
 if [ -z "$miss" ]; then ok "running-the-peer-review-gate carries every clause"
 else bad "running-the-peer-review-gate is missing:$miss"; fi
 if grep -qF 'docs/dispatch-preamble.md' "$SKILL"; then

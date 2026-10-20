@@ -109,3 +109,29 @@ Exit 9 is binary-specific: `dispatch-worker` means the agy model is not offered
 `coding-dispatch.sh` and `coding-build-phase.sh` mean review-pin refusal.
 An unparseable model list warns and skips validation. Model names are matched
 case-insensitively; tierless IDs warn that agy chooses the tier.
+
+## Exit 10: the source repo changed during a review
+
+Stop before committing. Read the named `config`, `hooks`, `commit`, `ref`, `worktree` and
+`tree` change lines and the `DISPATCH_REVIEW_STATE` stderr line. Critical changes override
+the runtime result; attribution to the reviewer or a concurrent session is not assumed.
+Discard the review body unless every change is known concurrent work, restore unexpected
+changes, and re-run. Values may be redacted, so compare with your known intended settings.
+
+For an accidental local key, use `git -C <repo> config --local --unset <key>` if it did not
+previously exist, or `git -C <repo> config --local --replace-all <key> <intended-value>` to
+restore it. Select the scope and origin named in the change line; restore all intended values
+for multivalued keys. Inspect hooks separately and restore only known unintended edits.
+After correcting identity, repair affected **unpushed** commits, from a clean feature branch:
+
+```bash
+git -C <repo> rebase --exec 'git commit --amend --no-edit --reset-author' <base>
+```
+
+This rewrites authors and commit IDs; identify the affected range and coordinate before
+rewriting any shared history. Verify the resulting author and committer identities.
+
+The clone reaper removes stale `dispatch-review-wt.*` clones older than six hours under the
+resolved parent. The default `<repo-parent>/.worktrees` parent is shared by sibling repos,
+so their stale clones may be removed too. Legacy linked worktrees are removed only through
+the source repo's worktree command and left alone if that fails.
