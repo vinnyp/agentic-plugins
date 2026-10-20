@@ -7,20 +7,35 @@ while [ -L "$_src" ]; do
   case "$_src" in /*) ;; *) _src="$_dir/$_src" ;; esac
 done
 SCRIPT_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
+[ -r "$SCRIPT_DIR/lib/repo-state.sh" ] || { echo "repo-state-check: broken install: cannot read lib/repo-state.sh" >&2; exit 3; }
 # shellcheck source=agent-dispatch/bin/lib/repo-state.sh
 . "$SCRIPT_DIR/lib/repo-state.sh"
+usage() {
+  echo 'usage: repo-state-check snapshot <repo> <file> | compare <before> <after>'
+  echo 'compare exits: 0 clean, 1 warn, 2 critical, 3 input error (unreadable before file or internal temp failure), 64 usage'
+  echo 'snapshot exits: 0 ok, 3 failure, 64 usage'
+  echo '--help, -h: print usage and exit 0'
+}
+usage_error() { usage >&2; exit 64; }
 case "${1:-}" in
+  --help|-h)
+    [ "$#" -eq 1 ] || usage_error
+    usage
+    exit 0 ;;
   snapshot)
-    [ "$#" -eq 3 ] || exit 64
-    repo_state_snapshot "$2" "$3"
-    exit $? ;;
+    [ "$#" -eq 3 ] || usage_error
+    if repo_state_snapshot "$2" "$3"; then
+      exit 0
+    fi
+    repo_state_mark_unreadable "$3" || true
+    exit 3 ;;
   compare)
-    [ "$#" -eq 3 ] || exit 64
-    changes=$(mktemp "${TMPDIR:-/tmp}/repo-state-changes.XXXXXX") || exit 2
+    [ "$#" -eq 3 ] || usage_error
+    changes=$(mktemp "${TMPDIR:-/tmp}/repo-state-changes.XXXXXX") || exit 3
     trap 'rm -f "$changes"' EXIT
     rc=0
     repo_state_compare "$2" "$3" "$changes" || rc=$?
     cat "$changes"
     exit "$rc" ;;
-  *) echo 'usage: repo-state-check snapshot <repo> <file> | compare <before> <after>' >&2; exit 64 ;;
+  *) usage_error ;;
 esac

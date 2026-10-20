@@ -172,14 +172,22 @@ _repo_state_display() {
 }
 
 repo_state_compare() (
-  local before=$1 after=$2 changes=$3 first temp scope origin key old new rc=0 remote line
+  local before=$1 after=$2 changes=$3 first='' temp scope origin key old new rc=0 remote line
   : > "$changes" || return 2
+  if [ ! -f "$before" ] || [ ! -r "$before" ]; then
+    printf 'state: <unreadable before snapshot>\n' > "$changes"
+    return 3
+  fi
+  if [ ! -f "$after" ] || [ ! -r "$after" ]; then
+    printf 'config: <unreadable after review>\n' > "$changes"
+    return 2
+  fi
   IFS= read -r first < "$after" || true
   if [ "$first" = unreadable ]; then
     printf 'config: <unreadable after review>\n' > "$changes"
     return 2
   fi
-  temp=$(mktemp -d "${TMPDIR:-/tmp}/repo-state-compare.XXXXXX") || return 2
+  temp=$(mktemp -d "${TMPDIR:-/tmp}/repo-state-compare.XXXXXX") || return 3
   trap 'rm -rf "$temp"' EXIT
   LC_ALL=C sort "$before" > "$temp/before"
   LC_ALL=C sort "$after" > "$temp/after"
