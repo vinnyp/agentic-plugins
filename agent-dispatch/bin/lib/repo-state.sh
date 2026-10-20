@@ -43,12 +43,25 @@ _repo_state_decode() {
 }
 
 _repo_state_hooks() {
-  local dir=$1 prefix=$2 file mode digest
+  local dir=$1 prefix=$2 file mode digest target content
   [ -d "$dir" ] || return 0
   for file in "$dir"/* "$dir"/.[!.]* "$dir"/..?*; do
-    [ -f "$file" ] && [ ! -L "$file" ] || continue
-    mode=$(stat -f '%Lp' "$file" 2>/dev/null) || mode=$(stat -c '%a' "$file")
-    digest=$(shasum -a 256 < "$file" | cut -d ' ' -f 1)
+    if [ -L "$file" ]; then
+      [ ! -d "$file" ] || continue
+      target=$(readlink "$file"; printf '.')
+      target=${target%.}
+      target=${target%$'\n'}
+      content=dangling
+      if [ -f "$file" ]; then
+        content=$(shasum -a 256 < "$file" | cut -d ' ' -f 1)
+      fi
+      mode='link'
+      digest=$(printf '%s\0%s' "$target" "$content" | shasum -a 256 | cut -d ' ' -f 1)
+    else
+      [ -f "$file" ] || continue
+      mode=$(stat -f '%Lp' "$file" 2>/dev/null) || mode=$(stat -c '%a' "$file")
+      digest=$(shasum -a 256 < "$file" | cut -d ' ' -f 1)
+    fi
     printf 'hooks\t%s\t%s\t%s\n' "$(_repo_state_encode "$prefix${file##*/}")" "$mode" "$digest"
   done
 }
@@ -95,13 +108,10 @@ repo_state_snapshot() (
     name=${ident% <*}; email=${ident##*<}; email=${email%>}
     printf 'identity\t%s\t%s\n' "$(_repo_state_encode "$name")" "$(_repo_state_encode "$email")"
     cat "$config.refs"
-    hooks=$(_repo_state_git -C "$repo" rev-parse --path-format=absolute --git-path hooks)
+    hooks="$(_repo_state_git -C "$repo" rev-parse --path-format=absolute --git-common-dir)/hooks"
     _repo_state_hooks "$hooks" ''
-    custom=$(_repo_state_git -C "$repo" config --get core.hooksPath) || custom=''
-    if [ -n "$custom" ]; then
-      case "$custom" in /*) ;; *) custom="$top/$custom" ;; esac
-      [ "$custom" = "$hooks" ] || _repo_state_hooks "$custom" 'core.hooksPath/'
-    fi
+    custom=$(_repo_state_git -C "$repo" rev-parse --path-format=absolute --git-path hooks)
+    [ "$custom" = "$hooks" ] || _repo_state_hooks "$custom" 'core.hooksPath/'
     wt='' head='' branch=''
     while IFS= read -r record || [ -n "$record" ]; do
       case "$record" in
