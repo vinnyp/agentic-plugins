@@ -527,7 +527,7 @@ exit 124
 		t.Fatalf("dispatch calls=%d want 1", calls)
 	}
 	for i, b := range []string{b2, b3} {
-		want := "- brief " + strconv.Itoa(i+2) + " (" + b + "): not dispatched - an earlier brief reported source-repo drift (rc 10)"
+		want := "- brief " + strconv.Itoa(i+2) + " (" + b + "): rc - (not dispatched: stopped after rc 10)"
 		if !strings.Contains(out, want) {
 			t.Fatalf("missing skipped summary %q: %q", want, out)
 		}

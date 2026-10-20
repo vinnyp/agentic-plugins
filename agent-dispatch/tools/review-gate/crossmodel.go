@@ -130,7 +130,7 @@ func cmdCrossModel(args []string) int {
 	summary.WriteString("# cross-model run summary\n\n")
 	for i, b := range briefs { // serialized - never concurrent (agy wedge risk)
 		if sourceRepoDrift {
-			fmt.Fprintf(&summary, "- brief %d (%s): not dispatched - an earlier brief reported source-repo drift (rc 10)\n", i+1, b)
+			fmt.Fprintf(&summary, "- brief %d (%s): rc - (not dispatched: stopped after rc 10)\n", i+1, b)
 			continue
 		}
 		briefWorkdir := reviewWorkdir

@@ -139,7 +139,7 @@ dispatch-worker — dispatch a worker brief to a runtime.
                      Env-var: REVIEW=1. Use with --runtime agy|codex.
                      For the agy runtime, a dirty real tree whose brief names an
                      uncommitted/untracked path REFUSES (exit 2, path listed) before any
-                     worktree is created or the worker is launched, instead of only
+                     review clone is created or the worker is launched, instead of only
                      warning — a stderr warning alone has twice failed to stop a long
                      review running against a tree missing the file it was briefed to
                      review. A dirty tree whose dirty files are NOT
@@ -185,7 +185,7 @@ from a real build failure and NOT retry it as a build):
       still truncated, not complete). Fall back to a LOCAL reviewer.
   9   agy effective model missing from live models; update bin/lib/agy-models.sh
       or pass --model (MODEL). No dispatch was started.
-  10  --review: the source repo's config, hooks or commit identity changed during the review window (see DISPATCH_REVIEW_STATE)
+  10  --review: the source repo's config, hooks, commit identity, or an unreadable after-snapshot triggered a review failure (see DISPATCH_REVIEW_STATE)
   DISPATCH_REVIEW_STATE=clean|warn(<n>)|critical(<n>)|skipped(<reason>) original_rc=<n> is emitted on stderr for every --review run.
   124 the external --timeout bound killed a hung peer agent (treat as BLOCKED). For
       agy --review specifically, a single 124/137 is retried once internally and only
@@ -244,6 +244,8 @@ done
 
 if [ "$REVIEW" = "1" ]; then
   unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_PREFIX
+  # shellcheck disable=SC2046 # Git emits variable names to unset individually.
+  unset $(git rev-parse --local-env-vars 2>/dev/null)
 fi
 
 : "$RECALL_PROJECT" "$RECALL_PROJECT_EXPLICIT" "$NO_RECALL"
@@ -327,7 +329,7 @@ run_with_timeout() {
 # Single-attempt runtimes share the same stored results consumed by the main tail.
 review_state_before_runtime() {
   [ "$REVIEW" = 1 ] || return 0
-  REVIEW_STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/dispatch-review-state.XXXXXX")" || return 3
+  REVIEW_STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/dispatch-review-state.XXXXXX")" || { echo "dispatch-worker: could not create the review state directory" >&2; return 3; }
   if [ -z "$REPO_STATE_SRC" ]; then
     REVIEW_STATE_STATUS="skipped(not-a-git-repo)"
   elif ! repo_state_snapshot "$REPO_STATE_SRC" "$REVIEW_STATE_DIR/before"; then
@@ -400,6 +402,7 @@ dispatch_codex() {
   if [ "${#codex_flags[@]}" -gt 0 ]; then codex_args+=("${codex_flags[@]}"); fi
   [ -n "$codex_cd_dir" ] && codex_args+=(-C "$codex_cd_dir")
   codex_args+=(--sandbox "$sandbox" -)
+  review_state_before_runtime || return $?
   errlog="$(mktemp -t dispatch-codex-out.XXXXXX)" || { echo "dispatch-worker: mktemp failed" >&2; return 1; }
   stdoutlog="$(mktemp -t dispatch-codex-stdout.XXXXXX)" || { rm -f "$errlog"; echo "dispatch-worker: mktemp failed" >&2; return 1; }
   # Tee each stream through a waited pipeline: fd 3 sends stdout to its tee while
@@ -412,7 +415,6 @@ dispatch_codex() {
   # only that subshell. Explicitly exiting with PIPESTATUS[0] preserves codex's rc,
   # including timeout rc; under pipefail, the group would otherwise return the inner
   # tee's rightmost non-zero status if that tee failed.
-  review_state_before_runtime || return $?
   REVIEW_RUNTIME_LAUNCHED=1
   { run_with_timeout codex "${codex_args[@]}" < "$BRIEF" 2>&1 1>&3 3>&- \
       | tee -a "$errlog" >&2 3>&-; exit "${PIPESTATUS[0]}"; } 3>&1 | tee -a "$stdoutlog"
@@ -731,7 +733,7 @@ dispatch_agy() {
         # shellcheck disable=SC2016 # Scratch instructions must retain literal shell variables.
         printf '%s\n' 'Scratch repos: set -eu; tmp=$(mktemp -d "${TMPDIR:-/tmp}/<name>.XXXXXX"); abort if it is empty; give every git command -C "$tmp".'
         printf '%s\n' "You MAY run read-only commands AND the project's build/test gate inside it."
-        printf '%s\n' "If your method requires MUTATING code to prove something — e.g. a mutation check that breaks the code under test to confirm a test FAILS — you MAY edit files INSIDE this worktree. You do not need to revert them; the worktree is discarded."
+        printf '%s\n' "If your method requires MUTATING code to prove something — e.g. a mutation check that breaks the code under test to confirm a test FAILS — you MAY edit files INSIDE this clone. You do not need to revert them; the clone is discarded."
         printf '%s\n' "You must NOT touch any path OUTSIDE ${review_path%/}. Do NOT commit, do NOT push, and do NOT write any success marker."
       else
         printf '%s\n' "READ-ONLY REVIEW MODE (headless --print): there is NO human to approve, and this is a REVIEW — you must NOT modify the repo."
@@ -783,13 +785,13 @@ dispatch_agy() {
     else
       echo "dispatch-worker: warning: review is running non-hermetically and therefore read-only; the lens may be unable to complete an execution-dependent method." >&2
     fi
-    REVIEW_STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/dispatch-review-state.XXXXXX")" || return 3
+    REVIEW_STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/dispatch-review-state.XXXXXX")" || { echo "dispatch-worker: could not create the review state directory" >&2; return 3; }
     if [ "$REVIEW_HERMETIC" = "1" ]; then
       local f="$REVIEW_STATE_DIR/global.gitconfig" record key value
-      (umask 077; : > "$f") || return 3
+      (umask 077; : > "$f") || { echo "dispatch-worker: could not build the private global git config" >&2; return 3; }
       local global_records="$REVIEW_STATE_DIR/global.records"
-      if ! git -C "$REPO_STATE_SRC" config --global --includes --list -z > "$global_records"; then
-        : > "$global_records"
+      if ! git -C "$REPO_STATE_SRC" config --global --includes --list -z > "$global_records" 2>/dev/null; then
+        : > "$global_records" || { echo "dispatch-worker: could not build the private global git config" >&2; return 3; }
       fi
       while IFS= read -r -d '' record; do
         case "$record" in
@@ -797,7 +799,7 @@ dispatch_agy() {
           *) key="$record"; value=true ;;
         esac
         case "$key" in include.path|includeif.*) continue ;; esac
-        git config --file "$f" --add "$key" "$value" || return 3
+        git config --file "$f" --add "$key" "$value" || { echo "dispatch-worker: could not build the private global git config" >&2; return 3; }
       done < "$global_records"
     fi
     local agy_rc=0 cmp_rc=0 retry_skipped=0 state_checked=0
@@ -949,7 +951,11 @@ dispatch_a2a_endpoint() {
 REPO_STATE_SRC=""
 REVIEW_RUNTIME_LAUNCHED=0
 if [ "$REVIEW" = "1" ]; then
-  REPO_STATE_SRC="$(git -C "${WORKDIR:-$PWD}" rev-parse --show-toplevel 2>/dev/null)" || REPO_STATE_SRC=""
+  if [ "$RUNTIME" = claude ]; then
+    REPO_STATE_SRC="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null)" || REPO_STATE_SRC=""
+  else
+    REPO_STATE_SRC="$(git -C "${WORKDIR:-$PWD}" rev-parse --show-toplevel 2>/dev/null)" || REPO_STATE_SRC=""
+  fi
 fi
 : "$REPO_STATE_SRC" "$REVIEW_RUNTIME_LAUNCHED"
 rc=0

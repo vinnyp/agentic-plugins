@@ -443,6 +443,27 @@ else
   fail "Test 8: the foreign symlink was modified (now -> $(readlink "$FAKE_LOCAL_BIN/gate-run.sh"))"
 fi
 
+# A partial installation must diagnose every required review helper.
+for missing_helper in repo-state.sh review-clone.sh; do
+  fake_install="$TMP/missing-$missing_helper"
+  mkdir -p "$fake_install/lib"
+  fake_install="$(cd "$fake_install" && pwd -P)"
+  cp "$DOCTOR_BIN" "$fake_install/agent-dispatch-doctor"
+  cp "$(dirname "$DOCTOR_BIN")/lib/agy-models.sh" "$fake_install/lib/agy-models.sh"
+  for helper in repo-state.sh review-clone.sh; do
+    if [ "$helper" != "$missing_helper" ]; then
+      cp "$(dirname "$DOCTOR_BIN")/lib/$helper" "$fake_install/lib/$helper"
+    fi
+  done
+  missing_rc=0
+  missing_out="$(bash "$fake_install/agent-dispatch-doctor" 2>&1)" || missing_rc=$?
+  if [ "$missing_rc" -eq 1 ] && printf '%s\n' "$missing_out" | grep -qF "FAIL broken install: cannot read $fake_install/lib/$missing_helper"; then
+    pass "missing $missing_helper fails installation check"
+  else
+    fail "missing $missing_helper was not diagnosed: $missing_out"
+  fi
+done
+
 # ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------

@@ -23,6 +23,7 @@ reset_dispatch_env  # neutralize any operator-exported dispatch vars before the 
 export AGY_TEST_CODING_PIN="$AGY_MODEL_CODING_DEFAULT" AGY_TEST_REVIEW_PIN="$AGY_MODEL_REVIEW_DEFAULT"
 DW="$SELF_DIR/dispatch-worker"
 TMP="$(mktemp -d)"
+cd "$TMP" || exit 1
 trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home"
 export GIT_CONFIG_GLOBAL="$TMP/gitconfig" GIT_CONFIG_NOSYSTEM=1
@@ -669,7 +670,8 @@ rc=$?
 [ ! -e "$TMP/.git" ] || fail "auth probe or runner cwd got git-initialized by agy stub"
 grep -qF -- "--dangerously-skip-permissions" <<<"$(agy_exec_args)" || fail "hermetic agy review did not bypass command permissions"
 grep -qF 'DISPOSABLE local clone at' "$AGY_STDIN_FILE" || fail "hermetic review preamble did not identify the disposable local clone"
-grep -qF 'Translate every' "$AGY_STDIN_FILE" || fail "hermetic review preamble did not map brief paths"
+grep -qF "detached at $pre_head" "$AGY_STDIN_FILE" || fail "hermetic review preamble did not identify the disposable local clone"
+grep -qF "Translate every $(git -C "$R17" rev-parse --show-toplevel)" "$AGY_STDIN_FILE" || fail "hermetic review preamble did not map brief paths"
 # shellcheck disable=SC2016 # Match the literal scratch command, without expansion.
 grep -qF 'tmp=$(mktemp -d "${TMPDIR:-/tmp}/<name>.XXXXXX")' "$AGY_STDIN_FILE" || fail "hermetic review preamble missing literal scratch allocation"
 # shellcheck disable=SC2016 # Match the literal scratch path variable.
@@ -1705,6 +1707,7 @@ while [ "$#" -gt 0 ]; do
 done
 cat >/dev/null
 if [ "${CODEX_STATE_DRIFT:-0}" = 1 ]; then
+  [ -n "$repo" ] || exit 98
   git -C "$repo" config user.email x@x.invalid || exit 99
 fi
 exit "${CODEX_STATE_RC:-0}"
@@ -1722,7 +1725,7 @@ run_state_runtime() {
 CODEX_STATE_DRIFT=1 CODEX_STATE_RC=124 run_state_runtime codex 10
 grep -qF 'DISPATCH_REVIEW_STATE=critical(1) original_rc=124' "$TMP/cfg.err" || fail 'codex drift/timeout state absent'
 cp "$TMP/state-config.before" "$SRC/.git/config"
-run_state_runtime claude 10
+(cd "$SRC" && run_state_runtime claude 10)
 grep -qF 'DISPATCH_REVIEW_STATE=critical(1) original_rc=0' "$TMP/cfg.err" || fail 'claude drift state absent'
 cp "$TMP/state-config.before" "$SRC/.git/config"
 CODEX_STATE_RC=10 run_state_runtime codex 1
@@ -1750,10 +1753,25 @@ grep -qF "10  --review: the source repo's config" "$TMP/help" || fail 'help miss
 grep -qF 'DISPATCH_REVIEW_STATE=' "$TMP/help" || fail 'help missing state line'
 echo 'test 46 (codex, claude, native 10, fallback and help) PASS'
 
+# Claude ignores --workdir: watch the repository where it actually runs.
+cat > "$TMP/bin/claude" <<'STUB'
+#!/usr/bin/env bash
+cat >/dev/null
+git -C "$PWD" config user.name changed || exit 99
+STUB
+claude_cwd_repo="$TMP/claude-cwd-repo"
+make_git_repo "$claude_cwd_repo"
+(cd "$claude_cwd_repo" && run_state_runtime claude 10)
+grep -qF 'DISPATCH_REVIEW_STATE=critical(1)' "$TMP/cfg.err" || fail 'claude caller repository drift absent'
+: > "$AGY_STUB_ACTIONS"
+GIT_CONFIG_GLOBAL="$TMP/absent-global.gitconfig" run_cfg_review "$r44" > "$TMP/no-global.out" 2> "$TMP/no-global.err"
+[ "$?" -eq 0 ] || fail 'review without global gitconfig failed'
+grep -q 'fatal:' "$TMP/cfg.err" && fail 'missing global gitconfig emitted fatal diagnostic'
+
 # The file had 22 agy stubs before the four persona-specific controls above;
 # every definition must answer the roster subcommand instead of falling into cat.
-agy_stub_defs="$(grep -c 'cat > .*bin/ag[y].*STUB' "$0")"
-agy_stub_arms="$(grep -c '^# PERSONA_ROSTER_STU[B]$' "$0")"
+agy_stub_defs="$(grep -c 'cat > .*bin/ag[y].*STUB' "$SELF_DIR/test-dispatch-worker.sh")"
+agy_stub_arms="$(grep -c '^# PERSONA_ROSTER_STU[B]$' "$SELF_DIR/test-dispatch-worker.sh")"
 [ "$agy_stub_defs" -eq 28 ] || fail "expected 22 original + 4 persona-control + 1 row-verdict agy stubs, found $agy_stub_defs"
 [ "$agy_stub_arms" -eq "$agy_stub_defs" ] || fail "not every agy stub has an agent) arm ($agy_stub_arms/$agy_stub_defs)"
 echo "test 42 (all 22 original agy stubs handle the agent subcommand) PASS"
