@@ -211,10 +211,21 @@ repo_state_compare() (
     [ -n "$key" ] || continue
     [ "$rc" -ge 1 ] || rc=1
     case "$key" in
-      branch.*.*|remote.*.fetch|remote.*.gh-resolved|gc.*|maintenance.*|extensions.worktreeconfig|core.sparsecheckout|core.sparsecheckoutcone|*vscode*) ;;
+      branch.*.pushremote) rc=2 ;;
+      branch.*.remote)
+        remote=$(_repo_state_decode "$new")
+        # Critical only when it names a remote created during the window.
+        if [ "$new" != '(absent)' ] &&
+           ! awk -F '\t' -v prefix="remote.$remote." '$1=="config" && index($4,prefix)==1 { found=1 } END {exit !found}' "$before" &&
+           awk -F '\t' -v prefix="remote.$remote." '$1=="config" && index($4,prefix)==1 { found=1 } END {exit !found}' "$after"; then rc=2; fi ;;
+      branch.*.*|remote.*.fetch|remote.*.gh-resolved|gc.*|maintenance.*|extensions.worktreeconfig|core.sparsecheckout|core.sparsecheckoutcone) ;;
       remote.*.*)
         remote=${key#remote.}; remote=${remote%.*}
-        if awk -F '\t' -v prefix="remote.$remote." '$1=="config" && index($4,prefix)==1 { found=1 } END {exit !found}' "$before"; then rc=2; fi ;;
+        if awk -F '\t' -v prefix="remote.$remote." '$1=="config" && index($4,prefix)==1 { found=1 } END {exit !found}' "$before"; then
+          rc=2
+        else
+          case "$key" in remote.*.url) ;; *) rc=2 ;; esac
+        fi ;;
       *) rc=2 ;;
     esac
     printf 'config %s (%s:%s): %s -> %s\n' \
@@ -226,18 +237,13 @@ repo_state_compare() (
     $1!="hooks" && $1!="ref" && $1!="worktree" && $1!="tree" {next}
     {k=$1 FS $2; v=$3; for(i=4;i<=NF;i++) v=v FS $i; keys[k]=1}
     FILENAME==ARGV[1] {old[k]=v; next} {new[k]=v}
-    END {for(k in keys) {hasold=(k in old); hasnew=(k in new); if(old[k]!=new[k]) {split(old[k],o,FS); split(new[k],n,FS); print k FS (hasold?o[1]:"(absent)") FS (hasnew?n[1]:"(absent)")}}}
+    END {for(k in keys) {hasold=(k in old); hasnew=(k in new); if(old[k]!=new[k]) {gsub(FS," ",old[k]); gsub(FS," ",new[k]); print k FS (hasold?old[k]:"(absent)") FS (hasnew?new[k]:"(absent)")}}}
   ' "$before" "$after" > "$temp/records"
-  local kind repo oid type sha cn ce identity_name identity_email count paths
+  local kind repo sha cn ce identity_name identity_email count paths
   repo=$(awk -F '\t' '$1=="repo" {print $2;exit}' "$after")
   repo=$(_repo_state_decode "$repo")
   identity_name=$(awk -F '\t' '$1=="identity" {print $2;exit}' "$before")
   identity_email=$(awk -F '\t' '$1=="identity" {print $3;exit}' "$before")
-  : > "$temp/exclude"
-  while IFS= read -r oid; do
-    type=$(_repo_state_git -C "$repo" cat-file -t "$oid" 2>/dev/null) || continue
-    case "$type" in commit|tag) printf '^%s\n' "$oid" >> "$temp/exclude" ;; esac
-  done < <(awk -F '\t' '$1=="ref" {print $3}' "$before")
   while IFS=$'\t' read -r kind key old new remote line; do
     [ "$rc" -ge 1 ] || rc=1
     case "$kind" in
@@ -250,6 +256,11 @@ repo_state_compare() (
       ref)
         printf 'ref %s: %s -> %s\n' "$key" "$old" "$new" >> "$changes"
         case "$key" in refs/heads/*)
+          if [ ! -f "$temp/exclude" ]; then
+            awk -F '\t' '$1=="ref" {print $3}' "$before" |
+              _repo_state_git -C "$repo" cat-file --batch-check='%(objectname) %(objecttype)' 2>/dev/null |
+              awk '$2=="commit" {print "^" $1}' > "$temp/exclude"
+          fi
           [ "$new" != '(absent)' ] || continue
           if ! _repo_state_git -C "$repo" rev-list --stdin "$new" --not --remotes < "$temp/exclude" > "$temp/commits" 2>/dev/null; then
             printf 'commit-check %s: failed\n' "$key" >> "$changes"; rc=2; continue
@@ -267,7 +278,11 @@ repo_state_compare() (
         [ "$new" = '(absent)' ] || new="HEAD $new"
         printf 'worktree %s: %s -> %s\n' "$key" "$old" "$new" >> "$changes" ;;
       tree)
-        if [ "$new" = unreadable ]; then
+        if [ "$old" = '(absent)' ]; then
+          printf 'tree %s: worktree added\n' "$key" >> "$changes"
+        elif [ "$new" = '(absent)' ]; then
+          printf 'tree %s: worktree removed\n' "$key" >> "$changes"
+        elif [ "$new" = unreadable ]; then
           printf 'tree %s: unreadable\n' "$key" >> "$changes"
         else
           awk -F '\t' -v wt="$key" '$1=="dirty" && $2==wt {print $3}' "$before" | LC_ALL=C sort -u > "$temp/dirty-old"
@@ -275,7 +290,11 @@ repo_state_compare() (
           LC_ALL=C comm -13 "$temp/dirty-old" "$temp/dirty-new" > "$temp/dirty"
           count=$(wc -l < "$temp/dirty" | tr -d ' ')
           paths=$(head -n 20 "$temp/dirty" | paste -sd ' ' -)
-          printf 'tree %s: %s new dirty paths: %s\n' "$key" "$count" "$paths" >> "$changes"
+          if [ "$count" = 0 ]; then
+            printf 'tree %s: status changed (no new dirty paths)\n' "$key" >> "$changes"
+          else
+            printf 'tree %s: %s new dirty paths: %s\n' "$key" "$count" "$paths" >> "$changes"
+          fi
         fi ;;
     esac
   done < "$temp/records"

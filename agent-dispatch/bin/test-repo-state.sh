@@ -272,4 +272,124 @@ rm -rf "$wt"
 snap "$TMP/after"
 rc_is 1 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
 grep -qx "tree $wt: unreadable" "$TMP/changes"
+# Classification must follow execution and destination effects, not editor text.
+check_key alias.vscode '!true' 2
+grep -q '^config alias.vscode ' "$TMP/changes"
+check_key url.https://example.invalid/vscode/.insteadof https://x 2
+grep -q '^config url.https://example.invalid/vscode/.insteadof ' "$TMP/changes"
+check_key branch.main.vscode-merge-base origin/main 1
+grep -q '^config branch.main.vscode-merge-base ' "$TMP/changes"
+check_key branch.main.pushremote origin 2
+grep -q '^config branch.main.pushremote ' "$TMP/changes"
+for addition in none uploadpack branch; do
+  fixture
+  snap "$TMP/before"
+  git -C "$R" remote add evil https://example.invalid/repo
+  expected=1
+  case "$addition" in
+    uploadpack) git -C "$R" config remote.evil.uploadpack '!true'; expected=2 ;;
+    branch) git -C "$R" config branch.main.remote evil; expected=2 ;;
+  esac
+  snap "$TMP/after"
+  rc_is "$expected" repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
+  grep -q '^config remote.evil.url ' "$TMP/changes"
+  case "$addition" in
+    uploadpack) grep -q '^config remote.evil.uploadpack ' "$TMP/changes" ;;
+    branch) grep -q '^config branch.main.remote ' "$TMP/changes" ;;
+  esac
+done
+for key in credential.helper http.extraheader foo.apitoken; do
+  fixture
+  case "$key" in
+    credential.helper) value='store --file /x-SECRET1' ;;
+    http.extraheader) value='AUTHORIZATION: bearer SECRET1' ;;
+    *) value=SECRET1 ;;
+  esac
+  git -C "$R" config "$key" "$value"
+  snap "$TMP/before"
+  git -C "$R" config "$key" "${value/SECRET1/SECRET2}"
+  snap "$TMP/after"
+  rc_is 2 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
+  grep -q "^config $key " "$TMP/changes"
+  if grep SECRET "$TMP/before" "$TMP/after" "$TMP/changes"; then exit 1; fi
+done
+fixture
+clone="$TMP/upstream-clone"
+git -C "$R" clone -q -b main "$R.git" "$clone"
+git -C "$clone" -c user.name=gh -c user.email=gh@x.invalid commit -qm upstream --allow-empty
+git -C "$clone" push -q origin main
+snap "$TMP/before"
+git -C "$R" pull -q --ff-only origin main
+snap "$TMP/after"
+rc_is 1 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
+grep -q '^ref refs/heads/main:' "$TMP/changes"
+if grep -q '^commit ' "$TMP/changes"; then exit 1; fi
+fixture
+snap "$TMP/before"
+git -C "$R" -c user.email=foreign@example.invalid commit -qm email-only --allow-empty
+snap "$TMP/after"
+rc_is 2 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
+grep -q '^commit .* committer <changed>$' "$TMP/changes"
+fixture
+git -C "$R" config extensions.worktreeConfig true
+wt="$TMP/config-linked"
+git -C "$R" worktree add -q -b linked "$wt"
+snap "$TMP/before"
+git -C "$wt" config --worktree alias.x y
+snap "$TMP/after"
+rc_is 2 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
+grep -q '^config alias.x ' "$TMP/changes"
+for value in $'a\nb' $'a\tb'; do
+  fixture
+  git -C "$R" config x.value "$value"
+  snap "$TMP/before"
+  git -C "$R" config x.value "${value/b/c}"
+  snap "$TMP/after"
+  rc_is 2 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
+  grep -q '^config x.value ' "$TMP/changes"
+done
+fixture
+git -C "$R" branch alternate
+snap "$TMP/before"
+git -C "$R" switch -q alternate
+snap "$TMP/after"
+rc_is 1 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
+grep -q '^worktree .*refs/heads/main -> HEAD .*refs/heads/alternate$' "$TMP/changes"
+wt="$TMP/removed-linked"
+snap "$TMP/before"
+git -C "$R" worktree add -q --detach "$wt"
+snap "$TMP/after"
+rc_is 1 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
+grep -qx "tree $wt: worktree added" "$TMP/changes"
+snap "$TMP/before"
+git -C "$R" worktree remove "$wt"
+snap "$TMP/after"
+rc_is 1 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
+grep -qx "tree $wt: worktree removed" "$TMP/changes"
+if grep -q '0 new dirty paths' "$TMP/changes"; then exit 1; fi
+printf first > "$R/dirty"
+snap "$TMP/before"
+git -C "$R" add dirty
+snap "$TMP/after"
+rc_is 1 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
+grep -qx "tree $R: status changed (no new dirty paths)" "$TMP/changes"
+# Configuration-only comparisons do not inspect objects; branch changes batch once.
+fixture
+snap "$TMP/before"
+git -C "$R" config branch.main.description fixture
+snap "$TMP/after"
+(
+  git() {
+    case " $* " in *' cat-file '*) printf '%s\n' "$*" >> "$TMP/cat-file-calls" ;; esac
+    command git "$@"
+  }
+  : > "$TMP/cat-file-calls"
+  rc_is 1 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
+  [ ! -s "$TMP/cat-file-calls" ]
+  git -C "$R" commit -qm batch --allow-empty
+  snap "$TMP/after"
+  rc_is 1 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
+  [ "$(wc -l < "$TMP/cat-file-calls" | tr -d ' ')" = 1 ]
+  grep -q -- "--batch-check=%(objectname) %(objecttype)" "$TMP/cat-file-calls"
+)
 echo 'repo-state tests passed'
