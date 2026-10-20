@@ -1776,6 +1776,12 @@ printf 'rm "$(dirname "$GIT_CONFIG_GLOBAL")/before"\n' > "$AGY_STUB_ACTIONS"
 check_state_run 10
 grep -qF 'DISPATCH_REVIEW_STATE=critical(' "$TMP/cfg.err" || fail 'agy baseline loss passed'
 grep -qF 'state: drift check could not complete' "$TMP/cfg.err" || fail 'agy compare diagnostic absent'
+# Removing the whole state directory must preserve the critical exit and diagnostic.
+# shellcheck disable=SC2016
+printf 'rm -rf "$(dirname "$GIT_CONFIG_GLOBAL")"\n' > "$AGY_STUB_ACTIONS"
+check_state_run 10
+grep -qE 'DISPATCH_REVIEW_STATE=critical\([0-9]' "$TMP/cfg.err" || fail 'agy state loss count absent'
+grep -qF '  state: review state directory missing or unreadable' "$TMP/cfg.err" || fail 'agy state loss diagnostic absent'
 cat > "$TMP/bin/claude" <<'STUB'
 #!/usr/bin/env bash
 cat >/dev/null

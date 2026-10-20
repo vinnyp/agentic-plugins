@@ -185,7 +185,7 @@ from a real build failure and NOT retry it as a build):
       still truncated, not complete). Fall back to a LOCAL reviewer.
   9   agy effective model missing from live models; update bin/lib/agy-models.sh
       or pass --model (MODEL). No dispatch was started.
-  10  --review: the source repo's config, hooks, commit identity, or an unreadable after-snapshot triggered a review failure (see DISPATCH_REVIEW_STATE)
+  10  --review: the source repo's config, hooks, commit identity, an unreadable after-snapshot, or a compare that could not complete triggered a review failure (see DISPATCH_REVIEW_STATE)
   DISPATCH_REVIEW_STATE=clean|warn(<n>)|critical(<n>)|skipped(<reason>) original_rc=<n> is emitted on stderr for every --review run.
   124 the external --timeout bound killed a hung peer agent (treat as BLOCKED). For
       agy --review specifically, a single 124/137 is retried once internally and only
@@ -348,7 +348,8 @@ review_state_after_runtime() {
     0|1|2) ;;
     *) printf 'state: drift check could not complete (compare exit %s)\n' "$REVIEW_STATE_CLASS" >> "$REVIEW_STATE_DIR/changes"; REVIEW_STATE_CLASS=2 ;;
   esac
-  REVIEW_STATE_N=$(wc -l < "$REVIEW_STATE_DIR/changes" | tr -d ' ')
+  REVIEW_STATE_N=$(wc -l < "$REVIEW_STATE_DIR/changes" 2>/dev/null | tr -d ' ')
+  [ -n "$REVIEW_STATE_N" ] || REVIEW_STATE_N=1
 }
 
 dispatch_codex() {
@@ -865,7 +866,8 @@ dispatch_agy() {
         cmp_rc=$after_rc
       fi
       REVIEW_STATE_CLASS=$cmp_rc
-      REVIEW_STATE_N=$(wc -l < "$REVIEW_STATE_DIR/changes" | tr -d ' ')
+      REVIEW_STATE_N=$(wc -l < "$REVIEW_STATE_DIR/changes" 2>/dev/null | tr -d ' ')
+      [ -n "$REVIEW_STATE_N" ] || REVIEW_STATE_N=1
     fi
     # Requirements-mode evidence: a PRD review's deliverable is the
     # per-row disposition table the brief itself asks for — a row ID (R<n>.<n> / E<n> /
@@ -986,16 +988,20 @@ if [ "$REVIEW" = 1 ]; then
     0) REVIEW_STATE_STATUS=clean ;;
     1)
       REVIEW_STATE_STATUS="warn($REVIEW_STATE_N)"
-      echo "dispatch-worker: warning: source repo moved during the review (may be concurrent work):" >&2
-      sed 's/^/  /' "$REVIEW_STATE_DIR/changes" >&2 ;;
+      echo "dispatch-worker: warning: source repo moved during the review (may be concurrent work):" >&2 || true
+      sed 's/^/  /' "$REVIEW_STATE_DIR/changes" >&2 || true ;;
     2)
       REVIEW_STATE_STATUS="critical($REVIEW_STATE_N)"
+      if [ "$REVIEW_RUNTIME_LAUNCHED" = 1 ]; then rc=10; fi
       if [ "$REVIEW_RUNTIME_LAUNCHED" = 1 ]; then
-        echo "dispatch-worker: SOURCE REPO CHANGED DURING THE REVIEW WINDOW (reviewer or a concurrent session; cause not attributed)." >&2
-        echo "Inspect and restore these before committing in that repo; the review body stands only if every change is known concurrent work:" >&2
-        sed 's/^/  /' "$REVIEW_STATE_DIR/changes" >&2
-        echo "(the run would otherwise have exited $REVIEW_ORIGINAL_RC)" >&2
-        rc=10
+        echo "dispatch-worker: SOURCE REPO CHANGED DURING THE REVIEW WINDOW (reviewer or a concurrent session; cause not attributed)." >&2 || true
+        echo "Inspect and restore these before committing in that repo; the review body stands only if every change is known concurrent work:" >&2 || true
+        if [ -r "$REVIEW_STATE_DIR/changes" ]; then
+          sed 's/^/  /' "$REVIEW_STATE_DIR/changes" >&2 || true
+        else
+          echo '  state: review state directory missing or unreadable' >&2 || true
+        fi
+        echo "(the run would otherwise have exited $REVIEW_ORIGINAL_RC)" >&2 || true
       fi ;;
     *)
       if [ "$REVIEW_RUNTIME_LAUNCHED" = 1 ] || [ "$RUNTIME" = workflow ]; then
@@ -1003,7 +1009,7 @@ if [ "$REVIEW" = 1 ]; then
       fi ;;
   esac
   if [ "$REVIEW_STATE_CLASS" != 2 ] && [ "$rc" -eq 10 ]; then
-    echo "dispatch-worker: runtime exited 10 natively; reported as 1 (10 is reserved for source-repo drift)." >&2
+    echo "dispatch-worker: runtime exited 10 natively; reported as 1 (10 is reserved for source-repo drift)." >&2 || true
     rc=1
   fi
 fi

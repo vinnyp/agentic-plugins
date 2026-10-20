@@ -68,6 +68,7 @@ done
 check_key commit.gpgSign true 2
 grep -q -- '-> true' "$TMP/changes"
 check_key branch.main.remote origin 1
+check_key branch.main.remote . 1
 fixture
 snap "$TMP/before"
 git -C "$R" remote add fork 'https://host.invalid/a b'
@@ -299,7 +300,7 @@ for addition in none uploadpack branch; do
     branch) grep -q '^config branch.main.remote ' "$TMP/changes" ;;
   esac
 done
-for key in credential.helper http.extraheader foo.apitoken; do
+for key in credential.helper http.extraheader foo.apitoken secrets.apikey token.x; do
   fixture
   case "$key" in
     credential.helper) value='store --file /x-SECRET1' ;;

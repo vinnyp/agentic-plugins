@@ -41,7 +41,10 @@ _repo_state_configs() {
       *) key=$kv; value='(novalue)' ;;
     esac
     lower=$(printf '%s' "$key" | LC_ALL=C tr '[:upper:]' '[:lower:]')
-    case "$lower" in credential.*) lower=extraheader ;; *) lower=${lower##*.} ;; esac
+    case "${lower%%.*}" in
+      credential|*extraheader*|*token*|*pass*|*secret*|*proxy*) lower=extraheader ;;
+      *) lower=${lower##*.} ;;
+    esac
     case "$lower" in
       *extraheader*|*token*|*pass*|*secret*|*proxy*)
         value="sha256:$(printf '%s' "$value" | _repo_state_sha256)" ;;
@@ -223,8 +226,8 @@ repo_state_compare() (
       branch.*.pushremote) rc=2 ;;
       branch.*.remote)
         remote=$(_repo_state_decode "$new")
-        # Only pre-existing remote names are benign.
-        if [ "$new" != '(absent)' ] &&
+        # Local repository sentinel and pre-existing remote names are benign.
+        if [ "$remote" != . ] && [ "$new" != '(absent)' ] &&
            ! awk -F '\t' -v prefix="remote.$remote." '$1=="config" && index($4,prefix)==1 { found=1 } END {exit !found}' "$before"; then rc=2; fi ;;
       branch.*.*|remote.*.fetch|remote.*.gh-resolved|gc.*|maintenance.*|extensions.worktreeconfig|core.sparsecheckout|core.sparsecheckoutcone) ;;
       remote.*.*)

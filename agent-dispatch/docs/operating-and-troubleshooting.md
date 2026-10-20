@@ -118,17 +118,19 @@ and repair the installation before retrying.
 
 Stop before committing. Read the named `config`, `hooks`, `commit`, `ref`, `worktree` and
 `tree` change lines and the `DISPATCH_REVIEW_STATE` stderr line. Critical changes override
-the runtime result. A compare that cannot complete is also critical (rc 10); attribution to the reviewer or a concurrent session is not assumed.
+the runtime result; attribution to the reviewer or a concurrent session is not assumed.
+A compare that cannot complete is also critical (rc 10).
 Discard the review body unless every change is known concurrent work, restore unexpected
 changes, and re-run. Values may be redacted, so compare with your known intended settings.
 
 A `branch.*.remote` change is benign only when it names a remote present before the
-review. Known residual: a review run can still execute a planted `filter.*.clean`
-during the after-snapshot’s `git status`.
+review, or is `.` (the local repository). Known residual: a review run can still execute a planted `filter.*.clean`
+during the after-snapshot's `git status`.
 
 Known false-positive sources include `submodule.*` keys from a concurrent
 `git submodule update --init`, `core.repositoryformatversion`/`extensions.*` writes,
-a global write by `gh auth setup-git`, and a branch fetched directly from a URL or
+a global write by `gh auth setup-git`, `gh pr checkout` of a fork PR (which writes a URL
+into `branch.*.remote`), and a branch fetched directly from a URL or
 fork PR (`gh pr checkout`) whose commits have another committer. Known blind spots
 are commits pushed to a remote during the window and commits on a detached HEAD
 in a source worktree.

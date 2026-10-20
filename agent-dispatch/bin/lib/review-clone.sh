@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Sourceable private review clone builder; preserves caller shell options.
+_REVIEW_CLONE_LOCAL_ENV_VARS=$(git rev-parse --local-env-vars 2>/dev/null)
+
 _review_clone_git() (
   unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_PREFIX
   # Git supplies the whitespace-separated names of its repository-local variables.
-  # shellcheck disable=SC2046
-  unset $(git rev-parse --local-env-vars 2>/dev/null)
+  # shellcheck disable=SC2086
+  unset $_REVIEW_CLONE_LOCAL_ENV_VARS
   export GIT_OPTIONAL_LOCKS=0
   git "$@"
 )
