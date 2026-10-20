@@ -703,11 +703,7 @@ dispatch_agy() {
       fi
       REVIEW_WT_RM_PARENT="$(dirname "$REVIEW_WT")"
       local clone_rc=0
-      if rmdir "$REVIEW_WT"; then
-        review_clone_build "$REVIEW_SRC_TOP" "$REVIEW_WT" || clone_rc=$?
-      else
-        clone_rc=3
-      fi
+      review_clone_build "$REVIEW_SRC_TOP" "$REVIEW_WT" || clone_rc=$?
       case "$clone_rc" in
         0)
           review_path="$REVIEW_WT"

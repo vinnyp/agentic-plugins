@@ -49,6 +49,8 @@ expect_rc 0 review_clone_build "$src" "$dest"
 [ "$(git -C "$dest" rev-list --count main..feature)" = 1 ]
 [ "$(git -C "$dest" rev-list --count origin/main..main)" = 1 ]
 [ "$(refs "$src")" = "$(refs "$dest")" ]
+[ "$(git -C "$dest" symbolic-ref refs/remotes/origin/HEAD)" = "$(git -C "$src" symbolic-ref refs/remotes/origin/HEAD)" ]
+[ "$(git -C "$dest" remote get-url --push origin)" = "$dest/.git/review-clone-disabled-remote" ]
 old=$(git -C "$dest" rev-parse origin/main)
 if git -C "$dest" fetch origin 2>/dev/null; then exit 1; fi
 [ "$old" = "$(git -C "$dest" rev-parse origin/main)" ]
@@ -56,6 +58,38 @@ if git -C "$dest" push origin HEAD:refs/heads/x 2>/dev/null; then exit 1; fi
 cmp "$src/.git/config" "$TMP/config"
 git -C "$src" for-each-ref > "$TMP/refs-after"
 cmp "$TMP/refs" "$TMP/refs-after"
+empty="$TMP/p/dispatch-review-wt.empty"
+mkdir -m 700 "$empty"
+expect_rc 0 review_clone_build "$src" "$empty"
+mkdir -m 700 "$TMP/p/dispatch-review-wt.nonempty"
+echo occupied > "$TMP/p/dispatch-review-wt.nonempty/file"
+expect_rc 3 review_clone_build "$src" "$TMP/p/dispatch-review-wt.nonempty"
+ln -s "$empty" "$TMP/p/dispatch-review-wt.link"
+expect_rc 3 review_clone_build "$src" "$TMP/p/dispatch-review-wt.link"
+mkdir "$TMP/nonrepo"
+expect_rc 3 review_clone_build "$TMP/nonrepo" "$TMP/p/dispatch-review-wt.nonrepo"
+echo '# filter=lfs' > "$src/.gitattributes"
+git -C "$src" add .gitattributes
+git -C "$src" commit -qm comment-attributes
+expect_rc 0 review_clone_build "$src" "$TMP/p/dispatch-review-wt.comment"
+echo '*.bin filter=lfs' > "$src/.gitattributes"
+git -C "$src" add .gitattributes
+git -C "$src" commit -qm filter-attributes
+expect_rc 4 review_clone_build "$src" "$TMP/p/dispatch-review-wt.filter"
+git -C "$src" rm -q .gitattributes
+git -C "$src" commit -qm remove-test-attributes
+# Move a ref after the first mirror fetch; the next fetch must converge.
+eval "$(declare -f _review_clone_refs | sed '1s/_review_clone_refs/_original_review_clone_refs/')"
+_review_clone_refs() {
+  if [ "$1" = "$src" ] && [ ! -e "$TMP/ref-moved" ]; then
+    touch "$TMP/ref-moved"
+    git -C "$src" tag concurrent-review
+  fi
+  _original_review_clone_refs "$1"
+}
+expect_rc 0 review_clone_build "$src" "$TMP/p/dispatch-review-wt.retry"
+[ "$(refs "$src")" = "$(refs "$TMP/p/dispatch-review-wt.retry")" ]
+eval "$(declare -f _original_review_clone_refs | sed '1s/_original_review_clone_refs/_review_clone_refs/')"
 git -C "$src" checkout -q main
 git -C "$src" worktree add -q "$TMP/linked" feature
 expect_rc 0 review_clone_build "$TMP/linked" "$TMP/p/dispatch-review-wt.linked"
@@ -100,6 +134,13 @@ expect_rc 0 review_clone_guarded_rm "$TMP/p" "$dest"
 [ ! -e "$dest" ]
 expect_rc 0 "$BIN/review-clone.sh" --remove "$TMP/p" "$TMP/p/dispatch-review-wt.linked"
 ln -s "$BIN/review-clone.sh" "$TMP/cli"
-expect_rc 0 "$TMP/cli" "$src" "$dest"
+usage='usage: review-clone.sh <source-worktree> <dest> [<sha>] | --remove <parent> <path>'
+expect_rc 0 "$TMP/cli" --help > "$TMP/output"
+[ "$(cat "$TMP/output")" = "$usage" ]
+expect_rc 0 "$TMP/cli" -h > "$TMP/output"
+[ "$(cat "$TMP/output")" = "$usage" ]
+expect_rc 0 "$TMP/cli" "$src" "$dest" > "$TMP/output"
+[ "$(cat "$TMP/output")" = "$dest $(git -C "$src" rev-parse HEAD)" ]
 expect_rc 64 "$TMP/cli"
+[ "$(cat "$TMP/error")" = "$usage" ]
 echo 'PASS review-clone'

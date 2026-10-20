@@ -9,10 +9,18 @@ done
 SCRIPT_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 # shellcheck source=agent-dispatch/bin/lib/review-clone.sh
 . "$SCRIPT_DIR/lib/review-clone.sh"
+usage() {
+  printf '%s\n' 'usage: review-clone.sh <source-worktree> <dest> [<sha>] | --remove <parent> <path>'
+}
+if [ "${1:-}" = --help ] || [ "${1:-}" = -h ]; then
+  usage
+  exit 0
+fi
 if [ "${1:-}" = --remove ]; then
-  [ "$#" = 3 ] || exit 64
+  [ "$#" = 3 ] || { usage >&2; exit 64; }
   review_clone_guarded_rm "$2" "$3"
 else
-  if [ "$#" -lt 2 ] || [ "$#" -gt 3 ]; then exit 64; fi
+  if [ "$#" -lt 2 ] || [ "$#" -gt 3 ]; then usage >&2; exit 64; fi
   review_clone_build "$@"
+  printf '%s %s\n' "$2" "$REVIEW_CLONE_SHA"
 fi

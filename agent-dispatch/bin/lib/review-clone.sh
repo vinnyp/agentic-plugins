@@ -47,7 +47,7 @@ _review_clone_refs() {
   printf '%s\n' "$refs" | sed '\|^refs/remotes/origin/HEAD |d'
 }
 
-# Only called after validating a previously absent destination.
+# Only called after validating a destination safe for this build.
 _review_clone_failed() {
   review_clone_guarded_rm "$2" "$3" 2>/dev/null || true
   _review_clone_reason "$1" 4
@@ -55,7 +55,7 @@ _review_clone_failed() {
 
 review_clone_build() {
   local src=${1:-} dest=${2:-} sha=${3:-} parent common config key value
-  local paths path attributes target source_refs dest_refs status
+  local paths path attributes target source_refs dest_refs status mode attempt entry
   REVIEW_CLONE_SHA=''
   # Public output variable for sourced callers.
   # shellcheck disable=SC2034
@@ -64,7 +64,18 @@ review_clone_build() {
     ''|*/|[!/]*) _review_clone_reason 'invalid destination path'; return 3 ;;
   esac
   if [ -L "$dest" ] || [ -e "$dest" ]; then
-    _review_clone_reason 'destination exists or is a symlink'; return 3
+    if [ ! -d "$dest" ] || [ -L "$dest" ] || [ ! -O "$dest" ]; then
+      _review_clone_reason 'unsafe existing destination'; return 3
+    fi
+    mode=$(stat -f %Lp "$dest" 2>/dev/null) || mode=$(stat -c %a "$dest" 2>/dev/null) || mode=''
+    if [ "$mode" != 700 ]; then
+      _review_clone_reason 'destination mode is not 700'; return 3
+    fi
+    for entry in "$dest"/* "$dest"/.[!.]* "$dest"/..?*; do
+      if [ -e "$entry" ] || [ -L "$entry" ]; then
+        _review_clone_reason 'destination is not empty'; return 3
+      fi
+    done
   fi
   case "${dest##*/}" in
     dispatch-review-wt.*) ;;
@@ -126,29 +137,29 @@ review_clone_build() {
     attributes=$(cat "$common/info/attributes" 2>/dev/null) || {
       _review_clone_failed 'unreadable info attributes' "$parent" "$dest"; return 4;
     }
-    if [[ "$attributes" = *filter=* ]]; then
+    if printf '%s\n' "$attributes" | sed '/^[[:space:]]*#/d' | grep -Eq '(^|[[:space:]])-?filter='; then
       _review_clone_failed 'filter in info attributes' "$parent" "$dest"; return 4
     fi
   fi
   paths=$(_review_clone_git -C "$src" -c core.quotePath=false ls-tree -r --name-only "$sha" 2>/dev/null) || {
     _review_clone_failed 'unreadable pinned tree' "$parent" "$dest"; return 4;
   }
+  paths=$(printf '%s\n' "$paths" | grep -E '(^|/)\.gitattributes$') || true
   while IFS= read -r path; do
-    case "$path" in
-      .gitattributes|*/.gitattributes)
-        attributes=$(_review_clone_git -C "$src" show "$sha:$path" 2>/dev/null) || {
-          _review_clone_failed 'unreadable tree attributes' "$parent" "$dest"; return 4;
-        }
-        if [[ "$attributes" = *filter=* ]]; then
-          _review_clone_failed 'filter in tree attributes' "$parent" "$dest"; return 4
-        fi ;;
-    esac
+    [ -n "$path" ] || continue
+    attributes=$(_review_clone_git -C "$src" show "$sha:$path" 2>/dev/null) || {
+      _review_clone_failed 'unreadable tree attributes' "$parent" "$dest"; return 4;
+    }
+    if printf '%s\n' "$attributes" | sed '/^[[:space:]]*#/d' | grep -Eq '(^|[[:space:]])-?filter='; then
+      _review_clone_failed 'filter in tree attributes' "$parent" "$dest"; return 4
+    fi
   done <<< "$paths"
   if ! _review_clone_git clone --quiet --local --no-checkout "$src" "$dest" 2>/dev/null ||
      ! chmod 700 "$dest" 2>/dev/null; then
     _review_clone_failed 'clone failed' "$parent" "$dest"; return 4
   fi
   _review_clone_git -C "$dest" remote set-head origin -d 2>/dev/null || true
+  for attempt in 1 2 3; do
   if ! _review_clone_git -C "$dest" fetch --quiet --no-tags --prune --update-head-ok "$src" \
       '+refs/heads/*:refs/heads/*' '+refs/remotes/*:refs/remotes/*' '+refs/tags/*:refs/tags/*' 2>/dev/null; then
     _review_clone_failed 'ref mirror failed' "$parent" "$dest"; return 4
@@ -170,9 +181,14 @@ review_clone_build() {
      ! dest_refs=$(_review_clone_refs "$dest" 2>/dev/null); then
       _review_clone_failed 'ref verification failed' "$parent" "$dest"; return 4
   fi
-  if [ -n "$status" ] || [ "$source_refs" != "$dest_refs" ]; then
+  if [ -n "$status" ]; then
     _review_clone_failed 'dirty checkout or mismatched refs' "$parent" "$dest"; return 4
   fi
+  [ "$source_refs" != "$dest_refs" ] || break
+  if [ "$attempt" = 3 ]; then
+    _review_clone_failed 'dirty checkout or mismatched refs' "$parent" "$dest"; return 4
+  fi
+  done
   # Public output variable for sourced callers.
   # shellcheck disable=SC2034
   REVIEW_CLONE_SHA=$sha
