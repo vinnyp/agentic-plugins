@@ -25,6 +25,8 @@ DW="$SELF_DIR/dispatch-worker"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home"
+export GIT_CONFIG_GLOBAL="$TMP/gitconfig" GIT_CONFIG_NOSYSTEM=1
+: > "$GIT_CONFIG_GLOBAL"
 # Keep the platform-temp namespace distinct from test repos so the review
 # location regression can prove the worktree is not created beneath $TMPDIR.
 export TMPDIR="$TMP/platform-tmp"
@@ -1170,6 +1172,7 @@ case "$*" in *models*) printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon
 # GNU coreutils stat may precede BSD stat on PATH, and its -f means something else
 # entirely (filesystem info), so try the GNU form FIRST and fall back to BSD.
 parent_mode="$(stat -c '%a' "$(dirname "$PWD")" 2>/dev/null || stat -f '%Lp' "$(dirname "$PWD")" 2>/dev/null)"
+[ -d .git ] && echo GIT_DIR_DIRECTORY >> "$AGY_ARGS_FILE"
 printf 'PARENT_MODE=%s\n' "$parent_mode" >> "$AGY_ARGS_FILE"
 for i in $(seq 1 40); do printf 'Minor finding %s: worktree location checked.\n' "$i"; done
 STUB
@@ -1184,6 +1187,7 @@ case "$review_pwd" in "$tmp_real/.worktrees/dispatch-review-wt."*) ;; *) fail "r
 case "$review_pwd" in "$TMPDIR"/*) fail "review cwd was created under TMPDIR: $review_pwd";; esac
 [ ! -e "$review_pwd" ] || fail "default review worktree was not cleaned up: $review_pwd"
 [ ! -d "$TMP/.worktrees" ] || fail "empty default .worktrees parent was left behind"
+grep -qFx GIT_DIR_DIRECTORY "$AGY_ARGS_FILE" || fail "review .git was not a directory"
 echo "test 32 (review worktree is outside platform temp template and cleaned) PASS"
 
 # 33. A parent created by dispatch is private, honored, and reclaimed when empty.
@@ -1198,6 +1202,7 @@ case "$review_pwd" in "$WT_OVERRIDE/dispatch-review-wt."*) ;; *) fail "DISPATCH_
 grep -q '^PARENT_MODE=700$' "$AGY_ARGS_FILE" || fail "created review parent was not mode 0700"
 [ ! -e "$review_pwd" ] || fail "overridden review worktree was not cleaned up"
 [ ! -d "$WT_OVERRIDE" ] || fail "empty overridden worktree parent was left behind"
+grep -qFx GIT_DIR_DIRECTORY "$AGY_ARGS_FILE" || fail "review .git was not a directory"
 echo "test 33 (review worktree directory override is honored) PASS"
 
 # 33b. A pre-existing empty operator-owned parent survives cleanup unchanged.
@@ -1224,6 +1229,7 @@ review_pwd="$(sed -n 's/^PWD=//p' "$AGY_ARGS_FILE" | tail -n 1)"
 [ -d "$SIBLING_WT" ] || fail "cleanup removed the concurrent sibling worktree"
 [ "$(find "$WT_SHARED" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" -eq 1 ] || fail "cleanup left a stray entry beside the sibling worktree"
 git -C "$R34" worktree remove --force "$SIBLING_WT" >/dev/null 2>&1 || true
+grep -qFx GIT_DIR_DIRECTORY "$AGY_ARGS_FILE" || fail "review .git was not a directory"
 echo "test 34 (cleanup preserves non-empty parent without stray worktree) PASS"
 
 # 35. An unusable preferred parent falls back loudly and remains hermetic.
@@ -1241,6 +1247,7 @@ review_pwd="$(sed -n 's/^PWD=//p' "$AGY_ARGS_FILE" | tail -n 1)"
 [ "$review_pwd" != "$R35" ] || fail "fallback review ran non-hermetically in the operator tree"
 [ "$(git -C "$R35" rev-parse HEAD)" = "$pre_head" ] && [ -z "$(git -C "$R35" status --porcelain)" ] || fail "fallback review changed the operator tree"
 rmdir "$WT_DENIED" 2>/dev/null || true; rm -rf "$XDG35"
+grep -qFx GIT_DIR_DIRECTORY "$AGY_ARGS_FILE" || fail "review .git was not a directory"
 echo "test 35 (unusable parent fallback remains hermetic) PASS"
 
 # 36. A source repo whose adjacent parent resolves under TMPDIR is redirected
@@ -1413,11 +1420,114 @@ else
 fi
 echo "test 41b (agy persona roster probe detaches stdin) PASS"
 
+# Configurable review runtime: probes never count as launches.
+install_cfg_agy_stub() {
+  cat > "$TMP/bin/agy" <<'STUB'
+#!/usr/bin/env bash
+# PERSONA_ROSTER_STUB
+case "${1:-}" in
+  models)
+    printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
+    if [ "${AGY_MISSING_REVIEW:-0}" = 1 ]; then
+      printf 'custom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'
+    else
+      printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n' "$AGY_TEST_CODING_PIN" "$AGY_TEST_REVIEW_PIN"
+    fi
+    exit 0 ;;
+  agent)
+    printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
+    [ "${AGY_ROSTER_MODE:-}" = nonzero ] && exit 19
+    [ "${AGY_ROSTER_MODE:-}" = empty ] || printf '%s\n' peer-security-reviewer peer-code-reviewer
+    exit 0 ;;
+esac
+n=$(cat "$AGY_STUB_COUNT_FILE"); n=$((n + 1)); echo "$n" > "$AGY_STUB_COUNT_FILE"
+printf 'PWD=%s\nCALL=%s\n%s\n' "$PWD" "$n" "$*" >> "$AGY_ARGS_FILE"
+cat > "$AGY_STDIN_FILE"
+[ -z "${AGY_STUB_ACTIONS:-}" ] || bash "$AGY_STUB_ACTIONS" "$n"
+for i in $(seq 1 100); do printf 'Minor REVIEW LINE %s src/x.go:1 ok\n' "$i"; done
+rc=${AGY_STUB_RC:-0}
+if [ -n "${AGY_STUB_RC_ON_CALL:-}" ] && [ "$n" != "$AGY_STUB_RC_ON_CALL" ]; then rc=0; fi
+exit "$rc"
+STUB
+  chmod +x "$TMP/bin/agy"
+}
+install_cfg_agy_stub
+unset AGY_ROSTER_MODE
+export AGY_STUB_COUNT_FILE="$TMP/cfg-count" AGY_STUB_ACTIONS="$TMP/cfg-actions"
+run_cfg_review() {
+  echo 0 > "$AGY_STUB_COUNT_FILE"
+  : > "$AGY_ARGS_FILE"
+  TIMEOUT=0 "$DW" --runtime agy --review --brief "$BRIEF" --workdir "$1" > "$TMP/cfg.out" 2> "$TMP/cfg.err"
+}
+R43="$TMP/repo43"; make_git_repo "$R43"
+cat > "$AGY_STUB_ACTIONS" <<'ACTIONS'
+git rev-parse --path-format=absolute --git-dir > "$AGY_ARGS_FILE.gitdir"
+git rev-parse --path-format=absolute --git-common-dir > "$AGY_ARGS_FILE.common"
+{ test -d .git && echo dir; ls -ld . | cut -c1-10; } > "$AGY_ARGS_FILE.mode"
+env | grep -c '^GIT_DIR=' > "$AGY_ARGS_FILE.env"
+ACTIONS
+before=$(git -C "$R43" worktree list)
+run_cfg_review "$R43" || fail 'V1 launch failed'
+review_pwd=$(sed -n 's/^PWD=//p' "$AGY_ARGS_FILE")
+[ "$(cat "$AGY_ARGS_FILE.gitdir")" = "$review_pwd/.git" ] || fail 'V1 git dir shared'
+[ "$(cat "$AGY_ARGS_FILE.common")" = "$review_pwd/.git" ] || fail 'V1 common dir shared'
+grep -qFx dir "$AGY_ARGS_FILE.mode" || fail 'V1 .git not directory'
+grep -qFx drwx------ "$AGY_ARGS_FILE.mode" || fail 'V1 workspace not private'
+[ "$before" = "$(git -C "$R43" worktree list)" ] || fail 'V1 source worktrees changed'
+decoy="$TMP/decoy43"; make_git_repo "$decoy"
+GIT_DIR="$decoy/.git" run_cfg_review "$R43"
+[ "$(cat "$AGY_ARGS_FILE.env")" = 0 ] || fail 'review inherited GIT_DIR'
+
+origin="$TMP/origin43"; git -C "$TMP" init --bare "$origin" >/dev/null 2>&1
+git -C "$R43" remote add origin "$origin"
+git -C "$R43" push origin review-main:main >/dev/null 2>&1
+git -C "$R43" checkout -b feature >/dev/null 2>&1
+echo feature >> "$R43/README.md"
+git -C "$R43" -c user.name=Test -c user.email=test@example.com commit -am feature >/dev/null 2>&1
+git -C "$R43" tag example
+echo stash >> "$R43/README.md"
+git -C "$R43" -c user.name=Test -c user.email=test@example.com stash >/dev/null 2>&1
+cat > "$AGY_STUB_ACTIONS" <<'ACTIONS'
+{
+git rev-list --count review-main..feature
+git rev-parse origin/main
+git rev-parse HEAD
+git fetch origin >/dev/null 2>&1; echo fetch=$?
+git rev-parse origin/main
+} > "$AGY_ARGS_FILE.refs"
+ACTIONS
+run_cfg_review "$R43" || fail 'V2 launch failed'
+expected_origin=$(git -C "$R43" rev-parse origin/main)
+expected_head=$(git -C "$R43" rev-parse HEAD)
+[ "$(sed -n '1p' "$AGY_ARGS_FILE.refs")" = "$(git -C "$R43" rev-list --count review-main..feature)" ] || fail 'V2 range changed'
+[ "$(sed -n '2p' "$AGY_ARGS_FILE.refs")" = "$expected_origin" ] || fail 'V2 origin changed'
+[ "$(sed -n '3p' "$AGY_ARGS_FILE.refs")" = "$expected_head" ] || fail 'V2 HEAD changed'
+! grep -qFx fetch=0 "$AGY_ARGS_FILE.refs" || fail 'V2 fetch enabled'
+[ "$(sed -n '5p' "$AGY_ARGS_FILE.refs")" = "$expected_origin" ] || fail 'V2 fetch moved origin'
+! grep -q unsuitable "$TMP/cfg.err" || fail 'stash disabled clone'
+linked="$TMP/linked43"
+git -C "$R43" checkout review-main >/dev/null 2>&1
+git -C "$R43" worktree add "$linked" feature >/dev/null 2>&1
+run_cfg_review "$linked"
+[ "$(sed -n '3p' "$AGY_ARGS_FILE.refs")" = "$expected_head" ] || fail 'linked source HEAD changed'
+git -C "$R43" config filter.x.clean cat
+run_cfg_review "$R43" || fail 'unsuitable fallback failed'
+grep -q 'unsuitable for a private clone' "$TMP/cfg.err" || fail 'missing unsuitable warning'
+! grep -q -- --dangerously-skip-permissions "$AGY_ARGS_FILE" || fail 'fallback bypasses permissions'
+last_repo="$TMP/last-repo"; make_git_repo "$last_repo"
+denied="$TMP/last-denied"; mkdir -m 555 "$denied"
+DISPATCH_REVIEW_WT_DIR="$denied" XDG_CACHE_HOME="$TMPDIR/cache" run_cfg_review "$last_repo" || fail 'last-resort launch failed'
+review_pwd=$(sed -n 's/^PWD=//p' "$AGY_ARGS_FILE")
+grep -qF "falling back to $review_pwd, where agy" "$TMP/cfg.err" || fail "last-resort path not reached: $review_pwd"
+[ ! -e "$review_pwd" ] || fail "last-resort workspace survived: $review_pwd"
+[ -z "$(find "$TMPDIR" -name 'dispatch-review-wt.*' -print)" ] || fail 'last-resort workspace leaked'
+echo 'test 43 (private clone, refs, environment and fallback) PASS'
+
 # The file had 22 agy stubs before the four persona-specific controls above;
 # every definition must answer the roster subcommand instead of falling into cat.
 agy_stub_defs="$(grep -c 'cat > .*bin/ag[y].*STUB' "$0")"
 agy_stub_arms="$(grep -c '^# PERSONA_ROSTER_STU[B]$' "$0")"
-[ "$agy_stub_defs" -eq 27 ] || fail "expected 22 original + 4 persona-control + 1 row-verdict agy stubs, found $agy_stub_defs"
+[ "$agy_stub_defs" -eq 28 ] || fail "expected 22 original + 4 persona-control + 1 row-verdict agy stubs, found $agy_stub_defs"
 [ "$agy_stub_arms" -eq "$agy_stub_defs" ] || fail "not every agy stub has an agent) arm ($agy_stub_arms/$agy_stub_defs)"
 echo "test 42 (all 22 original agy stubs handle the agent subcommand) PASS"
 
