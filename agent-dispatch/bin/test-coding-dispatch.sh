@@ -863,6 +863,53 @@ bash "$CD" codex "$P_perm_t" "$TMP/prompt" "true" >"$TMP/out_perm_t" 2>&1; rc=$?
 [ "$rc" -eq 0 ] || { cat "$TMP/out_perm_t"; fail "#53 permutation/MUTEX non-regression (tracked-diff) should pass, got $rc"; }
 echo "test #53 mutation marker guard PASS"
 
+# foundry#236: a mutation SUITE carries "# MUT" in its mutant definitions by design.
+# Adding a mutant to a *test-mutants* file passes; a sentinel anywhere else still fails
+# and the failure names the file; an empty CODING_DISPATCH_MUT_EXEMPT scans every file.
+mut_suite_parent() {
+  new_parent "$1"; mkdir -p "$1/hooks"
+  printf '%s\n' "mutant 'old' body.sh 's/a/b # MUT old/'" > "$1/hooks/test-mutants.sh"
+  printf '%s\n' 'echo body' > "$1/hooks/body.sh"
+  git -C "$1" add -A; git -C "$1" commit -qm suite
+}
+grep -qE '(//|#)[[:space:]]*MUT([[:space:]:]|$)' <<< "mutant 'new' body.sh 's/echo/true # MUT echo/'" || fail "#236 fixture mutant line must match the marker regex"
+P_ms="$TMP/mut_suite_parent"; mut_suite_parent "$P_ms"
+cat > "$TMP/bin/codex" <<'STUB'
+#!/usr/bin/env bash
+wd=""; while [ $# -gt 0 ]; do [ "$1" = "-C" ] && { wd="$2"; shift 2; continue; }; shift; done
+: "${wd:=$PWD}"
+printf '%s\n' "mutant 'new' body.sh 's/echo/true # MUT echo/'" >> "$wd/hooks/test-mutants.sh"
+printf '%s\n' "mutant 'x' body.sh 's/b/c # MUT b/'" > "$wd/hooks/test-mutants-extra.sh"
+STUB
+chmod +x "$TMP/bin/codex"
+bash "$CD" codex "$P_ms" "$TMP/prompt" "true" >"$TMP/out_ms" 2>&1; rc=$?
+[ "$rc" -eq 0 ] || { cat "$TMP/out_ms"; fail "#236 mutants added to a mutation suite should pass, got $rc"; }
+grep -q "mutation marker" "$TMP/out_ms" && { cat "$TMP/out_ms"; fail "#236 mutation suite tripped the marker guard"; }
+P_ms2="$TMP/mut_suite_body_parent"; mut_suite_parent "$P_ms2"
+cat > "$TMP/bin/codex" <<'STUB'
+#!/usr/bin/env bash
+wd=""; while [ $# -gt 0 ]; do [ "$1" = "-C" ] && { wd="$2"; shift 2; continue; }; shift; done
+: "${wd:=$PWD}"
+printf '%s\n' "mutant 'new' body.sh 's/echo/true # MUT echo/'" >> "$wd/hooks/test-mutants.sh"
+printf '%s\n' 'true || : # MUT' >> "$wd/hooks/body.sh"
+STUB
+chmod +x "$TMP/bin/codex"
+bash "$CD" codex "$P_ms2" "$TMP/prompt" "true" >"$TMP/out_ms2" 2>&1; rc=$?
+[ "$rc" -eq 1 ] || { cat "$TMP/out_ms2"; fail "#236 sentinel left in a hook body should fail rc 1, got $rc"; }
+grep -q "mutation marker.*(hooks/body.sh)" "$TMP/out_ms2" || { cat "$TMP/out_ms2"; fail "#236 failure should name hooks/body.sh"; }
+P_ms3="$TMP/mut_suite_noexempt_parent"; mut_suite_parent "$P_ms3"
+cat > "$TMP/bin/codex" <<'STUB'
+#!/usr/bin/env bash
+wd=""; while [ $# -gt 0 ]; do [ "$1" = "-C" ] && { wd="$2"; shift 2; continue; }; shift; done
+: "${wd:=$PWD}"
+printf '%s\n' "mutant 'new' body.sh 's/echo/true # MUT echo/'" >> "$wd/hooks/test-mutants.sh"
+STUB
+chmod +x "$TMP/bin/codex"
+CODING_DISPATCH_MUT_EXEMPT="" bash "$CD" codex "$P_ms3" "$TMP/prompt" "true" >"$TMP/out_ms3" 2>&1; rc=$?
+[ "$rc" -eq 1 ] || { cat "$TMP/out_ms3"; fail "#236 empty exempt list should scan the suite and fail, got $rc"; }
+grep -q "mutation marker.*(hooks/test-mutants.sh)" "$TMP/out_ms3" || { cat "$TMP/out_ms3"; fail "#236 empty exempt failure should name the suite"; }
+echo "test #236 mutation-suite exemption PASS"
+
 # ============================ #118: pre-revert patch snapshot + --keep-on-fail ============================
 
 # (A1) failing gate, UNCOMMITTED shape: patch file is non-empty and its path is printed;

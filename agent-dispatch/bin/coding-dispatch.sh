@@ -30,6 +30,8 @@
 #   env CODING_DISPATCH_RM_ON_FAIL (worktree mode) — 1 = remove the worktree on build failure
 #     instead of salvaging the diff IN the worktree; the patch itself still survives (written
 #     under the PARENT repo's git dir, keyed by slug) — see #118 (FINDING 3 fix).
+#   env CODING_DISPATCH_MUT_EXEMPT whitespace-separated path globs skipped by the mutation-marker
+#     guard (default *test-mutants*): mutation suites carry "# MUT" by design (foundry#236).
 #   env CODING_DISPATCH_CHILD_ENV  whitespace-separated KEY=VALUE pairs exported into the
 #     dispatched agent's environment (e.g. CODING_DISPATCH_CHILD_ENV="MYREPO_LEDGER=off").
 #     Values cannot contain whitespace (the format is whitespace-separated); malformed
@@ -796,14 +798,35 @@ if [ -z "$(git status --porcelain)" ]; then
 fi
 
 # Refuse to ship mutation-test sentinels before the build gate can bless a poisoned tree.
+# Mutation SUITES carry "# MUT" in their mutant definitions by design, so a path matching
+# CODING_DISPATCH_MUT_EXEMPT (whitespace-separated globs, default *test-mutants*) is not
+# scanned (vinnyp/foundry#236). A sentinel left in any other file still fails.
 _mut_re='(//|#)[[:space:]]*MUT([[:space:]:]|$)'
 _mut_hit=""
-git diff "$BASE" -- 2>/dev/null | grep -qE "^\+.*$_mut_re" && _mut_hit=1
-while IFS= read -r _uf; do
-  [ -f "$_uf" ] && grep -qE "$_mut_re" "$_uf" && { _mut_hit=1; break; }
-done < <(git ls-files --others --exclude-standard)
+# read -a splits without pathname expansion, so a glob is never expanded against the cwd.
+read -r -a _mut_exempt_globs <<< "${CODING_DISPATCH_MUT_EXEMPT-*test-mutants*}"
+_mut_exempt() {
+  local _g
+  for _g in ${_mut_exempt_globs[@]+"${_mut_exempt_globs[@]}"}; do
+    # shellcheck disable=SC2254 # the glob is the point: match the path against each pattern.
+    case "$1" in $_g) return 0 ;; esac
+  done
+  return 1
+}
+# --name-only paths are top-relative; :(top) keeps each per-file diff repo-wide from a subdir.
+while IFS= read -r _tf; do
+  [ -n "$_tf" ] || continue
+  _mut_exempt "$_tf" && continue
+  git diff "$BASE" -- ":(top)$_tf" 2>/dev/null | grep -qE "^\+.*$_mut_re" && { _mut_hit="$_tf"; break; }
+done < <(git -c core.quotepath=off diff "$BASE" --name-only -- 2>/dev/null)
+if [ -z "$_mut_hit" ]; then
+  while IFS= read -r _uf; do
+    _mut_exempt "$_uf" && continue
+    [ -f "$_uf" ] && grep -qE "$_mut_re" "$_uf" && { _mut_hit="$_uf"; break; }
+  done < <(git ls-files --others --exclude-standard)
+fi
 if [ -n "$_mut_hit" ]; then
-  note "DISPATCH=fail: mutation marker (// MUT / # MUT) present in the dispatched change — a mutation-test sentinel was not restored before the build/commit. Restore the tree to its pre-mutation state and re-dispatch."
+  note "DISPATCH=fail: mutation marker (// MUT / # MUT) present in the dispatched change ($_mut_hit) — a mutation-test sentinel was not restored before the build/commit. Restore the tree to its pre-mutation state and re-dispatch. (A mutation suite that carries MUT by design belongs in CODING_DISPATCH_MUT_EXEMPT.)"
   report_fail "mutation marker"
   exit 1
 fi
