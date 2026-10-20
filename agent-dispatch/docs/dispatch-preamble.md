@@ -1,6 +1,6 @@
 # The dispatch preamble
 
-Three clauses that every dispatched brief carries, whatever the runtime and
+Four clauses that every dispatched brief carries, whatever the runtime and
 whatever the agent is for — a coding worker, a reviewer, a research or archival
 subagent. They are concatenated into the brief at assembly time, not cited from
 it: a hand-maintained register of "places that cite this rule" is exactly what
@@ -22,6 +22,7 @@ inert, so an assembling path substitutes it or does not ship the brief.
 - **Never touch a file you did not create.** `rm`, `git checkout`, `git restore`, `git reset`, `git clean` and `git stash` are forbidden against any path outside your task's declared files. Treat unknown files as foreign and leave them. This binds every dispatched agent — a coding worker, a reviewer, a research or archival subagent, any runtime — not only a `coding-dispatch.sh` run.
 - **These paths are already dirty and are not yours:** {{DIRTY_PATHS}}. Reverting or deleting one of them is the failure this rule exists to prevent.
 - **You do not run the long gate.** Run every command in the foreground and let it finish. A subagent cannot receive a completion notification, so a backgrounded command hangs forever with nothing to wake it; if you catch yourself writing "I'll wait for the notification", that IS the violation. Never kill or signal a process you did not start.
+- **Scratch repos fail closed.** Create a throwaway repo only under an absolute `mktemp -d "${TMPDIR:-/tmp}/<name>.XXXXXX"`, in a script running `set -eu`, and abort if the path is empty. Every `git config`, `checkout`, `branch`, `merge`, `commit` or `push` in it carries `-C <that path>`. Pass an identity per command (`-c user.name=… -c user.email=…`, or `GIT_AUTHOR_*`/`GIT_COMMITTER_*` env), never with `git config`, and never `--global`. `git -C ""` silently runs in the current directory, and in a linked worktree `git config` rewrites the shared repository's config.
 <!-- PREAMBLE:END -->
 
 ## Who concatenates it
@@ -51,3 +52,5 @@ could never do that.
    agent waits for a wake-up that cannot come. The orchestrator-side half of
    this rule — that the orchestrator drives long gates itself — is the
    caller's, and is not part of the dispatched brief.
+
+4. **Scratch repos.** An empty scratch path once turned a reviewer's experiment into a write to the shared repository's identity; every later commit by any session took the throwaway author.

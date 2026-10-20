@@ -301,8 +301,12 @@ baseline). Use it for every mutation-verify pass, orchestrator or reviewer alike
 two or more reviewers that themselves RUN mutations (mutate a file → run the test → restore), do
 not point them at one shared worktree: they edit the same files in parallel, leave the tree dirty,
 restore each other's mutations, and cross-flag one another's in-flight edits. Either give each
-mutating reviewer its own isolated worktree, **or** instruct read-only diff review and run the
-mutation-verify yourself, serialized. Never share one worktree across concurrent mutators.
+mutating reviewer its own isolated clone, **or** instruct read-only diff review and run the
+mutation-verify yourself, serialized. Never share one clone across concurrent mutators. A linked worktree shares config and refs.
+Use `review-clone.sh <repo> <abs parent>/dispatch-review-wt.<slug>` and remove it with
+`review-clone.sh --remove <abs parent> <that path>`. Exit 10 requires inspecting and restoring
+source-repo changes before committing; discard the body unless all changes are known concurrent
+work, then re-run.
 
 **Grep-evasion is an auto-Blocker.** A spec's acceptance criteria must never be satisfiable by a
 textual stand-in for the behavioral requirement. When a criterion is expressed as a text or pattern

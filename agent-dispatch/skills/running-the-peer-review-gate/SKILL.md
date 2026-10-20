@@ -124,11 +124,12 @@ done
 ```
 
 Run it against the tree the reviewers will read — a worktree's dirty paths, not your cwd's — and
-check no brief still contains the literal `{{DIRTY_PATHS}}`. The three clauses are:
+check no brief still contains the literal `{{DIRTY_PATHS}}`. The four clauses are:
 
 - **Never touch a file you did not create.** `rm`, `git checkout`, `git restore`, `git reset`, `git clean` and `git stash` are forbidden against any path outside your task's declared files. Treat unknown files as foreign and leave them. This binds every dispatched agent — a coding worker, a reviewer, a research or archival subagent, any runtime — not only a `coding-dispatch.sh` run.
 - **These paths are already dirty and are not yours:** {{DIRTY_PATHS}}. Reverting or deleting one of them is the failure this rule exists to prevent.
 - **You do not run the long gate.** Run every command in the foreground and let it finish. A subagent cannot receive a completion notification, so a backgrounded command hangs forever with nothing to wake it; if you catch yourself writing "I'll wait for the notification", that IS the violation. Never kill or signal a process you did not start.
+- **Scratch repos fail closed.** Create a throwaway repo only under an absolute `mktemp -d "${TMPDIR:-/tmp}/<name>.XXXXXX"`, in a script running `set -eu`, and abort if the path is empty. Every `git config`, `checkout`, `branch`, `merge`, `commit` or `push` in it carries `-C <that path>`. Pass an identity per command (`-c user.name=… -c user.email=…`, or `GIT_AUTHOR_*`/`GIT_COMMITTER_*` env), never with `git config`, and never `--global`. `git -C ""` silently runs in the current directory, and in a linked worktree `git config` rewrites the shared repository's config.
 
 The third clause matters most here: a reviewer given Bash will otherwise background the suite it was
 asked to run and then wait for a notification that has no channel to arrive on.
@@ -185,11 +186,21 @@ pass**; say so in the tier-rationale log entry (Phase 2).
 
   **Parallel Bash-capable reviewers must be isolated.** When dispatching multiple reviewers (say
   `peer-code-reviewer` + `peer-test-reviewer`) in parallel and either can run the test suite or
-  issue file mutations, give each an **isolated worktree**, or serialize the test-executing lenses.
+  issue file mutations, give each an **isolated clone**, or serialize the test-executing lenses.
   Concurrent bytecode recompilation and file-mutation churn from two processes in the same worktree
   produce non-deterministic test failures that surface as false code-defect findings. Use
-  `git worktree add ../.worktrees/<slug> HEAD` per reviewer, or run code-reviewer and test-reviewer
-  sequentially.
+  `review-clone.sh <repo> <abs parent>/dispatch-review-wt.<slug>` per reviewer, or run code-reviewer and test-reviewer
+  sequentially. Remove it afterwards with
+  `review-clone.sh --remove <abs parent> <that path>`. A linked worktree shares the
+  repository's config and refs.
+
+  Around each Claude reviewer round, run `repo-state-check snapshot <repo> <before>`
+  before dispatching. Afterwards run `repo-state-check snapshot <repo> <after-snapshot>`
+  and `repo-state-check compare <before> <after-snapshot>`. Treat compare exit 2 as
+  rc 10: inspect and restore the named changes before committing, discard the review body
+  unless every change is known concurrent work, and re-run. An unreadable after-snapshot
+  also requires stopping and inspection. Exits 3/64 mean "check failed: stop and investigate",
+  never clean; stop on snapshot failure too.
 
 - **Optional different-model pass (serialized)** for independence on load-bearing lenses (code,
   security and privacy are capability-confirmed on `agy`; standards and interface for public-bound
@@ -208,7 +219,10 @@ pass**; say so in the tier-rationale log entry (Phase 2).
   git rebase origin/main   # or: git log --oneline origin/main..HEAD to confirm it's current
   ```
 
-  When in doubt, rebase first.
+  The review clone mirrors the source's refs at dispatch time; origin's fetch and push URLs
+  point at a disabled path. Other remotes and the operator's credential helper remain reachable,
+  so the drift check, not the clone, detects source changes. Rebase or fetch in the source
+  *before* dispatching. When in doubt, rebase first.
 
   ```bash
   "$RG" cross-model --runtime agy --brief /tmp/brief-code-xm.md --timeout 14m
@@ -220,6 +234,7 @@ pass**; say so in the tier-rationale log entry (Phase 2).
   briefs — so read the per-brief rc from the summary, not just `$?`. Each rc has a defined
   orchestrator action:
 
+  - **10** — source repo changed during the review window: inspect and restore the named changes before committing; discard the review body unless every change is known concurrent work; re-run.
   - **9** — agy model not offered → fix the pin or pass `--model` to `review-gate cross-model`, then re-run; do NOT fall back to a Claude reviewer.
   - **5/6** — codex auth or rate limit → **not a build failure**. Fix the auth/ratelimit and re-run
     `cross-model` for that lens.
@@ -236,7 +251,8 @@ pass**; say so in the tier-rationale log entry (Phase 2).
   rc with an empty body (rc 1 has been observed twice) gets the same treatment — a lens that
   returned nothing has not been reviewed, whatever it exited with. Read the per-brief **body
   length** from the run summary and apply the rule mechanically; never read a non-enumerated rc as
-  "no prescribed action". Exception: rc 5/6/9 keep their distinct "not a build failure, fix the
+  "no prescribed action". Exception: rc 10 requires source-repo inspection and restoration before re-running,
+  regardless of the review body. rc 5/6/9 keep their distinct "not a build failure, fix the
   auth/ratelimit/model pin and re-run" handling.
 
 ### 5. Verify-the-reviewer

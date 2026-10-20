@@ -207,7 +207,7 @@ the brief is dispatched. The selected persona is retained on the one permitted r
 deliverable **on stdout**. What "read-only" is enforced by, and whether a *bad* review is caught,
 differ sharply by runtime — this is not a general `--review` contract:
 
-* **agy** — the full treatment. The review runs in a disposable, detached worktree at
+* **agy** — the full treatment. The review runs in a disposable private clone, detached at the pinned HEAD, at
   `<repo>/../.worktrees/dispatch-review-wt.XXXXXX` (falling back to
   `${XDG_CACHE_HOME:-~/.cache}/dispatch-review-worktrees/`, then `$TMPDIR`), removed on exit. Two
   gates decide whether the review counts: a byte backstop (`DISPATCH_MIN_REVIEW_BYTES`, default
@@ -218,15 +218,37 @@ differ sharply by runtime — this is not a general `--review` contract:
   missing the file it was briefed on is worse than no review — a dirty tree whose dirty files are
   not named in the brief only warns, and `--allow-dirty` (`DISPATCH_ALLOW_DIRTY=1`) opts out.
 * **codex** — `--sandbox read-only` is forced (an explicit `--ceremony` is overridden, and it says
-  so) and the post-dispatch dep gate is skipped. That is all. There is **no** byte floor, **no**
-  evidence gate, **no** isolated worktree and **no** `REVIEW_OUTFILE`.
+  so) and the post-dispatch dep gate is skipped. There is **no** byte floor, **no**
+  evidence gate, **no** isolated clone and **no** `REVIEW_OUTFILE`.
 * **claude** — `--permission-mode plan` is forced (`--ceremony` ignored). Same story: the review's
   *content* is not gated at all.
 
-In plain terms: outside agy, `--review` gets you sandbox/permission restriction and nothing else —
+In plain terms: outside agy, `--review` gets you sandbox/permission restriction and the source-state check —
 an empty or one-line review comes back as the binary's own exit code, usually `0`. **codex is the
 default runtime**, so a bare `dispatch-worker --review` is the ungated path; pass `--runtime agy`
 if you want the review judged, or judge it yourself.
+
+The clone mirrors the source's local branches, remote-tracking refs and tags at dispatch time.
+Origin's fetch and push URLs point at a disabled path; fetch or rebase in the source before dispatching.
+Other remotes and the operator's credential helper remain reachable, so the drift check,
+not the clone, detects source changes. Git config,
+refs and branches are private, and the reviewer gets a mode-0600 flattened copy of global Git
+config via `GIT_CONFIG_GLOBAL`. Unsuitable repos (partial clones, filters, LFS or an invalid
+HEAD) fall back to the live workspace, naming the reason and enforcing permissions instead of
+passing `--dangerously-skip-permissions`. Allocation refusal remains exit 3.
+`GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`, `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY` and
+`GIT_PREFIX` are cleared for repository operations and the review child.
+
+Every runtime's `--review`, including fallback, snapshots source state before and after.
+Unexpected config changes, hook changes, foreign committers on new local commits, or an
+unreadable after-snapshot exit 10, overriding every post-launch result. A compare that
+cannot complete is also critical (rc 10). Ref, worktree and
+working-tree movement only warn. stderr reports
+`DISPATCH_REVIEW_STATE=clean|warn(<n>)|critical(<n>)|skipped(<reason>) original_rc=<n>`:
+clean means no drift; `<n>` in both `warn(<n>)` and `critical(<n>)` counts all change lines.
+The closed skipped-reason set is `not-launched`, `not-a-git-repo`, `snapshot-failed`,
+and `not-checked`. `original_rc` is the runtime
+result before state classification; a runtime's native 10 is remapped to 1.
 
 A review pin is taken on the workdir for every `--review` regardless of runtime, and released on
 exit (see [`review-pin.sh`](#review-pinsh)).
@@ -251,15 +273,16 @@ so judge those reviews yourself. For a whole round of lenses, see
 |---|---|
 | `0` | the runtime returned success |
 | `2` | usage error, unreadable brief, unknown runtime, or the dirty-tree review refusal |
-| `3` | the runtime binary is not on PATH, or no isolated review worktree could be allocated |
+| `3` | the runtime binary is not on PATH, or no isolated review workspace could be allocated |
 | `4` | `--require-dep` gate failed — a promised module is missing from `go.mod` |
 | `5` | codex rejected every model at the auth/config layer. Fix auth; **do not** retry as a build. |
 | `6` | codex hit a usage/rate limit. It can exit 0 on a zero-edit no-op, so this is detected from the limit signature *plus* an absence of substantive output. Treat as blocked. |
 | `7` | agy is not authenticated (`agy` and sign in). Do not retry as a build. |
 | `8` | an agy `--review` did not produce a real review (too short, no evidence, or timed out twice) |
 | `9` | effective agy model missing from live `agy models`; update `bin/lib/agy-models.sh` or the override |
+| `10` | source repo changed during the review window or compare could not complete; inspect and restore named changes before committing, discard the body unless every change is known concurrent work, then re-run. Known residual: a review run can still execute a planted `filter.*.clean` during the after-snapshot's `git status`. |
 | `124` | the external `--timeout` bound killed a hung agent — a blocked phase, not a result |
-| other | the runtime's own exit code, unchanged |
+| other | the runtime's own exit code; native 10 is remapped to 1 during review |
 
 Artifacts (agy `--review` only): the review is also tee'd to a file whose path is printed on
 stderr as `REVIEW_OUTFILE=<path> (rc=<n>)`. If **you** set `REVIEW_OUTFILE`, that file is yours and
@@ -474,7 +497,10 @@ unresolvable `--spec`/`--source`/`--range`, a `--topic` that is not a bare slug,
 without `--force`), `2` an I/O or system error, `3` for `log-new` when the log was written but the
 persona provenance is `UNRESOLVED`. `cross-model` instead passes through the worst
 `dispatch-worker` rc — `5`/`6` codex auth or rate limit (not a build failure), `7` agy not
-authenticated, `8` empty/short/evidence-free review, `124` timeout.
+authenticated, `8` empty/short/evidence-free review, `10` source repo changed during the
+review window, `124` timeout. On 10 it stops dispatching, lists skipped briefs, and exits 10
+regardless of other results. Inspect and restore named changes before committing and re-run;
+discard the body unless every change is known concurrent work.
 
 ## `drive-cold-session.sh`
 
@@ -617,14 +643,77 @@ FAIL. So an `--install` that skipped an entrypoint (a foreign symlink it refused
 | `REVIEW_OUTFILE` | `dispatch-worker` | where to tee the review. Supplying it means **you** own the file and it is retained. |
 | `DISPATCH_MIN_REVIEW_BYTES` | `dispatch-worker` | `1200` byte backstop for `--review` |
 | `DISPATCH_REVIEW_REQUIRE_EVIDENCE` | `dispatch-worker` | exactly `0` disables the labelled-severity / `file:line` evidence gate |
-| `DISPATCH_REVIEW_WT_DIR` | `dispatch-worker` | preferred parent directory for isolated review worktrees |
+| `DISPATCH_REVIEW_WT_DIR` | `dispatch-worker` | preferred parent directory for private review clones; stale clones older than six hours may be reaped across sibling repos |
+| `GIT_CONFIG_GLOBAL` | agy review child | private flattened global config copy in hermetic mode; writes stay in the run |
+| `DISPATCH_REVIEW_STATE` | stderr output, not an input knob | `clean`, `warn(<n>)`, `critical(<n>)`, or `skipped(<reason>)`, followed by `original_rc=<n>` |
 | `DISPATCH_ALLOW_DIRTY` | `dispatch-worker` | `1` = warn instead of refusing when a review brief names an uncommitted path |
 | `DISPATCH_LIMIT_NOOP_BYTES` | `dispatch-worker` | `200` — stdout below this, plus a rate-limit signature, is read as a limit no-op (exit 6) |
 | `CODING_PREFLIGHT_CODEX_PROBE`, `CODEX_EXEC_PROBE_TIMEOUT` | `coding-preflight.sh codex` | enabled unless exactly `0`; `75s` timeout |
 | `AGY_FORM_PROBE_TIMEOUT`, `AGY_BIN` | `coding-preflight.sh` probes | `30s`; the agy binary to probe |
 | `DCS_BOOT_MAX`, `DCS_SETTLE_MAX`, `DCS_STABLE`, `DCS_INTERVAL`, `DCS_COLS`, `DCS_ROWS`, `DCS_KILL`, `DCS_CLOSE` | the drive scripts | see above |
-| `TMPDIR`, `XDG_CACHE_HOME` | several | honoured for temp files, gate logs, and review-worktree fallbacks |
+| `TMPDIR`, `XDG_CACHE_HOME` | several | honoured for temp files, gate logs, and review-clone fallbacks |
 
 `review-gate cross-model --model <id>` forwards a one-off model override.
 Exit 9 means model not offered in `dispatch-worker`; in `coding-dispatch.sh` and
 `coding-build-phase.sh` it means review-pin refusal.
+
+## review-clone.sh
+
+```text
+review-clone.sh <src> <dest> [<sha>]
+review-clone.sh --remove <abs parent> <that path>
+review-clone.sh --help | -h
+```
+
+Builds a disposable local clone detached at the supplied SHA (default source HEAD), with
+hardlinked objects where possible and no alternates. Mirrors local branches, remote-tracking
+refs and tags; origin's fetch and push URLs point at a disabled path. Other remotes and the
+operator's credential helper remain reachable, so the drift check, not the clone, detects
+source changes. Config and refs are private. On success it prints `<dest> <resolved-sha>`
+to stdout. It verifies a
+clean checkout and matching refs. Exit 0 means success; 3 refuses an unsuitable path or source;
+4 means a faithful checkout is unavailable (including filters, LFS, partial clones or invalid
+HEAD), allowing the dispatcher's non-hermetic fallback. Invalid CLI arguments exit 64.
+Source must be an absolute work-tree path. Destination must be absolute, not symlinked, without a trailing slash, and named
+`dispatch-review-wt.*` under an existing parent. It may be absent or an existing empty
+directory owned by the current user with mode 700.
+Guarded removal requires an absolute,
+non-symlink path directly under the resolved parent, with no trailing slash and a basename
+matching `dispatch-review-wt.*`. Failed builds use guarded cleanup too.
+The clone does not mirror branch upstream config (`@{upstream}`), `stash@{n}`,
+`refs/notes/*`, `refs/replace/*` or reflog forms; brief authors should use explicit
+`origin/<x>` ranges.
+
+## repo-state-check
+
+```text
+repo-state-check snapshot <abs-repo-dir> <file>
+repo-state-check compare <before> <after>
+```
+
+Snapshot records effective config (including worktree config), hook hashes and modes, refs,
+worktrees, dirty paths and configured identity. Files are mode 0600; keep them in a private
+temp directory and remove them after inspection. Snapshot exits 0 on success or 3 for an
+empty, relative or invalid repository path, a missing hasher, or unreadable config.
+A failed snapshot writes an `unreadable` marker to the output file when possible.
+Invalid CLI arguments exit 64.
+Compare prints named change lines and exits 0 for clean, 1 for warn-only drift or 2 for
+critical drift. Config changes are critical except these benign keys: `branch.*.*`
+except `branch.*.pushremote`; `branch.*.remote` is benign only when it names a remote
+present before the review or is `.` (the local repository);
+`remote.*.fetch`; `remote.*.gh-resolved`; a new remote's `url`/`fetch`/`gh-resolved`;
+`gc.*`; `maintenance.*`; `extensions.worktreeconfig`; `core.sparsecheckout`; and
+`core.sparsecheckoutcone`. Existing remote URL changes stay critical.
+Hook changes and new local-only commits with a committer different from the initial identity
+are critical. Ref, worktree and working-tree movement warn. Sensitive values are hashed in
+snapshots and output is redacted. Treat compare exit 2 as review rc 10; exits 3/64 mean
+check failed: stop and investigate, never clean. `dispatch-worker` treats a compare
+that cannot complete as critical and returns rc 10.
+
+| Exit | Meaning |
+| --- | --- |
+| `0` | Snapshot succeeded, compare clean, or help printed |
+| `1` | Compare found warn-only drift |
+| `2` | Compare found critical drift (including an unreadable after-snapshot) |
+| `3` | Snapshot failure, broken install, unreadable before-snapshot or internal temp failure |
+| `64` | Usage error; unlike the usual house exit 2, which here means critical drift |

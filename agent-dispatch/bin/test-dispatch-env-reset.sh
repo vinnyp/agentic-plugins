@@ -70,6 +70,7 @@ KNOWN_FALSE_HITS=(
   CODING_BIN     # coding-preflight.sh: echoed diagnostic label, never read as ${CODING_BIN}
   CODING_MODEL   # coding-preflight.sh: echoed diagnostic label, never read as ${CODING_MODEL}
   CODING_INVOKE  # coding-preflight.sh: echoed diagnostic label, never read as ${CODING_INVOKE}
+  DISPATCH_REVIEW_STATE  # dispatch-worker: emitted machine-readable status label, not an operator env var
   DISPATCH_BASE  # coding-dispatch.sh: emitted freshness stamp label, not an operator env var
   DISPATCH_BASE_TRACKING # coding-dispatch.sh: emitted freshness stamp label, not an operator env var
   DISPATCH_BASE_STALE    # coding-dispatch.sh: emitted freshness stamp label, not an operator env var (renamed from DISPATCH_BASE_WARNING by #62)
