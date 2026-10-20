@@ -19,6 +19,8 @@ export RECALL_CAPTURE_FILE="$TMP/$recall_cmd.capture"
 cp "$DW_SRC" "$TMP/plugin-bin/dispatch-worker"
 mkdir -p "$TMP/plugin-bin/lib"
 cp "$ROOT/bin/lib/agy-models.sh" "$TMP/plugin-bin/lib/agy-models.sh"
+cp "$ROOT/bin/lib/review-clone.sh" "$TMP/plugin-bin/lib/review-clone.sh"
+cp "$ROOT/bin/lib/repo-state.sh" "$TMP/plugin-bin/lib/repo-state.sh"
 DW_MUT="$TMP/plugin-bin/dispatch-worker"
 DW="$DW_SRC"
 

@@ -23,8 +23,11 @@ reset_dispatch_env  # neutralize any operator-exported dispatch vars before the 
 export AGY_TEST_CODING_PIN="$AGY_MODEL_CODING_DEFAULT" AGY_TEST_REVIEW_PIN="$AGY_MODEL_REVIEW_DEFAULT"
 DW="$SELF_DIR/dispatch-worker"
 TMP="$(mktemp -d)"
+cd "$TMP" || exit 1
 trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home"
+export GIT_CONFIG_GLOBAL="$TMP/gitconfig" GIT_CONFIG_NOSYSTEM=1
+: > "$GIT_CONFIG_GLOBAL"
 # Keep the platform-temp namespace distinct from test repos so the review
 # location regression can prove the worktree is not created beneath $TMPDIR.
 export TMPDIR="$TMP/platform-tmp"
@@ -666,13 +669,22 @@ rc=$?
 [ ! -e "$TMP/scratch_evil.py" ] || fail "auth probe or runner cwd was mutated by agy stub"
 [ ! -e "$TMP/.git" ] || fail "auth probe or runner cwd got git-initialized by agy stub"
 grep -qF -- "--dangerously-skip-permissions" <<<"$(agy_exec_args)" || fail "hermetic agy review did not bypass command permissions"
-grep -q "DISPOSABLE, DETACHED git worktree" "$AGY_STDIN_FILE" || fail "hermetic review preamble did not identify the disposable detached worktree"
+grep -qF 'DISPOSABLE local clone at' "$AGY_STDIN_FILE" || fail "hermetic review preamble did not identify the disposable local clone"
+grep -qF "Origin's fetch and push URLs point at a disabled path; other remotes and the operator's credential helper remain reachable, so do not fetch or push." "$AGY_STDIN_FILE" || fail "hermetic review preamble missing remote warning"
+grep -qF "detached at $pre_head" "$AGY_STDIN_FILE" || fail "hermetic review preamble did not identify the disposable local clone"
+grep -qF "Translate every $(git -C "$R17" rev-parse --show-toplevel)" "$AGY_STDIN_FILE" || fail "hermetic review preamble did not map brief paths"
+# shellcheck disable=SC2016 # Match the literal scratch command, without expansion.
+grep -qF 'tmp=$(mktemp -d "${TMPDIR:-/tmp}/<name>.XXXXXX")' "$AGY_STDIN_FILE" || fail "hermetic review preamble missing literal scratch allocation"
+# shellcheck disable=SC2016 # Match the literal scratch path variable.
+grep -qF -- '-C "$tmp"' "$AGY_STDIN_FILE" || fail "hermetic review preamble missing literal scratch git path"
+grep -qF 'the real repository is untouched' "$AGY_STDIN_FILE" && fail "hermetic review preamble still promises the real repository is untouched"
+grep -qF 'DISPOSABLE, DETACHED git worktree' "$AGY_STDIN_FILE" && fail "hermetic review preamble still describes a linked worktree"
 grep -q "MUTATING code to prove something" "$AGY_STDIN_FILE" || fail "hermetic review preamble did not permit mutation checks"
 # Intent: the hermetic preamble must NAME the isolated worktree. It must NOT do so with the
 # blanket "(do not change)" / "DO NOT write any files" phrasing, which contradicts the
 # may-mutate permission granted just above it — a reviewer resolving that conflict toward the
 # prohibition silently skips its mutation check, the defect this whole change removes.
-grep -q "disposable worktree: .*dispatch-review-wt\." "$AGY_STDIN_FILE" || fail "hermetic review preamble did not contain the isolated worktree path"
+grep -F "is the disposable clone: " "$AGY_STDIN_FILE" | grep -q "dispatch-review-wt\." || fail "hermetic review preamble did not contain the isolated worktree path"
 grep -q "Repo to read (do not change)" "$AGY_STDIN_FILE" && fail "hermetic review preamble still carries the contradictory read-only phrasing"
 grep -q "DO NOT write any files to disk" "$AGY_STDIN_FILE" && fail "hermetic review preamble still forbids all disk writes, contradicting the mutation-check permission"
 grep -q "If a tool, command, or capability your method requires is unavailable or denied" "$AGY_STDIN_FILE" || fail "hermetic review preamble missing degradation clause"
@@ -1170,6 +1182,7 @@ case "$*" in *models*) printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon
 # GNU coreutils stat may precede BSD stat on PATH, and its -f means something else
 # entirely (filesystem info), so try the GNU form FIRST and fall back to BSD.
 parent_mode="$(stat -c '%a' "$(dirname "$PWD")" 2>/dev/null || stat -f '%Lp' "$(dirname "$PWD")" 2>/dev/null)"
+[ -d .git ] && echo GIT_DIR_DIRECTORY >> "$AGY_ARGS_FILE"
 printf 'PARENT_MODE=%s\n' "$parent_mode" >> "$AGY_ARGS_FILE"
 for i in $(seq 1 40); do printf 'Minor finding %s: worktree location checked.\n' "$i"; done
 STUB
@@ -1184,6 +1197,7 @@ case "$review_pwd" in "$tmp_real/.worktrees/dispatch-review-wt."*) ;; *) fail "r
 case "$review_pwd" in "$TMPDIR"/*) fail "review cwd was created under TMPDIR: $review_pwd";; esac
 [ ! -e "$review_pwd" ] || fail "default review worktree was not cleaned up: $review_pwd"
 [ ! -d "$TMP/.worktrees" ] || fail "empty default .worktrees parent was left behind"
+grep -qFx GIT_DIR_DIRECTORY "$AGY_ARGS_FILE" || fail "review .git was not a directory"
 echo "test 32 (review worktree is outside platform temp template and cleaned) PASS"
 
 # 33. A parent created by dispatch is private, honored, and reclaimed when empty.
@@ -1198,6 +1212,7 @@ case "$review_pwd" in "$WT_OVERRIDE/dispatch-review-wt."*) ;; *) fail "DISPATCH_
 grep -q '^PARENT_MODE=700$' "$AGY_ARGS_FILE" || fail "created review parent was not mode 0700"
 [ ! -e "$review_pwd" ] || fail "overridden review worktree was not cleaned up"
 [ ! -d "$WT_OVERRIDE" ] || fail "empty overridden worktree parent was left behind"
+grep -qFx GIT_DIR_DIRECTORY "$AGY_ARGS_FILE" || fail "review .git was not a directory"
 echo "test 33 (review worktree directory override is honored) PASS"
 
 # 33b. A pre-existing empty operator-owned parent survives cleanup unchanged.
@@ -1209,6 +1224,35 @@ rc=$?
 [ -d "$WT_PREEXIST" ] || fail "cleanup removed the operator's pre-existing empty parent"
 [ -z "$(find "$WT_PREEXIST" -mindepth 1 -maxdepth 1 -print -quit)" ] || fail "pre-existing parent retained a stray entry"
 echo "test 33b (pre-existing empty parent survives cleanup) PASS"
+
+# V13. Reap old clones and source worktrees, preserving fresh and foreign entries.
+REAPER_PARENT="$TMP/reaper preferred"
+mkdir -p "$REAPER_PARENT"
+REAPER_OTHER="$TMP/reaper-other-repo"; make_git_repo "$REAPER_OTHER"
+git clone --quiet --local "$R33" "$REAPER_PARENT/dispatch-review-wt.old1" || fail "V13 old clone setup"
+git -C "$R33" worktree add --quiet --detach "$REAPER_PARENT/dispatch-review-wt.old2" HEAD || fail "V13 legacy setup"
+git clone --quiet --local "$R33" "$REAPER_PARENT/dispatch-review-wt.new" || fail "V13 fresh clone setup"
+mkdir "$REAPER_PARENT/other-dir"
+git -C "$REAPER_OTHER" worktree add --quiet --detach "$REAPER_PARENT/dispatch-review-wt.sib" HEAD || fail "V13 foreign setup"
+touch -t 202001010000 "$REAPER_PARENT/dispatch-review-wt.old1" "$REAPER_PARENT/dispatch-review-wt.old2" "$REAPER_PARENT/other-dir" "$REAPER_PARENT/dispatch-review-wt.sib"
+DISPATCH_REVIEW_WT_DIR="$REAPER_PARENT" TIMEOUT=0 "$DW" --runtime agy --review --brief "$BRIEF" --workdir "$R33" >"$TMP/v13.out" 2>"$TMP/v13.err"
+rc=$?
+[ "$rc" -eq 0 ] || fail "V13 preferred review failed"
+[ ! -e "$REAPER_PARENT/dispatch-review-wt.old1" ] || fail "V13 old clone survived"
+[ ! -e "$REAPER_PARENT/dispatch-review-wt.old2" ] || fail "V13 old source worktree survived"
+[ -d "$REAPER_PARENT/dispatch-review-wt.new/.git" ] || fail "V13 fresh clone removed"
+[ -d "$REAPER_PARENT/other-dir" ] || fail "V13 unrelated directory removed"
+[ -f "$REAPER_PARENT/dispatch-review-wt.sib/.git" ] || fail "V13 foreign worktree removed"
+git -C "$REAPER_PARENT/dispatch-review-wt.sib" rev-parse --verify HEAD >/dev/null || fail "V13 foreign worktree damaged"
+REAPER_CACHE="$TMP/reaper-cache"
+mkdir -p "$REAPER_CACHE/dispatch-review-worktrees"
+git clone --quiet --local "$R33" "$REAPER_CACHE/dispatch-review-worktrees/dispatch-review-wt.old1" || fail "V13 cache clone setup"
+touch -t 202001010000 "$REAPER_CACHE/dispatch-review-worktrees/dispatch-review-wt.old1"
+DISPATCH_REVIEW_WT_DIR="$TMPDIR/reaper-rejected" XDG_CACHE_HOME="$REAPER_CACHE" TIMEOUT=0 "$DW" --runtime agy --review --brief "$BRIEF" --workdir "$R33" >"$TMP/v13-cache.out" 2>"$TMP/v13-cache.err"
+rc=$?
+[ "$rc" -eq 0 ] || fail "V13 cache review failed"
+[ ! -e "$REAPER_CACHE/dispatch-review-worktrees/dispatch-review-wt.old1" ] || fail "V13 cache old clone survived"
+echo "test V13 (reaper handles clones and legacy worktrees in both parents) PASS"
 
 # 34. Cleanup removes only its worktree: a concurrent sibling worktree survives.
 R34="$TMP/repo34"; make_git_repo "$R34"
@@ -1224,6 +1268,7 @@ review_pwd="$(sed -n 's/^PWD=//p' "$AGY_ARGS_FILE" | tail -n 1)"
 [ -d "$SIBLING_WT" ] || fail "cleanup removed the concurrent sibling worktree"
 [ "$(find "$WT_SHARED" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" -eq 1 ] || fail "cleanup left a stray entry beside the sibling worktree"
 git -C "$R34" worktree remove --force "$SIBLING_WT" >/dev/null 2>&1 || true
+grep -qFx GIT_DIR_DIRECTORY "$AGY_ARGS_FILE" || fail "review .git was not a directory"
 echo "test 34 (cleanup preserves non-empty parent without stray worktree) PASS"
 
 # 35. An unusable preferred parent falls back loudly and remains hermetic.
@@ -1241,6 +1286,7 @@ review_pwd="$(sed -n 's/^PWD=//p' "$AGY_ARGS_FILE" | tail -n 1)"
 [ "$review_pwd" != "$R35" ] || fail "fallback review ran non-hermetically in the operator tree"
 [ "$(git -C "$R35" rev-parse HEAD)" = "$pre_head" ] && [ -z "$(git -C "$R35" status --porcelain)" ] || fail "fallback review changed the operator tree"
 rmdir "$WT_DENIED" 2>/dev/null || true; rm -rf "$XDG35"
+grep -qFx GIT_DIR_DIRECTORY "$AGY_ARGS_FILE" || fail "review .git was not a directory"
 echo "test 35 (unusable parent fallback remains hermetic) PASS"
 
 # 36. A source repo whose adjacent parent resolves under TMPDIR is redirected
@@ -1413,11 +1459,345 @@ else
 fi
 echo "test 41b (agy persona roster probe detaches stdin) PASS"
 
+# Configurable review runtime: probes never count as launches.
+install_cfg_agy_stub() {
+  cat > "$TMP/bin/agy" <<'STUB'
+#!/usr/bin/env bash
+# PERSONA_ROSTER_STUB
+case "${1:-}" in
+  models)
+    printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
+    if [ "${AGY_MISSING_REVIEW:-0}" = 1 ]; then
+      printf 'custom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n'
+    else
+      printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n' "$AGY_TEST_CODING_PIN" "$AGY_TEST_REVIEW_PIN"
+    fi
+    exit 0 ;;
+  agent)
+    printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
+    [ "${AGY_ROSTER_MODE:-}" = nonzero ] && exit 19
+    [ "${AGY_ROSTER_MODE:-}" = empty ] || printf '%s\n' peer-security-reviewer peer-code-reviewer
+    exit 0 ;;
+esac
+n=$(cat "$AGY_STUB_COUNT_FILE"); n=$((n + 1)); echo "$n" > "$AGY_STUB_COUNT_FILE"
+printf 'PWD=%s\nCALL=%s\n%s\n' "$PWD" "$n" "$*" >> "$AGY_ARGS_FILE"
+cat > "$AGY_STDIN_FILE"
+[ -z "${AGY_STUB_ACTIONS:-}" ] || bash "$AGY_STUB_ACTIONS" "$n"
+for i in $(seq 1 100); do printf 'Minor REVIEW LINE %s src/x.go:1 ok\n' "$i"; done
+rc=${AGY_STUB_RC:-0}
+if [ -n "${AGY_STUB_RC_ON_CALL:-}" ] && [ "$n" != "$AGY_STUB_RC_ON_CALL" ]; then rc=0; fi
+exit "$rc"
+STUB
+  chmod +x "$TMP/bin/agy"
+}
+install_cfg_agy_stub
+unset AGY_ROSTER_MODE
+export AGY_STUB_COUNT_FILE="$TMP/cfg-count" AGY_STUB_ACTIONS="$TMP/cfg-actions"
+run_cfg_review() {
+  echo 0 > "$AGY_STUB_COUNT_FILE"
+  : > "$AGY_ARGS_FILE"
+  TIMEOUT=0 "$DW" --runtime agy --review --brief "$BRIEF" --workdir "$1" > "$TMP/cfg.out" 2> "$TMP/cfg.err"
+}
+R43="$TMP/repo43"; make_git_repo "$R43"
+cat > "$AGY_STUB_ACTIONS" <<'ACTIONS'
+git rev-parse --path-format=absolute --git-dir > "$AGY_ARGS_FILE.gitdir"
+git rev-parse --path-format=absolute --git-common-dir > "$AGY_ARGS_FILE.common"
+{ test -d .git && echo dir; ls -ld . | cut -c1-10; } > "$AGY_ARGS_FILE.mode"
+env | grep -c '^GIT_DIR=' > "$AGY_ARGS_FILE.env"
+ACTIONS
+before=$(git -C "$R43" worktree list)
+run_cfg_review "$R43" || fail 'V1 launch failed'
+review_pwd=$(sed -n 's/^PWD=//p' "$AGY_ARGS_FILE")
+[ "$(cat "$AGY_ARGS_FILE.gitdir")" = "$review_pwd/.git" ] || fail 'V1 git dir shared'
+[ "$(cat "$AGY_ARGS_FILE.common")" = "$review_pwd/.git" ] || fail 'V1 common dir shared'
+grep -qFx dir "$AGY_ARGS_FILE.mode" || fail 'V1 .git not directory'
+grep -qFx drwx------ "$AGY_ARGS_FILE.mode" || fail 'V1 workspace not private'
+[ "$before" = "$(git -C "$R43" worktree list)" ] || fail 'V1 source worktrees changed'
+decoy="$TMP/decoy43"; make_git_repo "$decoy"
+GIT_DIR="$decoy/.git" run_cfg_review "$R43"
+[ "$(cat "$AGY_ARGS_FILE.env")" = 0 ] || fail 'review inherited GIT_DIR'
+
+origin="$TMP/origin43"; git -C "$TMP" init --bare "$origin" >/dev/null 2>&1
+git -C "$R43" remote add origin "$origin"
+git -C "$R43" push origin review-main:main >/dev/null 2>&1
+git -C "$R43" checkout -b feature >/dev/null 2>&1
+echo feature >> "$R43/README.md"
+git -C "$R43" -c user.name=Test -c user.email=test@example.com commit -am feature >/dev/null 2>&1
+git -C "$R43" tag example
+echo stash >> "$R43/README.md"
+git -C "$R43" -c user.name=Test -c user.email=test@example.com stash >/dev/null 2>&1
+cat > "$AGY_STUB_ACTIONS" <<'ACTIONS'
+{
+git rev-list --count review-main..feature
+git rev-parse origin/main
+git rev-parse HEAD
+git fetch origin >/dev/null 2>&1; echo fetch=$?
+git rev-parse origin/main
+} > "$AGY_ARGS_FILE.refs"
+ACTIONS
+run_cfg_review "$R43" || fail 'V2 launch failed'
+expected_origin=$(git -C "$R43" rev-parse origin/main)
+expected_head=$(git -C "$R43" rev-parse HEAD)
+[ "$(sed -n '1p' "$AGY_ARGS_FILE.refs")" = "$(git -C "$R43" rev-list --count review-main..feature)" ] || fail 'V2 range changed'
+[ "$(sed -n '2p' "$AGY_ARGS_FILE.refs")" = "$expected_origin" ] || fail 'V2 origin changed'
+[ "$(sed -n '3p' "$AGY_ARGS_FILE.refs")" = "$expected_head" ] || fail 'V2 HEAD changed'
+! grep -qFx fetch=0 "$AGY_ARGS_FILE.refs" || fail 'V2 fetch enabled'
+[ "$(sed -n '5p' "$AGY_ARGS_FILE.refs")" = "$expected_origin" ] || fail 'V2 fetch moved origin'
+! grep -q unsuitable "$TMP/cfg.err" || fail 'stash disabled clone'
+linked="$TMP/linked43"
+git -C "$R43" checkout review-main >/dev/null 2>&1
+git -C "$R43" worktree add "$linked" feature >/dev/null 2>&1
+run_cfg_review "$linked"
+[ "$(sed -n '3p' "$AGY_ARGS_FILE.refs")" = "$expected_head" ] || fail 'linked source HEAD changed'
+git -C "$R43" config filter.x.clean cat
+run_cfg_review "$R43" || fail 'unsuitable fallback failed'
+grep -q 'unsuitable for a private clone' "$TMP/cfg.err" || fail 'missing unsuitable warning'
+! grep -q -- --dangerously-skip-permissions "$AGY_ARGS_FILE" || fail 'fallback bypasses permissions'
+last_repo="$TMP/last-repo"; make_git_repo "$last_repo"
+denied="$TMP/last-denied"; mkdir -m 555 "$denied"
+DISPATCH_REVIEW_WT_DIR="$denied" XDG_CACHE_HOME="$TMPDIR/cache" run_cfg_review "$last_repo" || fail 'last-resort launch failed'
+review_pwd=$(sed -n 's/^PWD=//p' "$AGY_ARGS_FILE")
+grep -qF "falling back to $review_pwd, where agy" "$TMP/cfg.err" || fail "last-resort path not reached: $review_pwd"
+[ ! -e "$review_pwd" ] || fail "last-resort workspace survived: $review_pwd"
+[ -z "$(find "$TMPDIR" -name 'dispatch-review-wt.*' -print)" ] || fail 'last-resort workspace leaked'
+echo 'test 43 (private clone, refs, environment and fallback) PASS'
+
+# V3. Global reads are flattened and every reviewer write stays private.
+r44="$TMP/repo44"; make_git_repo "$r44"
+git -C "$r44" branch feature
+git -C "$r44" remote add origin "$origin"
+cat > "$TMP/included.gitconfig" <<'CONFIG'
+[core]
+ editor = ed
+CONFIG
+cat > "$GIT_CONFIG_GLOBAL" <<CONFIG
+[user]
+ name = Review Test
+ email = review@example.invalid
+[include]
+ path = $TMP/included.gitconfig
+[x]
+ flag
+CONFIG
+cp "$GIT_CONFIG_GLOBAL" "$TMP/global.before"
+cp "$r44/.git/config" "$TMP/local.before"
+git -C "$r44" for-each-ref > "$TMP/refs.before"
+git -C "$r44" worktree list --porcelain > "$TMP/worktrees.before"
+cat > "$AGY_STUB_ACTIONS" <<'ACTIONS'
+{
+git config --global --get user.email
+git config --global --get core.editor
+git config --global --bool --get x.flag
+ls -l "$GIT_CONFIG_GLOBAL" | cut -c1-10
+} > "$AGY_ARGS_FILE.global"
+git config user.name x
+git config --global user.email x@x.invalid
+git branch scratch
+git branch -D feature
+git checkout -b other
+git push origin HEAD:refs/heads/evil >/dev/null 2>&1; echo push=$? > "$AGY_ARGS_FILE.push"
+ACTIONS
+run_cfg_review "$r44" || fail 'V3 launch failed'
+grep -qF 'DISPATCH_REVIEW_STATE=clean' "$TMP/cfg.err" || fail 'V3 missing clean state'
+[ "$(sed -n '1p' "$AGY_ARGS_FILE.global")" = review@example.invalid ] || fail 'V3 global identity lost'
+[ "$(sed -n '2p' "$AGY_ARGS_FILE.global")" = ed ] || fail 'V3 included editor lost'
+[ "$(sed -n '3p' "$AGY_ARGS_FILE.global")" = true ] || fail 'V3 valueless flag lost'
+[ "$(sed -n '4p' "$AGY_ARGS_FILE.global")" = -rw------- ] || fail 'V3 global config permissions'
+cmp -s "$GIT_CONFIG_GLOBAL" "$TMP/global.before" || fail 'V3 global config changed'
+cmp -s "$r44/.git/config" "$TMP/local.before" || fail 'V3 source config changed'
+git -C "$r44" for-each-ref > "$TMP/refs.after"
+git -C "$r44" worktree list --porcelain > "$TMP/worktrees.after"
+cmp -s "$TMP/refs.before" "$TMP/refs.after" || fail 'V3 source refs changed'
+cmp -s "$TMP/worktrees.before" "$TMP/worktrees.after" || fail 'V3 source worktrees changed'
+grep -q '^push=[1-9][0-9]*$' "$AGY_ARGS_FILE.push" || fail 'V3 push enabled'
+[ -z "$(find "$TMPDIR" -name 'dispatch-review-state.*' -print)" ] || fail 'V3 state directory leaked'
+: > "$AGY_STUB_ACTIONS"
+GIT_CONFIG_GLOBAL="$TMP/missing-global" run_cfg_review "$r44" || fail 'missing global config launch failed'
+[ ! -e "$TMP/missing-global" ] || fail 'missing global config created outside review'
+[ -z "$(find "$TMPDIR" -name 'dispatch-review-state.*' -print)" ] || fail 'missing global state directory leaked'
+echo 'test 44 (private flattened global config and absent global config) PASS'
+
+# Source-state contract: actions deliberately target only test-owned repos.
+for i in $(seq 1 100); do printf 'Minor REVIEW LINE %s src/x.go:1 ok\n' "$i"; done > "$TMP/expected-body"
+export SRC="$TMP/state-source"
+make_git_repo "$SRC"
+git -C "$SRC" remote add origin https://example.invalid/source
+cp "$SRC/.git/config" "$TMP/state-config.before"
+check_state_run() {
+  local expected="$1" actual=0
+  run_cfg_review "${2:-$SRC}" || actual=$?
+  [ "$actual" -eq "$expected" ] || fail "state expected rc $expected, got $actual: $(cat "$TMP/cfg.err")"
+}
+for key in user.name core.hooksPath; do
+  value=x
+  [ "$key" != core.hooksPath ] || value="$(cd "$SRC/.git/hooks" && pwd -P)"
+  # shellcheck disable=SC2016 # Expanded by the generated action script.
+  printf 'git -C "$SRC" config %s "%s"\n' "$key" "$value" > "$AGY_STUB_ACTIONS"
+  check_state_run 10
+  grep -qi "config $key" "$TMP/cfg.err" || fail "missing $key change"
+  grep -qF 'DISPATCH_REVIEW_STATE=critical(1) original_rc=0' "$TMP/cfg.err" || fail 'critical state count/rc'
+  cmp -s "$TMP/expected-body" "$TMP/cfg.out" || fail 'state check changed stdout'
+  cp "$TMP/state-config.before" "$SRC/.git/config"
+done
+# shellcheck disable=SC2016 # Expanded by the generated action script.
+printf 'git -C "$SRC" config branch.review-main.remote origin\n' > "$AGY_STUB_ACTIONS"
+check_state_run 0
+grep -qF 'DISPATCH_REVIEW_STATE=warn(1)' "$TMP/cfg.err" || fail 'benign config not warn'
+cp "$TMP/state-config.before" "$SRC/.git/config"
+# shellcheck disable=SC2016 # Expanded by the generated action script.
+printf 'echo hook > "$SRC/.git/hooks/pre-commit"\n' > "$AGY_STUB_ACTIONS"
+check_state_run 10
+rm "$SRC/.git/hooks/pre-commit"
+# shellcheck disable=SC2016 # Expanded by the generated action script.
+printf 'git -C "$SRC" -c user.name=t -c user.email=t@x.invalid commit --quiet --allow-empty -m x\n' > "$AGY_STUB_ACTIONS"
+check_state_run 10
+grep -q 'commit ' "$TMP/cfg.err" || fail 'foreign commit not named'
+# shellcheck disable=SC2016 # Expanded by the generated action script.
+printf 'printf "[core\\n bad" >> "$SRC/.git/config"\n' > "$AGY_STUB_ACTIONS"
+check_state_run 10
+grep -qF '<unreadable after review>' "$TMP/cfg.err" || fail 'unreadable after missing'
+cp "$TMP/state-config.before" "$SRC/.git/config"
+export AGY_STUB_RC=124
+for call in 2 1; do
+  # shellcheck disable=SC2016 # Expanded by the generated action script.
+  printf '[ "$1" != %s ] || git -C "$SRC" config user.name x\n' "$call" > "$AGY_STUB_ACTIONS"
+  check_state_run 10
+  [ "$(cat "$AGY_STUB_COUNT_FILE")" = "$call" ] || fail 'drift retry count'
+  if [ "$call" = 2 ]; then
+    grep -qF 'original_rc=8' "$TMP/cfg.err" || fail 'retry original rc'
+  else
+    grep -qF 'original_rc=124' "$TMP/cfg.err" || fail 'skip original rc'
+    grep -qF 'skipping the timeout retry' "$TMP/cfg.err" || fail 'skip message absent'
+    ! grep -qF 'timed out again' "$TMP/cfg.err" || fail 'skip printed retry failure'
+  fi
+  cp "$TMP/state-config.before" "$SRC/.git/config"
+done
+# shellcheck disable=SC2016 # Expanded by the generated action script.
+printf '[ "$1" != 1 ] || printf "[core\\n bad" >> "$SRC/.git/config"\n' > "$AGY_STUB_ACTIONS"
+check_state_run 10
+[ "$(cat "$AGY_STUB_COUNT_FILE")" = 1 ] || fail 'unreadable interim retried'
+cp "$TMP/state-config.before" "$SRC/.git/config"
+unset AGY_STUB_RC
+cp "$decoy/.git/config" "$TMP/decoy.before"
+printf 'git config user.name x\n' > "$AGY_STUB_ACTIONS"
+GIT_DIR="$decoy/.git" GIT_INDEX_FILE="$decoy/.git/index" check_state_run 0
+grep -qF 'DISPATCH_REVIEW_STATE=clean' "$TMP/cfg.err" || fail 'V10 not clean'
+cmp -s "$decoy/.git/config" "$TMP/decoy.before" || fail 'decoy config changed'
+# shellcheck disable=SC2016 # Expanded by the generated action script.
+printf 'git -C "$SRC" config user.name x\n' > "$AGY_STUB_ACTIONS"
+GIT_DIR="$decoy/.git" GIT_INDEX_FILE="$decoy/.git/index" check_state_run 10
+cp "$TMP/state-config.before" "$SRC/.git/config"
+git -C "$SRC" worktree add --quiet --detach "$TMP/state-linked" HEAD
+check_state_run 10 "$TMP/state-linked"
+cp "$TMP/state-config.before" "$SRC/.git/config"
+# shellcheck disable=SC2016 # Expanded by the generated action script.
+printf 'git -C "$SRC" branch concurrent\n' > "$AGY_STUB_ACTIONS"
+check_state_run 0
+grep -qF 'DISPATCH_REVIEW_STATE=warn(' "$TMP/cfg.err" || fail 'concurrent branch not warn'
+: > "$AGY_STUB_ACTIONS"
+AGY_MISSING_REVIEW=1 check_state_run 9
+grep -qF 'DISPATCH_REVIEW_STATE=skipped(not-launched) original_rc=9' "$TMP/cfg.err" || fail 'prelaunch state missing'
+echo 'test 45 (source state and critical precedence) PASS'
+
+# Task 9: every review runtime checks the source, including fallback paths.
+cat > "$TMP/bin/codex" <<'STUB'
+#!/usr/bin/env bash
+repo=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = -C ]; then repo="$2"; shift; fi
+  shift
+done
+cat >/dev/null
+if [ "${CODEX_STATE_DRIFT:-0}" = 1 ]; then
+  [ -n "$repo" ] || exit 98
+  git -C "$repo" config user.email x@x.invalid || exit 99
+fi
+exit "${CODEX_STATE_RC:-0}"
+STUB
+cat > "$TMP/bin/claude" <<'STUB'
+#!/usr/bin/env bash
+cat >/dev/null
+git -C "$SRC" config user.name changed || exit 99
+STUB
+run_state_runtime() {
+  local runtime="$1" expected="$2" actual=0
+  TIMEOUT=0 "$DW" --runtime "$runtime" --review --brief "$BRIEF" --workdir "$SRC" > "$TMP/cfg.out" 2> "$TMP/cfg.err" || actual=$?
+  [ "$actual" -eq "$expected" ] || fail "$runtime state expected $expected, got $actual"
+}
+CODEX_STATE_DRIFT=1 CODEX_STATE_RC=124 run_state_runtime codex 10
+grep -qF 'DISPATCH_REVIEW_STATE=critical(1) original_rc=124' "$TMP/cfg.err" || fail 'codex drift/timeout state absent'
+cp "$TMP/state-config.before" "$SRC/.git/config"
+(cd "$SRC" && run_state_runtime claude 10)
+grep -qF 'DISPATCH_REVIEW_STATE=critical(1) original_rc=0' "$TMP/cfg.err" || fail 'claude drift state absent'
+cp "$TMP/state-config.before" "$SRC/.git/config"
+CODEX_STATE_RC=10 run_state_runtime codex 1
+grep -qF 'DISPATCH_REVIEW_STATE=clean original_rc=10' "$TMP/cfg.err" || fail 'native 10 state absent'
+grep -qF 'dispatch-worker: runtime exited 10 natively; reported as 1 (10 is reserved for source-repo drift).' "$TMP/cfg.err" || fail 'native 10 note absent'
+git -C "$SRC" config filter.x.clean cat
+# shellcheck disable=SC2016 # Expanded by the generated action script.
+printf 'git -C "$SRC" config user.name changed\n' > "$AGY_STUB_ACTIONS"
+actual=0
+(cd "$TMP" && run_cfg_review "$SRC") || actual=$?
+[ "$actual" -eq 10 ] || fail "V9 fallback expected 10, got $actual"
+grep -qF 'unsuitable for a private clone' "$TMP/cfg.err" || fail 'V9 fallback reason absent'
+grep -qF 'DISPATCH_REVIEW_STATE=critical(1)' "$TMP/cfg.err" || fail 'V9 fallback source drift absent'
+cp "$TMP/state-config.before" "$SRC/.git/config"
+: > "$AGY_STUB_ACTIONS"
+mkdir "$TMP/non-git"
+for runtime in codex agy; do
+  actual=0
+  TIMEOUT=0 "$DW" --runtime "$runtime" --review --brief "$BRIEF" --workdir "$TMP/non-git" > "$TMP/cfg.out" 2> "$TMP/cfg.err" || actual=$?
+  [ "$actual" -eq 0 ] || fail "$runtime non-git review failed: $actual"
+  grep -qF 'DISPATCH_REVIEW_STATE=skipped(not-a-git-repo)' "$TMP/cfg.err" || fail "$runtime non-git state absent"
+done
+"$DW" --help > "$TMP/help"
+grep -qF "10  --review: the source repo's config" "$TMP/help" || fail 'help missing exit 10'
+grep -qF 'DISPATCH_REVIEW_STATE=' "$TMP/help" || fail 'help missing state line'
+echo 'test 46 (codex, claude, native 10, fallback and help) PASS'
+
+# Claude ignores --workdir: watch the repository where it actually runs.
+cat > "$TMP/bin/claude" <<'STUB'
+#!/usr/bin/env bash
+cat >/dev/null
+git -C "$PWD" config user.name changed || exit 99
+STUB
+claude_cwd_repo="$TMP/claude-cwd-repo"
+make_git_repo "$claude_cwd_repo"
+(cd "$claude_cwd_repo" && run_state_runtime claude 10)
+grep -qF 'DISPATCH_REVIEW_STATE=critical(1)' "$TMP/cfg.err" || fail 'claude caller repository drift absent'
+: > "$AGY_STUB_ACTIONS"
+GIT_CONFIG_GLOBAL="$TMP/absent-global.gitconfig" run_cfg_review "$r44" > "$TMP/no-global.out" 2> "$TMP/no-global.err"
+[ "$?" -eq 0 ] || fail 'review without global gitconfig failed'
+grep -q 'fatal:' "$TMP/cfg.err" && fail 'missing global gitconfig emitted fatal diagnostic'
+
+# Loss of the baseline must fail closed for both review paths.
+# shellcheck disable=SC2016
+printf 'rm "$(dirname "$GIT_CONFIG_GLOBAL")/before"\n' > "$AGY_STUB_ACTIONS"
+check_state_run 10
+grep -qF 'DISPATCH_REVIEW_STATE=critical(' "$TMP/cfg.err" || fail 'agy baseline loss passed'
+grep -qF 'state: drift check could not complete' "$TMP/cfg.err" || fail 'agy compare diagnostic absent'
+# Removing the whole state directory must preserve the critical exit and diagnostic.
+# shellcheck disable=SC2016
+printf 'rm -rf "$(dirname "$GIT_CONFIG_GLOBAL")"\n' > "$AGY_STUB_ACTIONS"
+check_state_run 10
+grep -qE 'DISPATCH_REVIEW_STATE=critical\([0-9]' "$TMP/cfg.err" || fail 'agy state loss count absent'
+grep -qF '  state: review state directory missing or unreadable' "$TMP/cfg.err" || fail 'agy state loss diagnostic absent'
+cat > "$TMP/bin/claude" <<'STUB'
+#!/usr/bin/env bash
+cat >/dev/null
+for state in "$TMPDIR"/dispatch-review-state.*; do
+  [ ! -d "$state" ] || rm "$state/before"
+done
+STUB
+(cd "$SRC" && run_state_runtime claude 10)
+grep -qF 'DISPATCH_REVIEW_STATE=critical(' "$TMP/cfg.err" || fail 'claude baseline loss passed'
+grep -qF 'state: drift check could not complete' "$TMP/cfg.err" || fail 'claude compare diagnostic absent'
+
 # The file had 22 agy stubs before the four persona-specific controls above;
 # every definition must answer the roster subcommand instead of falling into cat.
-agy_stub_defs="$(grep -c 'cat > .*bin/ag[y].*STUB' "$0")"
-agy_stub_arms="$(grep -c '^# PERSONA_ROSTER_STU[B]$' "$0")"
-[ "$agy_stub_defs" -eq 27 ] || fail "expected 22 original + 4 persona-control + 1 row-verdict agy stubs, found $agy_stub_defs"
+agy_stub_defs="$(grep -c 'cat > .*bin/ag[y].*STUB' "$SELF_DIR/test-dispatch-worker.sh")"
+agy_stub_arms="$(grep -c '^# PERSONA_ROSTER_STU[B]$' "$SELF_DIR/test-dispatch-worker.sh")"
+[ "$agy_stub_defs" -eq 28 ] || fail "expected 22 original + 4 persona-control + 1 row-verdict agy stubs, found $agy_stub_defs"
 [ "$agy_stub_arms" -eq "$agy_stub_defs" ] || fail "not every agy stub has an agent) arm ($agy_stub_arms/$agy_stub_defs)"
 echo "test 42 (all 22 original agy stubs handle the agent subcommand) PASS"
 

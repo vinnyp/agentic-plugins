@@ -495,3 +495,74 @@ func TestCrossModelOmitsEmptyModel(t *testing.T) {
 		}
 	}
 }
+
+func TestRcMeaning10(t *testing.T) {
+	const want = "source repo changed during the review window (reviewer or a concurrent session) - inspect the named changes and restore them before committing; the review stands only if every change is known concurrent work; NOT a build failure"
+	if got := rcMeaning(10); got != want {
+		t.Fatalf("rcMeaning(10)=%q want %q", got, want)
+	}
+}
+
+func TestReviewDisposition10NotRemapped(t *testing.T) {
+	if !isInfrastructureRC(10) {
+		t.Fatal("rc 10 must be infrastructure")
+	}
+	if got := reviewDispositionRC(10, 0); got != 10 {
+		t.Fatalf("reviewDispositionRC(10, 0)=%d want 10", got)
+	}
+}
+
+func TestCrossModelStopsOnRc10(t *testing.T) {
+	callLog := stubDispatchWorkerScript(t, `#!/usr/bin/env bash
+echo "$@" >> "CALLLOG"
+if [ "$(wc -l < "CALLLOG")" -eq 1 ]; then exit 10; fi
+exit 124
+`)
+	b1, b2, b3 := writeBrief(t, "first.md"), writeBrief(t, "second.md"), writeBrief(t, "third.md")
+	rc, out := runCapt(t, "cross-model", "--brief", b1, "--brief", b2, "--brief", b3)
+	if rc != 10 {
+		t.Fatalf("rc=%d want 10", rc)
+	}
+	if calls := strings.Count(readFile(t, callLog), "\n"); calls != 1 {
+		t.Fatalf("dispatch calls=%d want 1", calls)
+	}
+	for i, b := range []string{b2, b3} {
+		want := "- brief " + strconv.Itoa(i+2) + " (" + b + "): rc - (not dispatched: stopped after rc 10)"
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing skipped summary %q: %q", want, out)
+		}
+	}
+}
+
+func TestCrossModelRc10BeatsEarlier124(t *testing.T) {
+	callLog := stubDispatchWorkerScript(t, `#!/usr/bin/env bash
+echo "$@" >> "CALLLOG"
+if [ "$(wc -l < "CALLLOG")" -eq 1 ]; then exit 124; fi
+exit 10
+`)
+	rc, _ := runCapt(t, "cross-model", "--brief", writeBrief(t, "first.md"), "--brief", writeBrief(t, "second.md"))
+	if rc != 10 {
+		t.Fatalf("rc=%d want 10", rc)
+	}
+	if calls := strings.Count(readFile(t, callLog), "\n"); calls != 2 {
+		t.Fatalf("dispatch calls=%d want 2", calls)
+	}
+}
+
+func TestCrossModelSummaryCarriesState(t *testing.T) {
+	stubDispatchWorkerScript(t, `#!/usr/bin/env bash
+echo "$@" >> "CALLLOG"
+echo 'DISPATCH_REVIEW_STATE=clean original_rc=0' >&2
+echo 'unrelated stderr' >&2
+echo 'DISPATCH_REVIEW_STATE=warn(2) original_rc=0' >&2
+exit 0
+`)
+	_, out := runCapt(t, "cross-model", "--brief", writeBrief(t, "state.md"))
+	_, summary, ok := strings.Cut(out, "# cross-model run summary\n")
+	if !ok || !strings.Contains(summary, " state=warn(2)\n") {
+		t.Fatalf("summary missing last state token: %q", out)
+	}
+	if strings.Contains(summary, "state=clean") || strings.Contains(summary, "original_rc=") {
+		t.Fatalf("summary must contain only the last state token: %q", summary)
+	}
+}

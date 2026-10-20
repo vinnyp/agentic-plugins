@@ -38,6 +38,12 @@ SCRIPT_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 [ -r "$SCRIPT_DIR/lib/agy-models.sh" ] || { echo "dispatch-worker: broken install: cannot read $SCRIPT_DIR/lib/agy-models.sh" >&2; exit 3; }
 # shellcheck disable=SC1091
 . "$SCRIPT_DIR/lib/agy-models.sh"
+[ -r "$SCRIPT_DIR/lib/review-clone.sh" ] || { echo "dispatch-worker: broken install: cannot read $SCRIPT_DIR/lib/review-clone.sh" >&2; exit 3; }
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/lib/review-clone.sh"
+[ -r "$SCRIPT_DIR/lib/repo-state.sh" ] || { echo "dispatch-worker: broken install: cannot read $SCRIPT_DIR/lib/repo-state.sh" >&2; exit 3; }
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/lib/repo-state.sh"
 RUNTIME="${RUNTIME:-codex}"
 SHAPE="mechanical"
 BRIEF=""
@@ -60,12 +66,33 @@ ALLOW_DIRTY="${DISPATCH_ALLOW_DIRTY:-0}"  # --allow-dirty / DISPATCH_ALLOW_DIRTY
 ENRICHED_BRIEF_FILE=""
 REVIEW_WT=""
 REVIEW_WT_PARENT=""
+REVIEW_WT_RM_PARENT=""
 REVIEW_WT_PARENT_CREATED=0
 REVIEW_SRC_TOP=""
 REVIEW_PIN_DIR=""
+REVIEW_STATE_DIR=""
+REVIEW_STATE_CLASS=""
+REVIEW_STATE_N=0
+REVIEW_ORIGINAL_RC=""
+REVIEW_STATE_STATUS="skipped(not-launched)"
 REVIEW_OUTFILE_TMP=""   # set only when WE mktemp'd the review file, so only that one is removed
 
+# Reap stale clones safely; legacy worktrees may belong to a sibling repository.
+reap_stale_review_workspaces() {
+  local parent="$1" workspace
+  while IFS= read -r -d '' workspace; do
+    if [ -d "$workspace/.git" ]; then
+      review_clone_guarded_rm "$parent" "$workspace" 2>/dev/null || true
+    elif [ -f "$workspace/.git" ]; then
+      git -C "$REVIEW_SRC_TOP" worktree remove --force "$workspace" 2>/dev/null || true
+    fi
+  done < <(find "$parent" -mindepth 1 -maxdepth 1 -type d -name 'dispatch-review-wt.*' -mmin +360 -print0 2>/dev/null)
+}
+
+# Invoked by the EXIT trap.
+# shellcheck disable=SC2329
 cleanup_dispatch_worker() {
+  local exit_rc=$?
   rm -f "$ENRICHED_BRIEF_FILE"
   # The review itself is on STDOUT — that is the deliverable, and the documented consumer
   # contract is to capture stdout, never this path. The REVIEW_OUTFILE= line on stderr is a
@@ -78,13 +105,16 @@ cleanup_dispatch_worker() {
     "$SCRIPT_DIR/review-pin.sh" release "$REVIEW_PIN_DIR" 2>/dev/null || true
   fi
   if [ -n "${REVIEW_WT:-}" ]; then
-    if [ -n "${REVIEW_SRC_TOP:-}" ]; then
-      git -C "$REVIEW_SRC_TOP" worktree remove --force "$REVIEW_WT" 2>/dev/null || true
-    fi
-    rm -rf "$REVIEW_WT"
+    review_clone_guarded_rm "$REVIEW_WT_RM_PARENT" "$REVIEW_WT" 2>/dev/null || true
+  fi
+  if [ -n "${REVIEW_STATE_DIR:-}" ]; then
+    rm -rf "$REVIEW_STATE_DIR"
   fi
   # Only reclaim a parent this invocation created; operator-owned empty dirs survive.
   [ "${REVIEW_WT_PARENT_CREATED:-0}" = "1" ] && [ -n "${REVIEW_WT_PARENT:-}" ] && rmdir "$REVIEW_WT_PARENT" 2>/dev/null || true
+  if [ "$REVIEW" = "1" ]; then
+    echo "DISPATCH_REVIEW_STATE=$REVIEW_STATE_STATUS original_rc=${REVIEW_ORIGINAL_RC:-$exit_rc}" >&2
+  fi
 }
 trap cleanup_dispatch_worker EXIT
 
@@ -109,7 +139,7 @@ dispatch-worker — dispatch a worker brief to a runtime.
                      Env-var: REVIEW=1. Use with --runtime agy|codex.
                      For the agy runtime, a dirty real tree whose brief names an
                      uncommitted/untracked path REFUSES (exit 2, path listed) before any
-                     worktree is created or the worker is launched, instead of only
+                     review clone is created or the worker is launched, instead of only
                      warning — a stderr warning alone has twice failed to stop a long
                      review running against a tree missing the file it was briefed to
                      review. A dirty tree whose dirty files are NOT
@@ -120,7 +150,7 @@ dispatch-worker — dispatch a worker brief to a runtime.
   Review gate env:   DISPATCH_MIN_REVIEW_BYTES sets the byte backstop (default 1200).
                      DISPATCH_REVIEW_REQUIRE_EVIDENCE=0 disables the evidence gate;
                      only the exact value 0 disables it. DISPATCH_REVIEW_WT_DIR sets
-                     the preferred parent for isolated review worktrees.
+                     the preferred parent for isolated review workspaces.
   --model M          Model to pass to agy (--model M). Multi-word names with spaces/parens
                      are kept intact as a single argument. Role defaults are defined in
                      bin/lib/agy-models.sh: review "$AGY_MODEL_REVIEW_DEFAULT";
@@ -155,6 +185,8 @@ from a real build failure and NOT retry it as a build):
       still truncated, not complete). Fall back to a LOCAL reviewer.
   9   agy effective model missing from live models; update bin/lib/agy-models.sh
       or pass --model (MODEL). No dispatch was started.
+  10  --review: the source repo's config, hooks, commit identity, an unreadable after-snapshot, or a compare that could not complete triggered a review failure (see DISPATCH_REVIEW_STATE)
+  DISPATCH_REVIEW_STATE=clean|warn(<n>)|critical(<n>)|skipped(<reason>) original_rc=<n> is emitted on stderr for every --review run.
   124 the external --timeout bound killed a hung peer agent (treat as BLOCKED). For
       agy --review specifically, a single 124/137 is retried once internally and only
       surfaces as rc 8 (not a bare 124) if the retry ALSO times out; other runtimes/
@@ -209,6 +241,12 @@ while [ $# -gt 0 ]; do
     *)          echo "dispatch-worker: unknown arg: $1" >&2; usage; exit 2 ;;
   esac
 done
+
+if [ "$REVIEW" = "1" ]; then
+  unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_PREFIX
+  # shellcheck disable=SC2046 # Git emits variable names to unset individually.
+  unset $(git rev-parse --local-env-vars 2>/dev/null)
+fi
 
 : "$RECALL_PROJECT" "$RECALL_PROJECT_EXPLICIT" "$NO_RECALL"
 
@@ -288,6 +326,32 @@ run_with_timeout() {
   return "$rc"
 }
 
+# Single-attempt runtimes share the same stored results consumed by the main tail.
+review_state_before_runtime() {
+  [ "$REVIEW" = 1 ] || return 0
+  REVIEW_STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/dispatch-review-state.XXXXXX")" || { echo "dispatch-worker: could not create the review state directory" >&2; return 3; }
+  if [ -z "$REPO_STATE_SRC" ]; then
+    REVIEW_STATE_STATUS="skipped(not-a-git-repo)"
+  elif ! repo_state_snapshot "$REPO_STATE_SRC" "$REVIEW_STATE_DIR/before"; then
+    REVIEW_STATE_STATUS="skipped(snapshot-failed)"
+  else
+    REVIEW_STATE_CLASS=0
+  fi
+}
+
+review_state_after_runtime() {
+  [ "$REVIEW" = 1 ] && [ -n "$REVIEW_STATE_CLASS" ] || return 0
+  repo_state_snapshot "$REPO_STATE_SRC" "$REVIEW_STATE_DIR/after" || repo_state_mark_unreadable "$REVIEW_STATE_DIR/after"
+  REVIEW_STATE_CLASS=0
+  repo_state_compare "$REVIEW_STATE_DIR/before" "$REVIEW_STATE_DIR/after" "$REVIEW_STATE_DIR/changes" || REVIEW_STATE_CLASS=$?
+  case "$REVIEW_STATE_CLASS" in
+    0|1|2) ;;
+    *) printf 'state: drift check could not complete (compare exit %s)\n' "$REVIEW_STATE_CLASS" >> "$REVIEW_STATE_DIR/changes"; REVIEW_STATE_CLASS=2 ;;
+  esac
+  REVIEW_STATE_N=$(wc -l < "$REVIEW_STATE_DIR/changes" 2>/dev/null | tr -d ' ')
+  [ -n "$REVIEW_STATE_N" ] || REVIEW_STATE_N=1
+}
+
 dispatch_codex() {
   command -v codex >/dev/null || { echo "dispatch-worker: codex not on PATH" >&2; return 3; }
   [ -f "$BRIEF" ] || { echo "dispatch-worker: --brief required + readable" >&2; return 2; }
@@ -343,6 +407,7 @@ dispatch_codex() {
   if [ "${#codex_flags[@]}" -gt 0 ]; then codex_args+=("${codex_flags[@]}"); fi
   [ -n "$codex_cd_dir" ] && codex_args+=(-C "$codex_cd_dir")
   codex_args+=(--sandbox "$sandbox" -)
+  review_state_before_runtime || return $?
   errlog="$(mktemp -t dispatch-codex-out.XXXXXX)" || { echo "dispatch-worker: mktemp failed" >&2; return 1; }
   stdoutlog="$(mktemp -t dispatch-codex-stdout.XXXXXX)" || { rm -f "$errlog"; echo "dispatch-worker: mktemp failed" >&2; return 1; }
   # Tee each stream through a waited pipeline: fd 3 sends stdout to its tee while
@@ -355,9 +420,11 @@ dispatch_codex() {
   # only that subshell. Explicitly exiting with PIPESTATUS[0] preserves codex's rc,
   # including timeout rc; under pipefail, the group would otherwise return the inner
   # tee's rightmost non-zero status if that tee failed.
+  REVIEW_RUNTIME_LAUNCHED=1
   { run_with_timeout codex "${codex_args[@]}" < "$BRIEF" 2>&1 1>&3 3>&- \
       | tee -a "$errlog" >&2 3>&-; exit "${PIPESTATUS[0]}"; } 3>&1 | tee -a "$stdoutlog"
   rc=${PIPESTATUS[0]}
+  review_state_after_runtime
   if [ "$rc" -ne 0 ] && grep -qiE 'not supported when using Codex|with a ChatGPT account|no (supported )?models? (are )?available|all models? (were |are )?rejected' "$errlog" "$stdoutlog"; then
     echo "dispatch-worker: codex rejected the request at the auth/config layer (not a build failure) — every model was refused." >&2
     echo "dispatch-worker: fix codex auth/config, do NOT retry this as a build: run 'codex login' (ChatGPT) or set a valid OpenAI API key provider, and check ~/.codex/config.toml for a bad model_provider override or a stray Authorization header." >&2
@@ -451,6 +518,18 @@ $hit"
       | awk 'NF'
   )
   printf '%s\n' "$matched" | awk 'NF' | sort -u
+}
+
+run_agy_review_attempt() {
+  REVIEW_RUNTIME_LAUNCHED=1
+  (
+    cd "$review_path" || exit 1
+    if [ "$REVIEW_HERMETIC" = "1" ]; then
+      export GIT_CONFIG_GLOBAL="$REVIEW_STATE_DIR/global.gitconfig"
+    fi
+    run_with_timeout agy "${model_args[@]}" < "$agy_brief"
+  ) | tee "$review_outfile"
+  return "${PIPESTATUS[0]}"
 }
 
 dispatch_agy() {
@@ -571,7 +650,7 @@ dispatch_agy() {
       REVIEW_SRC_TOP="$(git -C "$agy_workdir" rev-parse --show-toplevel)"
       _review_dirty_status="$(git -C "$REVIEW_SRC_TOP" status --porcelain --untracked-files=all)"
       if [ -n "$_review_dirty_status" ]; then
-        echo "dispatch-worker: review runs against committed HEAD in an isolated worktree; the real tree has uncommitted changes that are NOT included — commit them first or include the diff in the brief." >&2
+        echo "dispatch-worker: review runs against committed HEAD in an isolated workspace; the real tree has uncommitted changes that are NOT included — commit them first or include the diff in the brief." >&2
         if [ "$ALLOW_DIRTY" != "1" ]; then
           _review_named_dirty="$(_review_brief_named_dirty_paths "$BRIEF" "$REVIEW_SRC_TOP" "$_review_dirty_status")"
           if [ -n "$_review_named_dirty" ]; then
@@ -590,8 +669,8 @@ dispatch_agy() {
         _review_parent_real="$(cd -P "$REVIEW_WT_PARENT" 2>/dev/null && pwd)" || _review_parent_real=""
         case "$_review_parent_real/" in "$_review_tmp_real/"*) _review_parent_usable=0;; *) _review_parent_usable=1;; esac
         if [ "$_review_parent_usable" = "1" ] && [ -w "$REVIEW_WT_PARENT" ]; then
-          # Reap only stale dispatch-owned worktrees; live siblings and other names are untouched.
-          find "$REVIEW_WT_PARENT" -mindepth 1 -maxdepth 1 -type d -name 'dispatch-review-wt.*' -mmin +360 -exec git -C "$REVIEW_SRC_TOP" worktree remove --force {} \; 2>/dev/null || true
+          # Reap stale review workspaces; preserve fresh and foreign legacy worktrees.
+          reap_stale_review_workspaces "$REVIEW_WT_PARENT"
           git -C "$REVIEW_SRC_TOP" worktree prune 2>/dev/null || true
           REVIEW_WT="$(mktemp -d "$REVIEW_WT_PARENT/dispatch-review-wt.XXXXXX")" || REVIEW_WT=""
         else
@@ -613,7 +692,7 @@ dispatch_agy() {
           case "$_review_cache_real/" in "$_review_tmp_real/"*) REVIEW_WT="";; *)
             REVIEW_WT_PARENT="$_review_cache_parent"
             [ "$_review_cache_existed" = "0" ] && REVIEW_WT_PARENT_CREATED=1
-            find "$REVIEW_WT_PARENT" -mindepth 1 -maxdepth 1 -type d -name 'dispatch-review-wt.*' -mmin +360 -exec git -C "$REVIEW_SRC_TOP" worktree remove --force {} \; 2>/dev/null || true
+            reap_stale_review_workspaces "$REVIEW_WT_PARENT"
             git -C "$REVIEW_SRC_TOP" worktree prune 2>/dev/null || true
             REVIEW_WT="$(mktemp -d "$REVIEW_WT_PARENT/dispatch-review-wt.XXXXXX")" || REVIEW_WT=""
           esac
@@ -623,21 +702,28 @@ dispatch_agy() {
         REVIEW_WT_PARENT=""
         REVIEW_WT_PARENT_CREATED=0
         REVIEW_WT="$(mktemp -d -t dispatch-review-wt.XXXXXX 2>/dev/null)" || REVIEW_WT=""
-        echo "dispatch-worker: warning: could not create a writable review worktree directory outside \$TMPDIR; falling back to ${REVIEW_WT:-an unavailable path}, where agy may deny command-class tools and emit an empty review." >&2
+        echo "dispatch-worker: warning: could not create a writable review workspace directory outside \$TMPDIR; falling back to ${REVIEW_WT:-an unavailable path}, where agy may deny command-class tools and emit an empty review." >&2
       fi
       if [ -z "$REVIEW_WT" ]; then
-        echo "dispatch-worker: could not allocate an isolated review git worktree; refusing a non-hermetic review." >&2
+        echo "dispatch-worker: could not allocate an isolated review workspace; refusing a non-hermetic review." >&2
         return 3
       fi
-      if git -C "$REVIEW_SRC_TOP" worktree add --quiet --detach "$REVIEW_WT" HEAD; then
-        review_path="$REVIEW_WT"
-        REVIEW_HERMETIC=1
-      else
-        echo "dispatch-worker: could not create isolated review git worktree — running non-hermetically (prompt-guard only)." >&2
-        REVIEW_WT=""
-        REVIEW_SRC_TOP=""
-        review_path="$agy_workdir"
-      fi
+      REVIEW_WT_RM_PARENT="$(dirname "$REVIEW_WT")"
+      local clone_rc=0
+      review_clone_build "$REVIEW_SRC_TOP" "$REVIEW_WT" || clone_rc=$?
+      case "$clone_rc" in
+        0)
+          review_path="$REVIEW_WT"
+          REVIEW_HERMETIC=1 ;;
+        4)
+          echo "dispatch-worker: review workspace unsuitable for a private clone ($REVIEW_CLONE_REASON) — running non-hermetically (prompt-guard only)." >&2
+          REVIEW_WT=""
+          REVIEW_SRC_TOP=""
+          review_path="$agy_workdir" ;;
+        *)
+          echo "dispatch-worker: could not allocate an isolated review workspace; refusing a non-hermetic review." >&2
+          return 3 ;;
+      esac
     else
       echo "dispatch-worker: review target is not a git work tree — running non-hermetically (prompt-guard only)." >&2
       review_path="$agy_workdir"
@@ -647,9 +733,12 @@ dispatch_agy() {
     {
       if [ "$REVIEW_HERMETIC" = "1" ]; then
         printf '%s\n' "READ-ONLY REVIEW MODE for the real repository (headless --print): this review runs hermetically, and there is NO human to approve."
-        printf '%s\n' "You are in a DISPOSABLE, DETACHED git worktree at ${review_path%/}. It is deleted when this run ends; the real repository is untouched by anything you do here."
+        printf '%s\n' "You are in a DISPOSABLE local clone at ${review_path%/}, detached at ${REVIEW_CLONE_SHA}. Its branches and refs are a snapshot of the real repository's; its git config and global git config are private to this run. Origin's fetch and push URLs point at a disabled path; other remotes and the operator's credential helper remain reachable, so do not fetch or push. It is deleted when this run ends."
+        printf '%s\n' "The brief's repo root ${REVIEW_SRC_TOP%/} is the live repository. Translate every ${REVIEW_SRC_TOP%/} path in the brief to ${review_path%/} and work there. Read-only commands may target ${REVIEW_SRC_TOP%/}, but never write, configure, checkout, branch, stash, commit or run a build or test under ${REVIEW_SRC_TOP%/}."
+        # shellcheck disable=SC2016 # Scratch instructions must retain literal shell variables.
+        printf '%s\n' 'Scratch repos: set -eu; tmp=$(mktemp -d "${TMPDIR:-/tmp}/<name>.XXXXXX"); abort if it is empty; give every git command -C "$tmp".'
         printf '%s\n' "You MAY run read-only commands AND the project's build/test gate inside it."
-        printf '%s\n' "If your method requires MUTATING code to prove something — e.g. a mutation check that breaks the code under test to confirm a test FAILS — you MAY edit files INSIDE this worktree. You do not need to revert them; the worktree is discarded."
+        printf '%s\n' "If your method requires MUTATING code to prove something — e.g. a mutation check that breaks the code under test to confirm a test FAILS — you MAY edit files INSIDE this clone. You do not need to revert them; the clone is discarded."
         printf '%s\n' "You must NOT touch any path OUTSIDE ${review_path%/}. Do NOT commit, do NOT push, and do NOT write any success marker."
       else
         printf '%s\n' "READ-ONLY REVIEW MODE (headless --print): there is NO human to approve, and this is a REVIEW — you must NOT modify the repo."
@@ -666,7 +755,7 @@ dispatch_agy() {
       # the conflict toward the prohibition silently skips its mutation check again —
       # the exact defect this change exists to remove.
       if [ "$REVIEW_HERMETIC" = "1" ]; then
-        printf '%s\n' "Repo to read — and, where your method requires it, to mutate — is the disposable worktree: ${review_path%/}"
+        printf '%s\n' "Repo to read — and, where your method requires it, to mutate — is the disposable clone: ${review_path%/}"
         printf '%s\n' "Do NOT write a REVIEW ARTEFACT to disk: no review.md, no output.md, no report file. Your STDOUT is the complete deliverable. (Editing SOURCE files inside ${review_path%/} for a mutation check is not a review artefact and is allowed.)"
       else
         printf '%s\n' "Repo to read (do not change): ${review_path%/}"
@@ -701,8 +790,44 @@ dispatch_agy() {
     else
       echo "dispatch-worker: warning: review is running non-hermetically and therefore read-only; the lens may be unable to complete an execution-dependent method." >&2
     fi
-    ( cd "$review_path" && run_with_timeout agy "${model_args[@]}" < "$agy_brief" ) | tee "$review_outfile"
-    local agy_rc=${PIPESTATUS[0]}
+    REVIEW_STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/dispatch-review-state.XXXXXX")" || { echo "dispatch-worker: could not create the review state directory" >&2; return 3; }
+    if [ "$REVIEW_HERMETIC" = "1" ]; then
+      local f="$REVIEW_STATE_DIR/global.gitconfig" record key value
+      (umask 077; : > "$f") || { echo "dispatch-worker: could not build the private global git config" >&2; return 3; }
+      local global_records="$REVIEW_STATE_DIR/global.records"
+      if ! git -C "$REPO_STATE_SRC" config --global --includes --list -z > "$global_records" 2>/dev/null; then
+        : > "$global_records" || { echo "dispatch-worker: could not build the private global git config" >&2; return 3; }
+      fi
+      while IFS= read -r -d '' record; do
+        case "$record" in
+          *$'\n'*) key="${record%%$'\n'*}"; value="${record#*$'\n'}" ;;
+          *) key="$record"; value=true ;;
+        esac
+        case "$key" in include.path|includeif.*) continue ;; esac
+        git config --file "$f" --add "$key" "$value" || { echo "dispatch-worker: could not build the private global git config" >&2; return 3; }
+      done < "$global_records"
+    fi
+    local agy_rc=0 cmp_rc=0 retry_skipped=0 state_checked=0
+    if [ -z "$REPO_STATE_SRC" ]; then
+      REVIEW_STATE_STATUS="skipped(not-a-git-repo)"
+    elif repo_state_snapshot "$REPO_STATE_SRC" "$REVIEW_STATE_DIR/before"; then
+      state_checked=1
+    else
+      REVIEW_STATE_STATUS="skipped(snapshot-failed)"
+    fi
+    run_agy_review_attempt || agy_rc=$?
+    if [ "$state_checked" = 1 ]; then
+      repo_state_snapshot "$REPO_STATE_SRC" "$REVIEW_STATE_DIR/interim" || repo_state_mark_unreadable "$REVIEW_STATE_DIR/interim"
+      repo_state_compare "$REVIEW_STATE_DIR/before" "$REVIEW_STATE_DIR/interim" "$REVIEW_STATE_DIR/changes" || cmp_rc=$?
+      case "$cmp_rc" in
+        0|1|2) ;;
+        *) printf 'state: drift check could not complete (compare exit %s)\n' "$cmp_rc" >> "$REVIEW_STATE_DIR/changes"; cmp_rc=2 ;;
+      esac
+      if [ "$cmp_rc" = 2 ] && { [ "$agy_rc" = 124 ] || [ "$agy_rc" = 137 ]; }; then
+        retry_skipped=1
+        echo "dispatch-worker: critical source-repo drift after the first attempt — skipping the timeout retry." >&2
+      fi
+    fi
     # Emit path and rc so callers can locate the file AND detect truncation (non-zero rc = partial).
     echo "REVIEW_OUTFILE=$review_outfile (rc=$agy_rc)" >&2
     local review_bytes
@@ -719,13 +844,30 @@ dispatch_agy() {
     # of how many bytes were produced. Bounded to one retry (no loop): if the
     # retry is ALSO a timeout, fall through to the rc check below, which fails
     # closed exactly like the rc=0-short-output case.
-    if [ "$agy_rc" -eq 124 ] || [ "$agy_rc" -eq 137 ]; then
+    if [ "$retry_skipped" = 0 ] && { [ "$agy_rc" -eq 124 ] || [ "$agy_rc" -eq 137 ]; }; then
       echo "dispatch-worker: agy review timed out (rc=$agy_rc, ${review_bytes}B written before the kill) — retrying ONCE before falling back." >&2
-      ( cd "$review_path" && run_with_timeout agy "${model_args[@]}" < "$agy_brief" ) | tee "$review_outfile"
-      agy_rc=${PIPESTATUS[0]}
+      agy_rc=0
+      run_agy_review_attempt || agy_rc=$?
       echo "REVIEW_OUTFILE=$review_outfile (rc=$agy_rc) [retry]" >&2
       review_bytes="$(wc -c < "$review_outfile" 2>/dev/null | tr -d ' ')"
       review_bytes="${review_bytes:-0}"
+    fi
+    if [ "$state_checked" = 1 ]; then
+      repo_state_snapshot "$REPO_STATE_SRC" "$REVIEW_STATE_DIR/after" || repo_state_mark_unreadable "$REVIEW_STATE_DIR/after"
+      local after_rc=0
+      repo_state_compare "$REVIEW_STATE_DIR/before" "$REVIEW_STATE_DIR/after" "$REVIEW_STATE_DIR/after-changes" || after_rc=$?
+      case "$after_rc" in
+        0|1|2) ;;
+        *) printf 'state: drift check could not complete (compare exit %s)\n' "$after_rc" >> "$REVIEW_STATE_DIR/after-changes"; after_rc=2 ;;
+      esac
+      # Preserve critical interim evidence even if concurrent work restored it.
+      if [ "$cmp_rc" != 2 ] || [ "$after_rc" = 2 ]; then
+        cp "$REVIEW_STATE_DIR/after-changes" "$REVIEW_STATE_DIR/changes"
+        cmp_rc=$after_rc
+      fi
+      REVIEW_STATE_CLASS=$cmp_rc
+      REVIEW_STATE_N=$(wc -l < "$REVIEW_STATE_DIR/changes" 2>/dev/null | tr -d ' ')
+      [ -n "$REVIEW_STATE_N" ] || REVIEW_STATE_N=1
     fi
     # Requirements-mode evidence: a PRD review's deliverable is the
     # per-row disposition table the brief itself asks for — a row ID (R<n>.<n> / E<n> /
@@ -748,7 +890,7 @@ dispatch_agy() {
         echo "dispatch-worker: REVIEW FAILED — review produced no labelled severity or file:line evidence (and no requirements-mode per-row ALIGN/OBJECT/ABSTAIN verdict) and is not a pass. Fall back to a LOCAL reviewer (Claude Agent-tool peer-*-reviewer, or Opus verify-the-reviewer) — do NOT retry the wedged agy." >&2
         agy_rc=8
       fi
-    elif [ "$agy_rc" -eq 124 ] || [ "$agy_rc" -eq 137 ]; then
+    elif [ "$retry_skipped" = 0 ] && { [ "$agy_rc" -eq 124 ] || [ "$agy_rc" -eq 137 ]; }; then
       echo "dispatch-worker: REVIEW FAILED — agy timed out again (rc=$agy_rc, ${review_bytes}B written) after one retry. A timed-out review is TRUNCATED and NOT a pass regardless of byte count; do NOT accept it. Fall back to a LOCAL reviewer (Claude Agent-tool peer-*-reviewer, or Opus verify-the-reviewer) — do NOT retry the wedged agy again." >&2
       agy_rc=8
     fi
@@ -756,6 +898,7 @@ dispatch_agy() {
     run_with_timeout agy "${model_args[@]}" < "$agy_brief"
     local agy_rc=$?
   fi
+  if [ "$REVIEW" = 1 ]; then REVIEW_ORIGINAL_RC=$agy_rc; fi
   rm -f "$agy_brief"
   return "$agy_rc"
 }
@@ -783,7 +926,12 @@ dispatch_claude() {
   # Prompt on STDIN, not argv: `claude -p` reads it from a pipe (verified), and a brief on the
   # command line is visible to every other process on the machine via `ps`, and can exceed the
   # OS argument-length limit for a large brief. codex and agy already take the brief on stdin.
-  run_with_timeout claude "${flags[@]}" < "$BRIEF"
+  local rc=0
+  review_state_before_runtime || return $?
+  REVIEW_RUNTIME_LAUNCHED=1
+  run_with_timeout claude "${flags[@]}" < "$BRIEF" || rc=$?
+  review_state_after_runtime
+  return "$rc"
 }
 
 dispatch_workflow() {
@@ -813,6 +961,17 @@ dispatch_a2a_endpoint() {
   return 3
 }
 
+# Source repository stays pinned as an input even when clone setup falls back.
+REPO_STATE_SRC=""
+REVIEW_RUNTIME_LAUNCHED=0
+if [ "$REVIEW" = "1" ]; then
+  if [ "$RUNTIME" = claude ]; then
+    REPO_STATE_SRC="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null)" || REPO_STATE_SRC=""
+  else
+    REPO_STATE_SRC="$(git -C "${WORKDIR:-$PWD}" rev-parse --show-toplevel 2>/dev/null)" || REPO_STATE_SRC=""
+  fi
+fi
+: "$REPO_STATE_SRC" "$REVIEW_RUNTIME_LAUNCHED"
 rc=0
 case "$RUNTIME" in
   codex)         dispatch_codex || rc=$? ;;
@@ -822,6 +981,38 @@ case "$RUNTIME" in
   a2a-endpoint)  dispatch_a2a_endpoint || rc=$? ;;
   *)             echo "dispatch-worker: unknown runtime: $RUNTIME" >&2; exit 2 ;;
 esac
+
+if [ "$REVIEW" = 1 ]; then
+  REVIEW_ORIGINAL_RC=${REVIEW_ORIGINAL_RC:-$rc}
+  case "$REVIEW_STATE_CLASS" in
+    0) REVIEW_STATE_STATUS=clean ;;
+    1)
+      REVIEW_STATE_STATUS="warn($REVIEW_STATE_N)"
+      echo "dispatch-worker: warning: source repo moved during the review (may be concurrent work):" >&2 || true
+      sed 's/^/  /' "$REVIEW_STATE_DIR/changes" >&2 || true ;;
+    2)
+      REVIEW_STATE_STATUS="critical($REVIEW_STATE_N)"
+      if [ "$REVIEW_RUNTIME_LAUNCHED" = 1 ]; then rc=10; fi
+      if [ "$REVIEW_RUNTIME_LAUNCHED" = 1 ]; then
+        echo "dispatch-worker: SOURCE REPO CHANGED DURING THE REVIEW WINDOW (reviewer or a concurrent session; cause not attributed)." >&2 || true
+        echo "Inspect and restore these before committing in that repo; the review body stands only if every change is known concurrent work:" >&2 || true
+        if [ -r "$REVIEW_STATE_DIR/changes" ]; then
+          sed 's/^/  /' "$REVIEW_STATE_DIR/changes" >&2 || true
+        else
+          echo '  state: review state directory missing or unreadable' >&2 || true
+        fi
+        echo "(the run would otherwise have exited $REVIEW_ORIGINAL_RC)" >&2 || true
+      fi ;;
+    *)
+      if [ "$REVIEW_RUNTIME_LAUNCHED" = 1 ] || [ "$RUNTIME" = workflow ]; then
+        if [ "$REVIEW_STATE_STATUS" = 'skipped(not-launched)' ]; then REVIEW_STATE_STATUS='skipped(not-checked)'; fi
+      fi ;;
+  esac
+  if [ "$REVIEW_STATE_CLASS" != 2 ] && [ "$rc" -eq 10 ]; then
+    echo "dispatch-worker: runtime exited 10 natively; reported as 1 (10 is reserved for source-repo drift)." >&2 || true
+    rc=1
+  fi
+fi
 
 # Post-dispatch dep gate — only for runtimes that actually built in-process
 # (codex/agy). The workflow runtime just emits a JSON marker; the real build

@@ -35,6 +35,8 @@ func rcMeaning(rc int) string {
 		return "empty/short review - do NOT retry; fall back to a LOCAL (Claude) reviewer"
 	case 9:
 		return "agy model not offered: fix lib/agy-models.sh or pass a model, then re-run; NOT a build failure"
+	case 10:
+		return "source repo changed during the review window (reviewer or a concurrent session) - inspect the named changes and restore them before committing; the review stands only if every change is known concurrent work; NOT a build failure"
 	case 124:
 		return "timeout - BLOCKED"
 	default:
@@ -52,7 +54,7 @@ func isInfrastructureRC(rc int) bool {
 	// the binary or free up a worktree dir.
 	// rc 9 is a model configuration refusal: fix the pin/override and re-run.
 	// It must preserve the infrastructure disposition even with an empty review.
-	case 2, 3, 4, 5, 6, 7, 9, 124:
+	case 2, 3, 4, 5, 6, 7, 9, 10, 124:
 		return true
 	default:
 		return false
@@ -123,9 +125,14 @@ func cmdCrossModel(args []string) int {
 		return 2
 	}
 	worst := 0
+	sourceRepoDrift := false
 	var summary strings.Builder
 	summary.WriteString("# cross-model run summary\n\n")
 	for i, b := range briefs { // serialized - never concurrent (agy wedge risk)
+		if sourceRepoDrift {
+			fmt.Fprintf(&summary, "- brief %d (%s): rc - (not dispatched: stopped after rc 10)\n", i+1, b)
+			continue
+		}
 		briefWorkdir := reviewWorkdir
 		if !explicitWorkdir {
 			briefWorkdir = cwd
@@ -156,7 +163,20 @@ func cmdCrossModel(args []string) int {
 		reviewBody := stdout.String()
 		bodyBytes := len(reviewBody)
 		dispositionRC := reviewDispositionRC(rc, bodyBytes)
-		fmt.Fprintf(&summary, "- brief %d (%s): rc %d - %s (body_bytes=%d)\n", i+1, b, dispositionRC, rcMeaning(dispositionRC), bodyBytes)
+		state := ""
+		for _, line := range strings.Split(stderr.String(), "\n") {
+			if value, ok := strings.CutPrefix(line, "DISPATCH_REVIEW_STATE="); ok {
+				state, _, _ = strings.Cut(value, " ")
+			}
+		}
+		fmt.Fprintf(&summary, "- brief %d (%s): rc %d - %s (body_bytes=%d)", i+1, b, dispositionRC, rcMeaning(dispositionRC), bodyBytes)
+		if state != "" {
+			fmt.Fprintf(&summary, " state=%s", state)
+		}
+		summary.WriteByte('\n')
+		if dispositionRC == 10 {
+			sourceRepoDrift = true
+		}
 		// The review itself (dispatch-worker's stdout) is the deliverable:
 		fmt.Fprintf(os.Stdout, "===== review: brief %d (%s) rc=%d =====\n%s\n", i+1, b, dispositionRC, reviewBody)
 		if dispositionRC > worst {
@@ -165,6 +185,9 @@ func cmdCrossModel(args []string) int {
 		// NO retry on rc 8 (or any rc): dispatch-worker mandates fall-back-to-local, not retry.
 	}
 	fmt.Fprint(os.Stdout, summary.String())
+	if sourceRepoDrift {
+		return 10
+	}
 	if worst != 0 {
 		return worst
 	}
