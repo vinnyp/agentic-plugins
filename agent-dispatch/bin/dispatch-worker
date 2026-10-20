@@ -142,7 +142,7 @@ dispatch-worker — dispatch a worker brief to a runtime.
   Review gate env:   DISPATCH_MIN_REVIEW_BYTES sets the byte backstop (default 1200).
                      DISPATCH_REVIEW_REQUIRE_EVIDENCE=0 disables the evidence gate;
                      only the exact value 0 disables it. DISPATCH_REVIEW_WT_DIR sets
-                     the preferred parent for isolated review worktrees.
+                     the preferred parent for isolated review workspaces.
   --model M          Model to pass to agy (--model M). Multi-word names with spaces/parens
                      are kept intact as a single argument. Role defaults are defined in
                      bin/lib/agy-models.sh: review "$AGY_MODEL_REVIEW_DEFAULT";
@@ -610,7 +610,7 @@ dispatch_agy() {
       REVIEW_SRC_TOP="$(git -C "$agy_workdir" rev-parse --show-toplevel)"
       _review_dirty_status="$(git -C "$REVIEW_SRC_TOP" status --porcelain --untracked-files=all)"
       if [ -n "$_review_dirty_status" ]; then
-        echo "dispatch-worker: review runs against committed HEAD in an isolated worktree; the real tree has uncommitted changes that are NOT included — commit them first or include the diff in the brief." >&2
+        echo "dispatch-worker: review runs against committed HEAD in an isolated workspace; the real tree has uncommitted changes that are NOT included — commit them first or include the diff in the brief." >&2
         if [ "$ALLOW_DIRTY" != "1" ]; then
           _review_named_dirty="$(_review_brief_named_dirty_paths "$BRIEF" "$REVIEW_SRC_TOP" "$_review_dirty_status")"
           if [ -n "$_review_named_dirty" ]; then
@@ -662,10 +662,10 @@ dispatch_agy() {
         REVIEW_WT_PARENT=""
         REVIEW_WT_PARENT_CREATED=0
         REVIEW_WT="$(mktemp -d -t dispatch-review-wt.XXXXXX 2>/dev/null)" || REVIEW_WT=""
-        echo "dispatch-worker: warning: could not create a writable review worktree directory outside \$TMPDIR; falling back to ${REVIEW_WT:-an unavailable path}, where agy may deny command-class tools and emit an empty review." >&2
+        echo "dispatch-worker: warning: could not create a writable review workspace directory outside \$TMPDIR; falling back to ${REVIEW_WT:-an unavailable path}, where agy may deny command-class tools and emit an empty review." >&2
       fi
       if [ -z "$REVIEW_WT" ]; then
-        echo "dispatch-worker: could not allocate an isolated review git worktree; refusing a non-hermetic review." >&2
+        echo "dispatch-worker: could not allocate an isolated review workspace; refusing a non-hermetic review." >&2
         return 3
       fi
       REVIEW_WT_RM_PARENT="$(dirname "$REVIEW_WT")"
@@ -685,7 +685,7 @@ dispatch_agy() {
           REVIEW_SRC_TOP=""
           review_path="$agy_workdir" ;;
         *)
-          echo "dispatch-worker: could not allocate an isolated review git worktree; refusing a non-hermetic review." >&2
+          echo "dispatch-worker: could not allocate an isolated review workspace; refusing a non-hermetic review." >&2
           return 3 ;;
       esac
     else
@@ -697,7 +697,10 @@ dispatch_agy() {
     {
       if [ "$REVIEW_HERMETIC" = "1" ]; then
         printf '%s\n' "READ-ONLY REVIEW MODE for the real repository (headless --print): this review runs hermetically, and there is NO human to approve."
-        printf '%s\n' "You are in a DISPOSABLE, DETACHED git worktree at ${review_path%/}. It is deleted when this run ends; the real repository is untouched by anything you do here."
+        printf '%s\n' "You are in a DISPOSABLE local clone at ${review_path%/}, detached at ${REVIEW_CLONE_SHA}. Its branches and refs are a snapshot of the real repository's; its git config and global git config are private to this run. Fetching and pushing are disabled. It is deleted when this run ends."
+        printf '%s\n' "The brief's repo root ${REVIEW_SRC_TOP%/} is the live repository. Translate every ${REVIEW_SRC_TOP%/} path in the brief to ${review_path%/} and work there. Read-only commands may target ${REVIEW_SRC_TOP%/}, but never write, configure, checkout, branch, stash, commit or run a build or test under ${REVIEW_SRC_TOP%/}."
+        # shellcheck disable=SC2016 # Scratch instructions must retain literal shell variables.
+        printf '%s\n' 'Scratch repos: set -eu; tmp=$(mktemp -d "${TMPDIR:-/tmp}/<name>.XXXXXX"); abort if it is empty; give every git command -C "$tmp".'
         printf '%s\n' "You MAY run read-only commands AND the project's build/test gate inside it."
         printf '%s\n' "If your method requires MUTATING code to prove something — e.g. a mutation check that breaks the code under test to confirm a test FAILS — you MAY edit files INSIDE this worktree. You do not need to revert them; the worktree is discarded."
         printf '%s\n' "You must NOT touch any path OUTSIDE ${review_path%/}. Do NOT commit, do NOT push, and do NOT write any success marker."
@@ -716,7 +719,7 @@ dispatch_agy() {
       # the conflict toward the prohibition silently skips its mutation check again —
       # the exact defect this change exists to remove.
       if [ "$REVIEW_HERMETIC" = "1" ]; then
-        printf '%s\n' "Repo to read — and, where your method requires it, to mutate — is the disposable worktree: ${review_path%/}"
+        printf '%s\n' "Repo to read — and, where your method requires it, to mutate — is the disposable clone: ${review_path%/}"
         printf '%s\n' "Do NOT write a REVIEW ARTEFACT to disk: no review.md, no output.md, no report file. Your STDOUT is the complete deliverable. (Editing SOURCE files inside ${review_path%/} for a mutation check is not a review artefact and is allowed.)"
       else
         printf '%s\n' "Repo to read (do not change): ${review_path%/}"

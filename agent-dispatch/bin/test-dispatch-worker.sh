@@ -668,13 +668,20 @@ rc=$?
 [ ! -e "$TMP/scratch_evil.py" ] || fail "auth probe or runner cwd was mutated by agy stub"
 [ ! -e "$TMP/.git" ] || fail "auth probe or runner cwd got git-initialized by agy stub"
 grep -qF -- "--dangerously-skip-permissions" <<<"$(agy_exec_args)" || fail "hermetic agy review did not bypass command permissions"
-grep -q "DISPOSABLE, DETACHED git worktree" "$AGY_STDIN_FILE" || fail "hermetic review preamble did not identify the disposable detached worktree"
+grep -qF 'DISPOSABLE local clone at' "$AGY_STDIN_FILE" || fail "hermetic review preamble did not identify the disposable local clone"
+grep -qF 'Translate every' "$AGY_STDIN_FILE" || fail "hermetic review preamble did not map brief paths"
+# shellcheck disable=SC2016 # Match the literal scratch command, without expansion.
+grep -qF 'tmp=$(mktemp -d "${TMPDIR:-/tmp}/<name>.XXXXXX")' "$AGY_STDIN_FILE" || fail "hermetic review preamble missing literal scratch allocation"
+# shellcheck disable=SC2016 # Match the literal scratch path variable.
+grep -qF -- '-C "$tmp"' "$AGY_STDIN_FILE" || fail "hermetic review preamble missing literal scratch git path"
+grep -qF 'the real repository is untouched' "$AGY_STDIN_FILE" && fail "hermetic review preamble still promises the real repository is untouched"
+grep -qF 'DISPOSABLE, DETACHED git worktree' "$AGY_STDIN_FILE" && fail "hermetic review preamble still describes a linked worktree"
 grep -q "MUTATING code to prove something" "$AGY_STDIN_FILE" || fail "hermetic review preamble did not permit mutation checks"
 # Intent: the hermetic preamble must NAME the isolated worktree. It must NOT do so with the
 # blanket "(do not change)" / "DO NOT write any files" phrasing, which contradicts the
 # may-mutate permission granted just above it — a reviewer resolving that conflict toward the
 # prohibition silently skips its mutation check, the defect this whole change removes.
-grep -q "disposable worktree: .*dispatch-review-wt\." "$AGY_STDIN_FILE" || fail "hermetic review preamble did not contain the isolated worktree path"
+grep -F "is the disposable clone: " "$AGY_STDIN_FILE" | grep -q "dispatch-review-wt\." || fail "hermetic review preamble did not contain the isolated worktree path"
 grep -q "Repo to read (do not change)" "$AGY_STDIN_FILE" && fail "hermetic review preamble still carries the contradictory read-only phrasing"
 grep -q "DO NOT write any files to disk" "$AGY_STDIN_FILE" && fail "hermetic review preamble still forbids all disk writes, contradicting the mutation-check permission"
 grep -q "If a tool, command, or capability your method requires is unavailable or denied" "$AGY_STDIN_FILE" || fail "hermetic review preamble missing degradation clause"
