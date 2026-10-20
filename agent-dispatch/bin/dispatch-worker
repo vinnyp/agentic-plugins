@@ -71,6 +71,10 @@ REVIEW_WT_PARENT_CREATED=0
 REVIEW_SRC_TOP=""
 REVIEW_PIN_DIR=""
 REVIEW_STATE_DIR=""
+REVIEW_STATE_CLASS=""
+REVIEW_STATE_N=0
+REVIEW_ORIGINAL_RC=""
+REVIEW_STATE_STATUS="skipped(not-launched)"
 REVIEW_OUTFILE_TMP=""   # set only when WE mktemp'd the review file, so only that one is removed
 
 # Reap stale clones safely; legacy worktrees may belong to a sibling repository.
@@ -88,6 +92,7 @@ reap_stale_review_workspaces() {
 # Invoked by the EXIT trap.
 # shellcheck disable=SC2329
 cleanup_dispatch_worker() {
+  local exit_rc=$?
   rm -f "$ENRICHED_BRIEF_FILE"
   # The review itself is on STDOUT — that is the deliverable, and the documented consumer
   # contract is to capture stdout, never this path. The REVIEW_OUTFILE= line on stderr is a
@@ -107,6 +112,9 @@ cleanup_dispatch_worker() {
   fi
   # Only reclaim a parent this invocation created; operator-owned empty dirs survive.
   [ "${REVIEW_WT_PARENT_CREATED:-0}" = "1" ] && [ -n "${REVIEW_WT_PARENT:-}" ] && rmdir "$REVIEW_WT_PARENT" 2>/dev/null || true
+  if [ "$REVIEW" = "1" ]; then
+    echo "DISPATCH_REVIEW_STATE=$REVIEW_STATE_STATUS original_rc=${REVIEW_ORIGINAL_RC:-$exit_rc}" >&2
+  fi
 }
 trap cleanup_dispatch_worker EXIT
 
@@ -754,8 +762,8 @@ dispatch_agy() {
     else
       echo "dispatch-worker: warning: review is running non-hermetically and therefore read-only; the lens may be unable to complete an execution-dependent method." >&2
     fi
+    REVIEW_STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/dispatch-review-state.XXXXXX")" || return 3
     if [ "$REVIEW_HERMETIC" = "1" ]; then
-      REVIEW_STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/dispatch-review-state.XXXXXX")" || return 3
       local f="$REVIEW_STATE_DIR/global.gitconfig" record key value
       (umask 077; : > "$f") || return 3
       local global_records="$REVIEW_STATE_DIR/global.records"
@@ -771,8 +779,23 @@ dispatch_agy() {
         git config --file "$f" --add "$key" "$value" || return 3
       done < "$global_records"
     fi
-    local agy_rc=0
+    local agy_rc=0 cmp_rc=0 retry_skipped=0 state_checked=0
+    if [ -z "$REPO_STATE_SRC" ]; then
+      REVIEW_STATE_STATUS="skipped(not-a-git-repo)"
+    elif repo_state_snapshot "$REPO_STATE_SRC" "$REVIEW_STATE_DIR/before"; then
+      state_checked=1
+    else
+      REVIEW_STATE_STATUS="skipped(snapshot-failed)"
+    fi
     run_agy_review_attempt || agy_rc=$?
+    if [ "$state_checked" = 1 ]; then
+      repo_state_snapshot "$REPO_STATE_SRC" "$REVIEW_STATE_DIR/interim" || repo_state_mark_unreadable "$REVIEW_STATE_DIR/interim"
+      repo_state_compare "$REVIEW_STATE_DIR/before" "$REVIEW_STATE_DIR/interim" "$REVIEW_STATE_DIR/changes" || cmp_rc=$?
+      if [ "$cmp_rc" = 2 ] && { [ "$agy_rc" = 124 ] || [ "$agy_rc" = 137 ]; }; then
+        retry_skipped=1
+        echo "dispatch-worker: critical source-repo drift after the first attempt — skipping the timeout retry." >&2
+      fi
+    fi
     # Emit path and rc so callers can locate the file AND detect truncation (non-zero rc = partial).
     echo "REVIEW_OUTFILE=$review_outfile (rc=$agy_rc)" >&2
     local review_bytes
@@ -789,13 +812,25 @@ dispatch_agy() {
     # of how many bytes were produced. Bounded to one retry (no loop): if the
     # retry is ALSO a timeout, fall through to the rc check below, which fails
     # closed exactly like the rc=0-short-output case.
-    if [ "$agy_rc" -eq 124 ] || [ "$agy_rc" -eq 137 ]; then
+    if [ "$retry_skipped" = 0 ] && { [ "$agy_rc" -eq 124 ] || [ "$agy_rc" -eq 137 ]; }; then
       echo "dispatch-worker: agy review timed out (rc=$agy_rc, ${review_bytes}B written before the kill) — retrying ONCE before falling back." >&2
       agy_rc=0
       run_agy_review_attempt || agy_rc=$?
       echo "REVIEW_OUTFILE=$review_outfile (rc=$agy_rc) [retry]" >&2
       review_bytes="$(wc -c < "$review_outfile" 2>/dev/null | tr -d ' ')"
       review_bytes="${review_bytes:-0}"
+    fi
+    if [ "$state_checked" = 1 ]; then
+      repo_state_snapshot "$REPO_STATE_SRC" "$REVIEW_STATE_DIR/after" || repo_state_mark_unreadable "$REVIEW_STATE_DIR/after"
+      local after_rc=0
+      repo_state_compare "$REVIEW_STATE_DIR/before" "$REVIEW_STATE_DIR/after" "$REVIEW_STATE_DIR/after-changes" || after_rc=$?
+      # Preserve critical interim evidence even if concurrent work restored it.
+      if [ "$cmp_rc" != 2 ] || [ "$after_rc" = 2 ]; then
+        cp "$REVIEW_STATE_DIR/after-changes" "$REVIEW_STATE_DIR/changes"
+        cmp_rc=$after_rc
+      fi
+      REVIEW_STATE_CLASS=$cmp_rc
+      REVIEW_STATE_N=$(wc -l < "$REVIEW_STATE_DIR/changes" | tr -d ' ')
     fi
     # Requirements-mode evidence: a PRD review's deliverable is the
     # per-row disposition table the brief itself asks for — a row ID (R<n>.<n> / E<n> /
@@ -818,7 +853,7 @@ dispatch_agy() {
         echo "dispatch-worker: REVIEW FAILED — review produced no labelled severity or file:line evidence (and no requirements-mode per-row ALIGN/OBJECT/ABSTAIN verdict) and is not a pass. Fall back to a LOCAL reviewer (Claude Agent-tool peer-*-reviewer, or Opus verify-the-reviewer) — do NOT retry the wedged agy." >&2
         agy_rc=8
       fi
-    elif [ "$agy_rc" -eq 124 ] || [ "$agy_rc" -eq 137 ]; then
+    elif [ "$retry_skipped" = 0 ] && { [ "$agy_rc" -eq 124 ] || [ "$agy_rc" -eq 137 ]; }; then
       echo "dispatch-worker: REVIEW FAILED — agy timed out again (rc=$agy_rc, ${review_bytes}B written) after one retry. A timed-out review is TRUNCATED and NOT a pass regardless of byte count; do NOT accept it. Fall back to a LOCAL reviewer (Claude Agent-tool peer-*-reviewer, or Opus verify-the-reviewer) — do NOT retry the wedged agy again." >&2
       agy_rc=8
     fi
@@ -826,6 +861,7 @@ dispatch_agy() {
     run_with_timeout agy "${model_args[@]}" < "$agy_brief"
     local agy_rc=$?
   fi
+  if [ "$REVIEW" = 1 ]; then REVIEW_ORIGINAL_RC=$agy_rc; fi
   rm -f "$agy_brief"
   return "$agy_rc"
 }
@@ -900,6 +936,30 @@ case "$RUNTIME" in
   a2a-endpoint)  dispatch_a2a_endpoint || rc=$? ;;
   *)             echo "dispatch-worker: unknown runtime: $RUNTIME" >&2; exit 2 ;;
 esac
+
+if [ "$REVIEW" = 1 ]; then
+  REVIEW_ORIGINAL_RC=${REVIEW_ORIGINAL_RC:-$rc}
+  case "$REVIEW_STATE_CLASS" in
+    0) REVIEW_STATE_STATUS=clean ;;
+    1)
+      REVIEW_STATE_STATUS="warn($REVIEW_STATE_N)"
+      echo "dispatch-worker: warning: source repo moved during the review (may be concurrent work):" >&2
+      sed 's/^/  /' "$REVIEW_STATE_DIR/changes" >&2 ;;
+    2)
+      REVIEW_STATE_STATUS="critical($REVIEW_STATE_N)"
+      if [ "$REVIEW_RUNTIME_LAUNCHED" = 1 ]; then
+        echo "dispatch-worker: SOURCE REPO CHANGED DURING THE REVIEW WINDOW (reviewer or a concurrent session; cause not attributed)." >&2
+        echo "Inspect and restore these before committing in that repo; the review body stands only if every change is known concurrent work:" >&2
+        sed 's/^/  /' "$REVIEW_STATE_DIR/changes" >&2
+        echo "(the run would otherwise have exited $REVIEW_ORIGINAL_RC)" >&2
+        rc=10
+      fi ;;
+    *)
+      if [ "$REVIEW_RUNTIME_LAUNCHED" = 1 ] || [ "$RUNTIME" = workflow ]; then
+        if [ "$REVIEW_STATE_STATUS" = 'skipped(not-launched)' ]; then REVIEW_STATE_STATUS='skipped(not-checked)'; fi
+      fi ;;
+  esac
+fi
 
 # Post-dispatch dep gate — only for runtimes that actually built in-process
 # (codex/agy). The workflow runtime just emits a JSON marker; the real build

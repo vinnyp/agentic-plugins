@@ -1595,6 +1595,7 @@ git checkout -b other
 git push origin HEAD:refs/heads/evil >/dev/null 2>&1; echo push=$? > "$AGY_ARGS_FILE.push"
 ACTIONS
 run_cfg_review "$r44" || fail 'V3 launch failed'
+grep -qF 'DISPATCH_REVIEW_STATE=clean' "$TMP/cfg.err" || fail 'V3 missing clean state'
 [ "$(sed -n '1p' "$AGY_ARGS_FILE.global")" = review@example.invalid ] || fail 'V3 global identity lost'
 [ "$(sed -n '2p' "$AGY_ARGS_FILE.global")" = ed ] || fail 'V3 included editor lost'
 [ "$(sed -n '3p' "$AGY_ARGS_FILE.global")" = true ] || fail 'V3 valueless flag lost'
@@ -1612,6 +1613,87 @@ GIT_CONFIG_GLOBAL="$TMP/missing-global" run_cfg_review "$r44" || fail 'missing g
 [ ! -e "$TMP/missing-global" ] || fail 'missing global config created outside review'
 [ -z "$(find "$TMPDIR" -name 'dispatch-review-state.*' -print)" ] || fail 'missing global state directory leaked'
 echo 'test 44 (private flattened global config and absent global config) PASS'
+
+# Source-state contract: actions deliberately target only test-owned repos.
+for i in $(seq 1 100); do printf 'Minor REVIEW LINE %s src/x.go:1 ok\n' "$i"; done > "$TMP/expected-body"
+export SRC="$TMP/state-source"
+make_git_repo "$SRC"
+cp "$SRC/.git/config" "$TMP/state-config.before"
+check_state_run() {
+  local expected="$1" actual=0
+  run_cfg_review "${2:-$SRC}" || actual=$?
+  [ "$actual" -eq "$expected" ] || fail "state expected rc $expected, got $actual: $(cat "$TMP/cfg.err")"
+}
+for key in user.name core.hooksPath; do
+  value=x
+  [ "$key" != core.hooksPath ] || value="$(cd "$SRC/.git/hooks" && pwd -P)"
+  # shellcheck disable=SC2016 # Expanded by the generated action script.
+  printf 'git -C "$SRC" config %s "%s"\n' "$key" "$value" > "$AGY_STUB_ACTIONS"
+  check_state_run 10
+  grep -qi "config $key" "$TMP/cfg.err" || fail "missing $key change"
+  grep -qF 'DISPATCH_REVIEW_STATE=critical(1) original_rc=0' "$TMP/cfg.err" || fail 'critical state count/rc'
+  cmp -s "$TMP/expected-body" "$TMP/cfg.out" || fail 'state check changed stdout'
+  cp "$TMP/state-config.before" "$SRC/.git/config"
+done
+# shellcheck disable=SC2016 # Expanded by the generated action script.
+printf 'git -C "$SRC" config branch.review-main.remote origin\n' > "$AGY_STUB_ACTIONS"
+check_state_run 0
+grep -qF 'DISPATCH_REVIEW_STATE=warn(1)' "$TMP/cfg.err" || fail 'benign config not warn'
+cp "$TMP/state-config.before" "$SRC/.git/config"
+# shellcheck disable=SC2016 # Expanded by the generated action script.
+printf 'echo hook > "$SRC/.git/hooks/pre-commit"\n' > "$AGY_STUB_ACTIONS"
+check_state_run 10
+rm "$SRC/.git/hooks/pre-commit"
+# shellcheck disable=SC2016 # Expanded by the generated action script.
+printf 'git -C "$SRC" -c user.name=t -c user.email=t@x.invalid commit --quiet --allow-empty -m x\n' > "$AGY_STUB_ACTIONS"
+check_state_run 10
+grep -q 'commit ' "$TMP/cfg.err" || fail 'foreign commit not named'
+# shellcheck disable=SC2016 # Expanded by the generated action script.
+printf 'printf "[core\\n bad" >> "$SRC/.git/config"\n' > "$AGY_STUB_ACTIONS"
+check_state_run 10
+grep -qF '<unreadable after review>' "$TMP/cfg.err" || fail 'unreadable after missing'
+cp "$TMP/state-config.before" "$SRC/.git/config"
+export AGY_STUB_RC=124
+for call in 2 1; do
+  # shellcheck disable=SC2016 # Expanded by the generated action script.
+  printf '[ "$1" != %s ] || git -C "$SRC" config user.name x\n' "$call" > "$AGY_STUB_ACTIONS"
+  check_state_run 10
+  [ "$(cat "$AGY_STUB_COUNT_FILE")" = "$call" ] || fail 'drift retry count'
+  if [ "$call" = 2 ]; then
+    grep -qF 'original_rc=8' "$TMP/cfg.err" || fail 'retry original rc'
+  else
+    grep -qF 'original_rc=124' "$TMP/cfg.err" || fail 'skip original rc'
+    grep -qF 'skipping the timeout retry' "$TMP/cfg.err" || fail 'skip message absent'
+    ! grep -qF 'timed out again' "$TMP/cfg.err" || fail 'skip printed retry failure'
+  fi
+  cp "$TMP/state-config.before" "$SRC/.git/config"
+done
+# shellcheck disable=SC2016 # Expanded by the generated action script.
+printf '[ "$1" != 1 ] || printf "[core\\n bad" >> "$SRC/.git/config"\n' > "$AGY_STUB_ACTIONS"
+check_state_run 10
+[ "$(cat "$AGY_STUB_COUNT_FILE")" = 1 ] || fail 'unreadable interim retried'
+cp "$TMP/state-config.before" "$SRC/.git/config"
+unset AGY_STUB_RC
+cp "$decoy/.git/config" "$TMP/decoy.before"
+printf 'git config user.name x\n' > "$AGY_STUB_ACTIONS"
+GIT_DIR="$decoy/.git" GIT_INDEX_FILE="$decoy/.git/index" check_state_run 0
+grep -qF 'DISPATCH_REVIEW_STATE=clean' "$TMP/cfg.err" || fail 'V10 not clean'
+cmp -s "$decoy/.git/config" "$TMP/decoy.before" || fail 'decoy config changed'
+# shellcheck disable=SC2016 # Expanded by the generated action script.
+printf 'git -C "$SRC" config user.name x\n' > "$AGY_STUB_ACTIONS"
+GIT_DIR="$decoy/.git" GIT_INDEX_FILE="$decoy/.git/index" check_state_run 10
+cp "$TMP/state-config.before" "$SRC/.git/config"
+git -C "$SRC" worktree add --quiet --detach "$TMP/state-linked" HEAD
+check_state_run 10 "$TMP/state-linked"
+cp "$TMP/state-config.before" "$SRC/.git/config"
+# shellcheck disable=SC2016 # Expanded by the generated action script.
+printf 'git -C "$SRC" branch concurrent\n' > "$AGY_STUB_ACTIONS"
+check_state_run 0
+grep -qF 'DISPATCH_REVIEW_STATE=warn(' "$TMP/cfg.err" || fail 'concurrent branch not warn'
+: > "$AGY_STUB_ACTIONS"
+AGY_MISSING_REVIEW=1 check_state_run 9
+grep -qF 'DISPATCH_REVIEW_STATE=skipped(not-launched) original_rc=9' "$TMP/cfg.err" || fail 'prelaunch state missing'
+echo 'test 45 (source state and critical precedence) PASS'
 
 # The file had 22 agy stubs before the four persona-specific controls above;
 # every definition must answer the roster subcommand instead of falling into cat.
