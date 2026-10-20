@@ -1,27 +1,29 @@
 #!/usr/bin/env bash
 # Sourceable repository config snapshots. No caller shell options are changed.
+_REPO_STATE_LOCAL_ENV_VARS=$(git rev-parse --local-env-vars 2>/dev/null)
+
 _repo_state_git() (
   unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_PREFIX
   # Git supplies the whitespace-separated names of its repository-local variables.
-  # shellcheck disable=SC2046
-  unset $(git rev-parse --local-env-vars 2>/dev/null)
+  # shellcheck disable=SC2086
+  unset $_REPO_STATE_LOCAL_ENV_VARS
   export GIT_OPTIONAL_LOCKS=0
   git "$@"
 )
 
-_repo_state_sha256() {
-  local digest
-  if command -v shasum >/dev/null 2>&1; then
-    digest=$(shasum -a 256) || return 1
-  elif command -v sha256sum >/dev/null 2>&1; then
-    digest=$(sha256sum) || return 1
-  else
-    return 1
+_repo_state_sha256() (
+  local digest input
+  umask 077
+  input=$(mktemp "${TMPDIR:-/tmp}/repo-state-hash.XXXXXX") || return 1
+  trap 'rm -f "$input"' EXIT
+  cat > "$input" || return 1
+  if ! command -v shasum >/dev/null 2>&1 || ! digest=$(shasum -a 256 < "$input"); then
+    digest=$(sha256sum < "$input") || return 1
   fi
   digest=${digest%% *}
   [ -n "$digest" ] || return 1
   printf '%s\n' "$digest"
-}
+)
 
 _repo_state_encode() {
   local value=$1
@@ -39,8 +41,9 @@ _repo_state_configs() {
       *) key=$kv; value='(novalue)' ;;
     esac
     lower=$(printf '%s' "$key" | LC_ALL=C tr '[:upper:]' '[:lower:]')
+    case "$lower" in credential.*) lower=extraheader ;; *) lower=${lower##*.} ;; esac
     case "$lower" in
-      credential.*|*extraheader*|*token*|*pass*|*secret*|*proxy*)
+      *extraheader*|*token*|*pass*|*secret*|*proxy*)
         value="sha256:$(printf '%s' "$value" | _repo_state_sha256)" ;;
       *)
         if [[ "$value" =~ ://[^/]*@ ]]; then
@@ -72,8 +75,8 @@ _repo_state_hooks() {
       if [ -f "$file" ]; then
         content=$(_repo_state_sha256 < "$file")
       fi
-      mode='link'
-      digest=$(printf '%s\0%s' "$target" "$content" | _repo_state_sha256)
+      if [ -x "$file" ]; then mode=link-exec; else mode=link-noexec; fi
+      digest=$(printf '%s\0%s\0%s' "$target" "$content" "$mode" | _repo_state_sha256)
     else
       [ -f "$file" ] || continue
       mode=$(stat -f '%Lp' "$file" 2>/dev/null) || mode=$(stat -c '%a' "$file")
@@ -104,12 +107,13 @@ _repo_state_tree() {
 
 repo_state_snapshot() (
   umask 077
-  local repo=${1:-} out=${2:-} top ident name email config wt hooks custom head branch record
+  local repo=${1:-} out=${2:-} top ident name email config wt hooks custom head branch record temp
   _repo_state_sha256 </dev/null >/dev/null || return 3
   case "$repo" in /*) ;; *) return 3 ;; esac
   top=$(_repo_state_git -C "$repo" rev-parse --path-format=absolute --show-toplevel 2>/dev/null) || return 3
-  config=$(mktemp "$(dirname "$out")/.repo-state.XXXXXX") || return 3
-  trap 'rm -f "$config" "$config.refs" "$config.status"' EXIT
+  temp=$(mktemp -d "$(dirname "$out")/.repo-state.XXXXXX") || return 3
+  trap 'rm -rf "$temp"' EXIT
+  config="$temp/config"
   if ! _repo_state_git -C "$repo" config --list --show-scope --show-origin -z > "$config"; then
     return 3
   fi
@@ -178,6 +182,11 @@ repo_state_compare() (
     printf 'state: <unreadable before snapshot>\n' > "$changes"
     return 3
   fi
+  IFS= read -r first < "$before" || true
+  if [ "$first" = unreadable ]; then
+    printf 'state: <unreadable before snapshot>\n' > "$changes"
+    return 3
+  fi
   if [ ! -f "$after" ] || [ ! -r "$after" ]; then
     printf 'config: <unreadable after review>\n' > "$changes"
     return 2
@@ -187,7 +196,7 @@ repo_state_compare() (
     printf 'config: <unreadable after review>\n' > "$changes"
     return 2
   fi
-  temp=$(mktemp -d "${TMPDIR:-/tmp}/repo-state-compare.XXXXXX") || return 3
+  temp=$(mktemp -d "$(dirname "$changes")/.repo-state-compare.XXXXXX") || return 3
   trap 'rm -rf "$temp"' EXIT
   LC_ALL=C sort "$before" > "$temp/before"
   LC_ALL=C sort "$after" > "$temp/after"
@@ -214,10 +223,9 @@ repo_state_compare() (
       branch.*.pushremote) rc=2 ;;
       branch.*.remote)
         remote=$(_repo_state_decode "$new")
-        # Critical only when it names a remote created during the window.
+        # Only pre-existing remote names are benign.
         if [ "$new" != '(absent)' ] &&
-           ! awk -F '\t' -v prefix="remote.$remote." '$1=="config" && index($4,prefix)==1 { found=1 } END {exit !found}' "$before" &&
-           awk -F '\t' -v prefix="remote.$remote." '$1=="config" && index($4,prefix)==1 { found=1 } END {exit !found}' "$after"; then rc=2; fi ;;
+           ! awk -F '\t' -v prefix="remote.$remote." '$1=="config" && index($4,prefix)==1 { found=1 } END {exit !found}' "$before"; then rc=2; fi ;;
       branch.*.*|remote.*.fetch|remote.*.gh-resolved|gc.*|maintenance.*|extensions.worktreeconfig|core.sparsecheckout|core.sparsecheckoutcone) ;;
       remote.*.*)
         remote=${key#remote.}; remote=${remote%.*}
@@ -259,7 +267,7 @@ repo_state_compare() (
           if [ ! -f "$temp/exclude" ]; then
             awk -F '\t' '$1=="ref" {print $3}' "$before" |
               _repo_state_git -C "$repo" cat-file --batch-check='%(objectname) %(objecttype)' 2>/dev/null |
-              awk '$2=="commit" {print "^" $1}' > "$temp/exclude"
+              awk '($2=="commit" || $2=="tag") {print "^" $1}' > "$temp/exclude"
           fi
           [ "$new" != '(absent)' ] || continue
           if ! _repo_state_git -C "$repo" rev-list --stdin "$new" --not --remotes < "$temp/exclude" > "$temp/commits" 2>/dev/null; then

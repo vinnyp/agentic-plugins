@@ -1620,6 +1620,7 @@ echo 'test 44 (private flattened global config and absent global config) PASS'
 for i in $(seq 1 100); do printf 'Minor REVIEW LINE %s src/x.go:1 ok\n' "$i"; done > "$TMP/expected-body"
 export SRC="$TMP/state-source"
 make_git_repo "$SRC"
+git -C "$SRC" remote add origin https://example.invalid/source
 cp "$SRC/.git/config" "$TMP/state-config.before"
 check_state_run() {
   local expected="$1" actual=0
@@ -1767,6 +1768,23 @@ grep -qF 'DISPATCH_REVIEW_STATE=critical(1)' "$TMP/cfg.err" || fail 'claude call
 GIT_CONFIG_GLOBAL="$TMP/absent-global.gitconfig" run_cfg_review "$r44" > "$TMP/no-global.out" 2> "$TMP/no-global.err"
 [ "$?" -eq 0 ] || fail 'review without global gitconfig failed'
 grep -q 'fatal:' "$TMP/cfg.err" && fail 'missing global gitconfig emitted fatal diagnostic'
+
+# Loss of the baseline must fail closed for both review paths.
+# shellcheck disable=SC2016
+printf 'rm "$(dirname "$GIT_CONFIG_GLOBAL")/before"\n' > "$AGY_STUB_ACTIONS"
+check_state_run 10
+grep -qF 'DISPATCH_REVIEW_STATE=critical(' "$TMP/cfg.err" || fail 'agy baseline loss passed'
+grep -qF 'state: drift check could not complete' "$TMP/cfg.err" || fail 'agy compare diagnostic absent'
+cat > "$TMP/bin/claude" <<'STUB'
+#!/usr/bin/env bash
+cat >/dev/null
+for state in "$TMPDIR"/dispatch-review-state.*; do
+  [ ! -d "$state" ] || rm "$state/before"
+done
+STUB
+(cd "$SRC" && run_state_runtime claude 10)
+grep -qF 'DISPATCH_REVIEW_STATE=critical(' "$TMP/cfg.err" || fail 'claude baseline loss passed'
+grep -qF 'state: drift check could not complete' "$TMP/cfg.err" || fail 'claude compare diagnostic absent'
 
 # The file had 22 agy stubs before the four persona-specific controls above;
 # every definition must answer the roster subcommand instead of falling into cat.

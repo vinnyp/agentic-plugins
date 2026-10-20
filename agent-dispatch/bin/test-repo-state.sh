@@ -56,6 +56,7 @@ for args in snapshot compare; do
 done
 (TMPDIR="$TMP/nonexistent"; export TMPDIR
  rc_is 3 "$BIN/repo-state-check" compare "$TMP/before" "$TMP/before"
+ mktemp() { return 1; }
  rc_is 3 repo_state_compare "$TMP/before" "$TMP/before" "$TMP/changes")
 check_key user.name Other 2
 grep -Eq '^config user.name \(local:.*<changed>' "$TMP/changes"
@@ -392,4 +393,47 @@ snap "$TMP/after"
   [ "$(wc -l < "$TMP/cat-file-calls" | tr -d ' ')" = 1 ]
   grep -q -- "--batch-check=%(objectname) %(objecttype)" "$TMP/cat-file-calls"
 )
+# A failing shasum must retry the same bytes with sha256sum.
+(
+  expected=$(printf fixture | _repo_state_sha256)
+  shasum() { cat >/dev/null; return 1; }
+  [ "$(printf fixture | _repo_state_sha256)" = "$expected" ]
+)
+# Fail closed on an explicit unreadable baseline.
+repo_state_mark_unreadable "$TMP/bad-before"
+rc_is 3 repo_state_compare "$TMP/bad-before" "$TMP/after" "$TMP/changes"
+grep -qx 'state: <unreadable before snapshot>' "$TMP/changes"
+check_key branch.main.remote /tmp/x.git 2
+fixture
+git -C "$R" config branch.main.remote origin
+snap "$TMP/before"
+git -C "$R" config --unset branch.main.remote
+snap "$TMP/after"
+rc_is 1 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
+fixture
+snap "$TMP/before"
+git -C "$R" remote add evil https://example.invalid/evil
+git -C "$R" config branch.bypass-cache.remote evil
+snap "$TMP/after"
+rc_is 2 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
+grep -q $'branch.bypass-cache.remote\tevil$' "$TMP/after"
+fixture
+printf '#!/bin/sh\n' > "$TMP/hook-mode"
+chmod -x "$TMP/hook-mode"
+ln -s "$TMP/hook-mode" "$R/.git/hooks/pre-commit"
+snap "$TMP/before"
+chmod +x "$TMP/hook-mode"
+snap "$TMP/after"
+rc_is 2 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
+grep -qx 'hooks pre-commit: changed' "$TMP/changes"
+fixture
+git -C "$R" switch -q --detach
+git -C "$R" -c user.name=Foreign -c user.email=foreign@example.invalid commit -qm foreign --allow-empty
+git -C "$R" tag -a v1 -m fixture
+git -C "$R" switch -q main
+snap "$TMP/before"
+git -C "$R" switch -q -c x v1
+snap "$TMP/after"
+rc_is 1 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
+if grep -q '^commit ' "$TMP/changes"; then exit 1; fi
 echo 'repo-state tests passed'

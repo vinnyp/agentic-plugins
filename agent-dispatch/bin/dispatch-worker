@@ -344,6 +344,10 @@ review_state_after_runtime() {
   repo_state_snapshot "$REPO_STATE_SRC" "$REVIEW_STATE_DIR/after" || repo_state_mark_unreadable "$REVIEW_STATE_DIR/after"
   REVIEW_STATE_CLASS=0
   repo_state_compare "$REVIEW_STATE_DIR/before" "$REVIEW_STATE_DIR/after" "$REVIEW_STATE_DIR/changes" || REVIEW_STATE_CLASS=$?
+  case "$REVIEW_STATE_CLASS" in
+    0|1|2) ;;
+    *) printf 'state: drift check could not complete (compare exit %s)\n' "$REVIEW_STATE_CLASS" >> "$REVIEW_STATE_DIR/changes"; REVIEW_STATE_CLASS=2 ;;
+  esac
   REVIEW_STATE_N=$(wc -l < "$REVIEW_STATE_DIR/changes" | tr -d ' ')
 }
 
@@ -814,6 +818,10 @@ dispatch_agy() {
     if [ "$state_checked" = 1 ]; then
       repo_state_snapshot "$REPO_STATE_SRC" "$REVIEW_STATE_DIR/interim" || repo_state_mark_unreadable "$REVIEW_STATE_DIR/interim"
       repo_state_compare "$REVIEW_STATE_DIR/before" "$REVIEW_STATE_DIR/interim" "$REVIEW_STATE_DIR/changes" || cmp_rc=$?
+      case "$cmp_rc" in
+        0|1|2) ;;
+        *) printf 'state: drift check could not complete (compare exit %s)\n' "$cmp_rc" >> "$REVIEW_STATE_DIR/changes"; cmp_rc=2 ;;
+      esac
       if [ "$cmp_rc" = 2 ] && { [ "$agy_rc" = 124 ] || [ "$agy_rc" = 137 ]; }; then
         retry_skipped=1
         echo "dispatch-worker: critical source-repo drift after the first attempt — skipping the timeout retry." >&2
@@ -847,6 +855,10 @@ dispatch_agy() {
       repo_state_snapshot "$REPO_STATE_SRC" "$REVIEW_STATE_DIR/after" || repo_state_mark_unreadable "$REVIEW_STATE_DIR/after"
       local after_rc=0
       repo_state_compare "$REVIEW_STATE_DIR/before" "$REVIEW_STATE_DIR/after" "$REVIEW_STATE_DIR/after-changes" || after_rc=$?
+      case "$after_rc" in
+        0|1|2) ;;
+        *) printf 'state: drift check could not complete (compare exit %s)\n' "$after_rc" >> "$REVIEW_STATE_DIR/after-changes"; after_rc=2 ;;
+      esac
       # Preserve critical interim evidence even if concurrent work restored it.
       if [ "$cmp_rc" != 2 ] || [ "$after_rc" = 2 ]; then
         cp "$REVIEW_STATE_DIR/after-changes" "$REVIEW_STATE_DIR/changes"
