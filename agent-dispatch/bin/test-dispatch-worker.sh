@@ -670,6 +670,7 @@ rc=$?
 [ ! -e "$TMP/.git" ] || fail "auth probe or runner cwd got git-initialized by agy stub"
 grep -qF -- "--dangerously-skip-permissions" <<<"$(agy_exec_args)" || fail "hermetic agy review did not bypass command permissions"
 grep -qF 'DISPOSABLE local clone at' "$AGY_STDIN_FILE" || fail "hermetic review preamble did not identify the disposable local clone"
+grep -qF "Origin's fetch and push URLs point at a disabled path; other remotes and the operator's credential helper remain reachable, so do not fetch or push." "$AGY_STDIN_FILE" || fail "hermetic review preamble missing remote warning"
 grep -qF "detached at $pre_head" "$AGY_STDIN_FILE" || fail "hermetic review preamble did not identify the disposable local clone"
 grep -qF "Translate every $(git -C "$R17" rev-parse --show-toplevel)" "$AGY_STDIN_FILE" || fail "hermetic review preamble did not map brief paths"
 # shellcheck disable=SC2016 # Match the literal scratch command, without expansion.

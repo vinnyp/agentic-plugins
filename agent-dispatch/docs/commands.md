@@ -241,7 +241,8 @@ passing `--dangerously-skip-permissions`. Allocation refusal remains exit 3.
 
 Every runtime's `--review`, including fallback, snapshots source state before and after.
 Unexpected config changes, hook changes, foreign committers on new local commits, or an
-unreadable after-snapshot exit 10, overriding every post-launch result. Ref, worktree and
+unreadable after-snapshot exit 10, overriding every post-launch result. A compare that
+cannot complete is also critical (rc 10). Ref, worktree and
 working-tree movement only warn. stderr reports
 `DISPATCH_REVIEW_STATE=clean|warn(<n>)|critical(<n>)|skipped(<reason>) original_rc=<n>`:
 clean means no drift; `<n>` in both `warn(<n>)` and `critical(<n>)` counts all change lines.
@@ -279,7 +280,7 @@ so judge those reviews yourself. For a whole round of lenses, see
 | `7` | agy is not authenticated (`agy` and sign in). Do not retry as a build. |
 | `8` | an agy `--review` did not produce a real review (too short, no evidence, or timed out twice) |
 | `9` | effective agy model missing from live `agy models`; update `bin/lib/agy-models.sh` or the override |
-| `10` | source repo changed during the review window; inspect and restore named changes before committing, discard the body unless every change is known concurrent work, then re-run |
+| `10` | source repo changed during the review window or compare could not complete; inspect and restore named changes before committing, discard the body unless every change is known concurrent work, then re-run. Known residual: a review run can still execute a planted `filter.*.clean` during the after-snapshot’s `git status`. |
 | `124` | the external `--timeout` bound killed a hung agent — a blocked phase, not a result |
 | other | the runtime's own exit code; native 10 is remapped to 1 during review |
 
@@ -661,6 +662,7 @@ Exit 9 means model not offered in `dispatch-worker`; in `coding-dispatch.sh` and
 ```text
 review-clone.sh <src> <dest> [<sha>]
 review-clone.sh --remove <abs parent> <that path>
+review-clone.sh --help | -h
 ```
 
 Builds a disposable local clone detached at the supplied SHA (default source HEAD), with
@@ -672,8 +674,9 @@ to stdout. It verifies a
 clean checkout and matching refs. Exit 0 means success; 3 refuses an unsuitable path or source;
 4 means a faithful checkout is unavailable (including filters, LFS, partial clones or invalid
 HEAD), allowing the dispatcher's non-hermetic fallback. Invalid CLI arguments exit 64.
-Source must be an absolute work-tree path. Destination must be absolute, absent, not symlinked,
-without a trailing slash, and named `dispatch-review-wt.*` under an existing parent.
+Source must be an absolute work-tree path. Destination must be absolute, not symlinked, without a trailing slash, and named
+`dispatch-review-wt.*` under an existing parent. It may be absent or an existing empty
+directory owned by the current user with mode 700.
 Guarded removal requires an absolute,
 non-symlink path directly under the resolved parent, with no trailing slash and a basename
 matching `dispatch-review-wt.*`. Failed builds use guarded cleanup too.
@@ -691,17 +694,21 @@ repo-state-check compare <before> <after>
 Snapshot records effective config (including worktree config), hook hashes and modes, refs,
 worktrees, dirty paths and configured identity. Files are mode 0600; keep them in a private
 temp directory and remove them after inspection. Snapshot exits 0 on success or 3 for an
-empty, relative or invalid repository path; invalid CLI arguments exit 64.
+empty, relative or invalid repository path, a missing hasher, or unreadable config.
+A failed snapshot writes an `unreadable` marker to the output file when possible.
+Invalid CLI arguments exit 64.
 Compare prints named change lines and exits 0 for clean, 1 for warn-only drift or 2 for
 critical drift. Config changes are critical except these benign keys: `branch.*.*`
-except `branch.*.pushremote` and a `branch.*.remote` naming a new remote;
+except `branch.*.pushremote`; `branch.*.remote` is benign only when it names a remote
+present before the review;
 `remote.*.fetch`; `remote.*.gh-resolved`; a new remote's `url`/`fetch`/`gh-resolved`;
 `gc.*`; `maintenance.*`; `extensions.worktreeconfig`; `core.sparsecheckout`; and
 `core.sparsecheckoutcone`. Existing remote URL changes stay critical.
 Hook changes and new local-only commits with a committer different from the initial identity
 are critical. Ref, worktree and working-tree movement warn. Sensitive values are hashed in
 snapshots and output is redacted. Treat compare exit 2 as review rc 10; exits 3/64 mean
-check failed: stop and investigate, never clean.
+check failed: stop and investigate, never clean. `dispatch-worker` treats a compare
+that cannot complete as critical and returns rc 10.
 
 | Exit | Meaning |
 | --- | --- |

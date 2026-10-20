@@ -732,7 +732,7 @@ dispatch_agy() {
     {
       if [ "$REVIEW_HERMETIC" = "1" ]; then
         printf '%s\n' "READ-ONLY REVIEW MODE for the real repository (headless --print): this review runs hermetically, and there is NO human to approve."
-        printf '%s\n' "You are in a DISPOSABLE local clone at ${review_path%/}, detached at ${REVIEW_CLONE_SHA}. Its branches and refs are a snapshot of the real repository's; its git config and global git config are private to this run. Fetching and pushing are disabled. It is deleted when this run ends."
+        printf '%s\n' "You are in a DISPOSABLE local clone at ${review_path%/}, detached at ${REVIEW_CLONE_SHA}. Its branches and refs are a snapshot of the real repository's; its git config and global git config are private to this run. Origin's fetch and push URLs point at a disabled path; other remotes and the operator's credential helper remain reachable, so do not fetch or push. It is deleted when this run ends."
         printf '%s\n' "The brief's repo root ${REVIEW_SRC_TOP%/} is the live repository. Translate every ${REVIEW_SRC_TOP%/} path in the brief to ${review_path%/} and work there. Read-only commands may target ${REVIEW_SRC_TOP%/}, but never write, configure, checkout, branch, stash, commit or run a build or test under ${REVIEW_SRC_TOP%/}."
         # shellcheck disable=SC2016 # Scratch instructions must retain literal shell variables.
         printf '%s\n' 'Scratch repos: set -eu; tmp=$(mktemp -d "${TMPDIR:-/tmp}/<name>.XXXXXX"); abort if it is empty; give every git command -C "$tmp".'

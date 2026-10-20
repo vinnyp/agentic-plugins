@@ -61,6 +61,9 @@ cmp "$TMP/refs" "$TMP/refs-after"
 empty="$TMP/p/dispatch-review-wt.empty"
 mkdir -m 700 "$empty"
 expect_rc 0 review_clone_build "$src" "$empty"
+mkdir -m 755 "$TMP/p/dispatch-review-wt.public"
+expect_rc 3 review_clone_build "$src" "$TMP/p/dispatch-review-wt.public"
+[ -d "$TMP/p/dispatch-review-wt.public" ]
 mkdir -m 700 "$TMP/p/dispatch-review-wt.nonempty"
 echo occupied > "$TMP/p/dispatch-review-wt.nonempty/file"
 expect_rc 3 review_clone_build "$src" "$TMP/p/dispatch-review-wt.nonempty"
@@ -78,6 +81,24 @@ git -C "$src" commit -qm filter-attributes
 expect_rc 4 review_clone_build "$src" "$TMP/p/dispatch-review-wt.filter"
 git -C "$src" rm -q .gitattributes
 git -C "$src" commit -qm remove-test-attributes
+for directory in 'a"b' $'a\tb'; do
+  mkdir "$src/$directory"
+  echo '*.bin filter=lfs' > "$src/$directory/.gitattributes"
+  git -C "$src" add "$directory/.gitattributes"
+  git -C "$src" commit -qm unusual-attributes
+  expect_rc 4 review_clone_build "$src" "$TMP/p/dispatch-review-wt.unusual"
+  git -C "$src" rm -q "$directory/.gitattributes"
+  git -C "$src" commit -qm remove-unusual-attributes
+done
+printf '# filter=lfs\n' > "$src/.git/info/attributes"
+expect_rc 0 review_clone_build "$src" "$TMP/p/dispatch-review-wt.info-comment"
+{
+  printf '*.bin filter=lfs\n'
+  awk 'BEGIN {for (i=0; i<60000; i++) print "# padding"}'
+} > "$src/.git/info/attributes"
+[ "$(wc -c < "$src/.git/info/attributes")" -ge 600000 ]
+expect_rc 4 review_clone_build "$src" "$TMP/p/dispatch-review-wt.info-large"
+rm "$src/.git/info/attributes"
 # Move a ref after the first mirror fetch; the next fetch must converge.
 eval "$(declare -f _review_clone_refs | sed '1s/_review_clone_refs/_original_review_clone_refs/')"
 _review_clone_refs() {

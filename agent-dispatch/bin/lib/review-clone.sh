@@ -55,7 +55,7 @@ _review_clone_failed() {
 
 review_clone_build() {
   local src=${1:-} dest=${2:-} sha=${3:-} parent common config key value
-  local paths path attributes target source_refs dest_refs status mode attempt entry
+  local path attributes target source_refs dest_refs status mode attempt entry
   REVIEW_CLONE_SHA=''
   # Public output variable for sourced callers.
   # shellcheck disable=SC2034
@@ -137,23 +137,22 @@ review_clone_build() {
     attributes=$(cat "$common/info/attributes" 2>/dev/null) || {
       _review_clone_failed 'unreadable info attributes' "$parent" "$dest"; return 4;
     }
-    if printf '%s\n' "$attributes" | sed '/^[[:space:]]*#/d' | grep -Eq '(^|[[:space:]])-?filter='; then
+    if printf '%s\n' "$attributes" | awk '!/^[[:space:]]*#/ && /(^|[[:space:]])-?filter=/ {f=1} END {exit !f}'; then
       _review_clone_failed 'filter in info attributes' "$parent" "$dest"; return 4
     fi
   fi
-  paths=$(_review_clone_git -C "$src" -c core.quotePath=false ls-tree -r --name-only "$sha" 2>/dev/null) || {
+  _review_clone_git -C "$src" ls-tree -r -z --name-only "$sha" >/dev/null 2>&1 || {
     _review_clone_failed 'unreadable pinned tree' "$parent" "$dest"; return 4;
   }
-  paths=$(printf '%s\n' "$paths" | grep -E '(^|/)\.gitattributes$') || true
-  while IFS= read -r path; do
-    [ -n "$path" ] || continue
+  while IFS= read -r -d '' path; do
+    case "$path" in .gitattributes|*/.gitattributes) ;; *) continue ;; esac
     attributes=$(_review_clone_git -C "$src" show "$sha:$path" 2>/dev/null) || {
       _review_clone_failed 'unreadable tree attributes' "$parent" "$dest"; return 4;
     }
-    if printf '%s\n' "$attributes" | sed '/^[[:space:]]*#/d' | grep -Eq '(^|[[:space:]])-?filter='; then
+    if printf '%s\n' "$attributes" | awk '!/^[[:space:]]*#/ && /(^|[[:space:]])-?filter=/ {f=1} END {exit !f}'; then
       _review_clone_failed 'filter in tree attributes' "$parent" "$dest"; return 4
     fi
-  done <<< "$paths"
+  done < <(_review_clone_git -C "$src" ls-tree -r -z --name-only "$sha" 2>/dev/null)
   if ! _review_clone_git clone --quiet --local --no-checkout "$src" "$dest" 2>/dev/null ||
      ! chmod 700 "$dest" 2>/dev/null; then
     _review_clone_failed 'clone failed' "$parent" "$dest"; return 4
