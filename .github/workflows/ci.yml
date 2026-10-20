@@ -31,8 +31,10 @@ jobs:
         shell: bash
         run: bash agent-dispatch/bin/run-tests.sh
 
+      # Pinned so a new CLI release cannot fail every PR with a new validator warning.
+      # Bump deliberately, and fix or decide on any new warning in the same PR.
       - name: Install Claude Code
-        run: npm install -g @anthropic-ai/claude-code
+        run: npm install -g @anthropic-ai/claude-code@2.1.304
 
       - name: Validate plugin marketplace
         shell: bash
