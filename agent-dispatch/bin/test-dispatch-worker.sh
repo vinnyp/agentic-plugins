@@ -1215,6 +1215,35 @@ rc=$?
 [ -z "$(find "$WT_PREEXIST" -mindepth 1 -maxdepth 1 -print -quit)" ] || fail "pre-existing parent retained a stray entry"
 echo "test 33b (pre-existing empty parent survives cleanup) PASS"
 
+# V13. Reap old clones and source worktrees, preserving fresh and foreign entries.
+REAPER_PARENT="$TMP/reaper preferred"
+mkdir -p "$REAPER_PARENT"
+REAPER_OTHER="$TMP/reaper-other-repo"; make_git_repo "$REAPER_OTHER"
+git clone --quiet --local "$R33" "$REAPER_PARENT/dispatch-review-wt.old1" || fail "V13 old clone setup"
+git -C "$R33" worktree add --quiet --detach "$REAPER_PARENT/dispatch-review-wt.old2" HEAD || fail "V13 legacy setup"
+git clone --quiet --local "$R33" "$REAPER_PARENT/dispatch-review-wt.new" || fail "V13 fresh clone setup"
+mkdir "$REAPER_PARENT/other-dir"
+git -C "$REAPER_OTHER" worktree add --quiet --detach "$REAPER_PARENT/dispatch-review-wt.sib" HEAD || fail "V13 foreign setup"
+touch -t 202001010000 "$REAPER_PARENT/dispatch-review-wt.old1" "$REAPER_PARENT/dispatch-review-wt.old2" "$REAPER_PARENT/other-dir" "$REAPER_PARENT/dispatch-review-wt.sib"
+DISPATCH_REVIEW_WT_DIR="$REAPER_PARENT" TIMEOUT=0 "$DW" --runtime agy --review --brief "$BRIEF" --workdir "$R33" >"$TMP/v13.out" 2>"$TMP/v13.err"
+rc=$?
+[ "$rc" -eq 0 ] || fail "V13 preferred review failed"
+[ ! -e "$REAPER_PARENT/dispatch-review-wt.old1" ] || fail "V13 old clone survived"
+[ ! -e "$REAPER_PARENT/dispatch-review-wt.old2" ] || fail "V13 old source worktree survived"
+[ -d "$REAPER_PARENT/dispatch-review-wt.new/.git" ] || fail "V13 fresh clone removed"
+[ -d "$REAPER_PARENT/other-dir" ] || fail "V13 unrelated directory removed"
+[ -f "$REAPER_PARENT/dispatch-review-wt.sib/.git" ] || fail "V13 foreign worktree removed"
+git -C "$REAPER_PARENT/dispatch-review-wt.sib" rev-parse --verify HEAD >/dev/null || fail "V13 foreign worktree damaged"
+REAPER_CACHE="$TMP/reaper-cache"
+mkdir -p "$REAPER_CACHE/dispatch-review-worktrees"
+git clone --quiet --local "$R33" "$REAPER_CACHE/dispatch-review-worktrees/dispatch-review-wt.old1" || fail "V13 cache clone setup"
+touch -t 202001010000 "$REAPER_CACHE/dispatch-review-worktrees/dispatch-review-wt.old1"
+DISPATCH_REVIEW_WT_DIR="$TMPDIR/reaper-rejected" XDG_CACHE_HOME="$REAPER_CACHE" TIMEOUT=0 "$DW" --runtime agy --review --brief "$BRIEF" --workdir "$R33" >"$TMP/v13-cache.out" 2>"$TMP/v13-cache.err"
+rc=$?
+[ "$rc" -eq 0 ] || fail "V13 cache review failed"
+[ ! -e "$REAPER_CACHE/dispatch-review-worktrees/dispatch-review-wt.old1" ] || fail "V13 cache old clone survived"
+echo "test V13 (reaper handles clones and legacy worktrees in both parents) PASS"
+
 # 34. Cleanup removes only its worktree: a concurrent sibling worktree survives.
 R34="$TMP/repo34"; make_git_repo "$R34"
 WT_SHARED="$TMP/review-wt-shared"; mkdir -p "$WT_SHARED"
