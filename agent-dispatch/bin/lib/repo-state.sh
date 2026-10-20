@@ -35,14 +35,55 @@ _repo_state_configs() {
   done
 }
 
+_repo_state_decode() {
+  local value=$1
+  value=${value//%0A/$'\n'}
+  value=${value//%09/$'\t'}
+  printf '%s' "${value//%25/%}"
+}
+
+_repo_state_hooks() {
+  local dir=$1 prefix=$2 file mode digest
+  [ -d "$dir" ] || return 0
+  for file in "$dir"/* "$dir"/.[!.]* "$dir"/..?*; do
+    [ -f "$file" ] && [ ! -L "$file" ] || continue
+    mode=$(stat -f '%Lp' "$file" 2>/dev/null) || mode=$(stat -c '%a' "$file")
+    digest=$(shasum -a 256 < "$file" | cut -d ' ' -f 1)
+    printf 'hooks\t%s\t%s\t%s\n' "$(_repo_state_encode "$prefix${file##*/}")" "$mode" "$digest"
+  done
+}
+
+_repo_state_tree() {
+  local wt=$1 status=$2 record path skip
+  if [ ! -d "$wt" ] || ! _repo_state_git -C "$wt" status --porcelain=v2 -z --untracked-files=all > "$status" 2>/dev/null; then
+    printf 'tree\t%s\tunreadable\n' "$(_repo_state_encode "$wt")"
+    return
+  fi
+  printf 'tree\t%s\t%s\n' "$(_repo_state_encode "$wt")" "$(shasum -a 256 < "$status" | cut -d ' ' -f 1)"
+  while IFS= read -r -d '' record; do
+    case "$record" in
+      '1 '*) skip=8 ;; '2 '*) skip=9 ;; 'u '*) skip=10 ;;
+      '? '*) skip=1 ;; *) continue ;;
+    esac
+    path=$record
+    while [ "$skip" -gt 0 ]; do path=${path#* }; skip=$((skip - 1)); done
+    printf 'dirty\t%s\t%s\n' "$(_repo_state_encode "$wt")" "$(_repo_state_encode "$path")"
+    case "$record" in '2 '*) IFS= read -r -d '' path || true ;; esac
+  done < "$status"
+}
+
 repo_state_snapshot() (
   umask 077
-  local repo=${1:-} out=${2:-} top ident name email config wt
+  local repo=${1:-} out=${2:-} top ident name email config wt hooks custom head branch record
   case "$repo" in /*) ;; *) return 3 ;; esac
   top=$(_repo_state_git -C "$repo" rev-parse --path-format=absolute --show-toplevel 2>/dev/null) || return 3
   config=$(mktemp "${TMPDIR:-/tmp}/repo-state-config.XXXXXX") || return 3
   if ! _repo_state_git -C "$repo" config --list --show-scope --show-origin -z > "$config"; then
     rm -f "$config"
+    return 3
+  fi
+  if ! _repo_state_git -C "$repo" for-each-ref --format='ref%09%(refname)%09%(objectname)' > "$config.refs"; then
+    rm -f "$config" "$config.refs"
     return 3
   fi
   : > "$out" || { rm -f "$config"; return 3; }
@@ -53,6 +94,27 @@ repo_state_snapshot() (
     ident=${ident% *}; ident=${ident% *}
     name=${ident% <*}; email=${ident##*<}; email=${email%>}
     printf 'identity\t%s\t%s\n' "$(_repo_state_encode "$name")" "$(_repo_state_encode "$email")"
+    cat "$config.refs"
+    hooks=$(_repo_state_git -C "$repo" rev-parse --path-format=absolute --git-path hooks)
+    _repo_state_hooks "$hooks" ''
+    custom=$(_repo_state_git -C "$repo" config --get core.hooksPath) || custom=''
+    if [ -n "$custom" ]; then
+      case "$custom" in /*) ;; *) custom="$top/$custom" ;; esac
+      [ "$custom" = "$hooks" ] || _repo_state_hooks "$custom" 'core.hooksPath/'
+    fi
+    wt='' head='' branch=''
+    while IFS= read -r record || [ -n "$record" ]; do
+      case "$record" in
+        'worktree '*) wt=${record#worktree } ;;
+        'HEAD '*) head=${record#HEAD } ;;
+        'branch '*) branch=${record#branch } ;;
+        '')
+          [ -n "$wt" ] || continue
+          printf 'worktree\t%s\t%s\t%s\n' "$(_repo_state_encode "$wt")" "$head" "$branch"
+          _repo_state_tree "$wt" "$config.status"
+          wt='' head='' branch='' ;;
+      esac
+    done < <(_repo_state_git -C "$repo" -c core.quotePath=false worktree list --porcelain 2>/dev/null)
     _repo_state_configs < "$config"
     while IFS= read -r wt; do
       case "$wt" in 'worktree '*) wt=${wt#worktree } ;; *) continue ;; esac
@@ -62,7 +124,7 @@ repo_state_snapshot() (
       fi
     done < <(_repo_state_git -C "$repo" worktree list --porcelain 2>/dev/null)
   } > "$out"
-  rm -f "$config"
+  rm -f "$config" "$config.refs" "$config.status"
   return 0
 )
 
@@ -125,5 +187,63 @@ repo_state_compare() (
       "$(printf '%s' "$key" | sed -E 's#(://)[^/]*@#\1#g')" "$scope" "$origin" \
       "$(_repo_state_display "$key" "$old")" "$(_repo_state_display "$key" "$new")" >> "$changes"
   done < "$temp/diff"
+  # Pair records by kind and name; compare complete payloads (including modes/branches).
+  awk -F '\t' '
+    $1!="hooks" && $1!="ref" && $1!="worktree" && $1!="tree" {next}
+    {k=$1 FS $2; v=$3; for(i=4;i<=NF;i++) v=v FS $i; keys[k]=1}
+    FILENAME==ARGV[1] {old[k]=v; next} {new[k]=v}
+    END {for(k in keys) {hasold=(k in old); hasnew=(k in new); if(old[k]!=new[k]) {split(old[k],o,FS); split(new[k],n,FS); print k FS (hasold?o[1]:"(absent)") FS (hasnew?n[1]:"(absent)")}}}
+  ' "$before" "$after" > "$temp/records"
+  local kind repo oid type sha cn ce identity_name identity_email count paths
+  repo=$(awk -F '\t' '$1=="repo" {print $2;exit}' "$after")
+  repo=$(_repo_state_decode "$repo")
+  identity_name=$(awk -F '\t' '$1=="identity" {print $2;exit}' "$before")
+  identity_email=$(awk -F '\t' '$1=="identity" {print $3;exit}' "$before")
+  : > "$temp/exclude"
+  while IFS= read -r oid; do
+    type=$(_repo_state_git -C "$repo" cat-file -t "$oid" 2>/dev/null) || continue
+    case "$type" in commit|tag) printf '^%s\n' "$oid" >> "$temp/exclude" ;; esac
+  done < <(awk -F '\t' '$1=="ref" {print $3}' "$before")
+  while IFS=$'\t' read -r kind key old new remote line; do
+    [ "$rc" -ge 1 ] || rc=1
+    case "$kind" in
+      hooks)
+        rc=2
+        if [ "$old" = '(absent)' ]; then line=added
+        elif [ "$new" = '(absent)' ]; then line=removed
+        else line=changed; fi
+        printf 'hooks %s: %s\n' "$key" "$line" >> "$changes" ;;
+      ref)
+        printf 'ref %s: %s -> %s\n' "$key" "$old" "$new" >> "$changes"
+        case "$key" in refs/heads/*)
+          [ "$new" != '(absent)' ] || continue
+          if ! _repo_state_git -C "$repo" rev-list --stdin "$new" --not --remotes < "$temp/exclude" > "$temp/commits" 2>/dev/null; then
+            printf 'commit-check %s: failed\n' "$key" >> "$changes"; rc=2; continue
+          fi
+          while IFS= read -r sha; do
+            cn=$(_repo_state_git -C "$repo" show -s --format=%cn "$sha")
+            ce=$(_repo_state_git -C "$repo" show -s --format=%ce "$sha")
+            if [ "$(_repo_state_encode "$cn")" != "$identity_name" ] || [ "$(_repo_state_encode "$ce")" != "$identity_email" ]; then
+              printf 'commit %s: committer <changed>\n' "$sha" >> "$changes"; rc=2
+            fi
+          done < "$temp/commits" ;;
+        esac ;;
+      worktree)
+        [ "$old" = '(absent)' ] || old="HEAD $old"
+        [ "$new" = '(absent)' ] || new="HEAD $new"
+        printf 'worktree %s: %s -> %s\n' "$key" "$old" "$new" >> "$changes" ;;
+      tree)
+        if [ "$new" = unreadable ]; then
+          printf 'tree %s: unreadable\n' "$key" >> "$changes"
+        else
+          awk -F '\t' -v wt="$key" '$1=="dirty" && $2==wt {print $3}' "$before" | LC_ALL=C sort -u > "$temp/dirty-old"
+          awk -F '\t' -v wt="$key" '$1=="dirty" && $2==wt {print $3}' "$after" | LC_ALL=C sort -u > "$temp/dirty-new"
+          LC_ALL=C comm -13 "$temp/dirty-old" "$temp/dirty-new" > "$temp/dirty"
+          count=$(wc -l < "$temp/dirty" | tr -d ' ')
+          paths=$(head -n 20 "$temp/dirty" | paste -sd ' ' -)
+          printf 'tree %s: %s new dirty paths: %s\n' "$key" "$count" "$paths" >> "$changes"
+        fi ;;
+    esac
+  done < "$temp/records"
   return "$rc"
 )

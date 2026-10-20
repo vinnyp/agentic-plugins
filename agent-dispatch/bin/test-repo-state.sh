@@ -16,8 +16,11 @@ rc_is() {
 }
 fixture() {
   R=$(mktemp -d "$TMP/repo.XXXXXX")
-  git -C "$R" init -q
+  git -C "$R" init -q -b main
+  git -C "$R" init -q --bare "$R.git"
+  git -C "$R" remote add origin "$R.git"
   git -C "$R" -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm initial --allow-empty
+  git -C "$R" push -q origin main
 }
 snap() { repo_state_snapshot "$R" "$1"; }
 check_key() {
@@ -104,4 +107,61 @@ ln -s "$BIN/repo-state-check" "$TMP/links/check"
 rc_is 0 "$TMP/links/check" snapshot "$R" "$TMP/after"
 repo_state_mark_unreadable "$TMP/after"
 rc_is 2 "$TMP/links/check" compare "$TMP/before" "$TMP/after"
+git config --file "$GIT_CONFIG_GLOBAL" user.email fixture@example.invalid
+fixture
+snap "$TMP/before"
+printf '#!/bin/sh\n' > "$R/.git/hooks/pre-commit"
+snap "$TMP/after"
+rc_is 2 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
+grep -qx 'hooks pre-commit: added' "$TMP/changes"
+for identity in foreign configured; do
+  fixture
+  snap "$TMP/before"
+  if [ "$identity" = foreign ]; then
+    git -C "$R" -c user.name=t -c user.email=t@x.invalid commit -qm foreign --allow-empty
+    expected=2
+  else
+    git -C "$R" commit -qm configured --allow-empty
+    expected=1
+  fi
+  snap "$TMP/after"
+  rc_is "$expected" repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
+  grep -q '^ref refs/heads/main:' "$TMP/changes"
+  if [ "$identity" = foreign ]; then grep -q '^commit ' "$TMP/changes"
+  elif grep -q '^commit ' "$TMP/changes"; then exit 1; fi
+done
+fixture
+git -C "$R" checkout -qb old
+git -C "$R" -c user.name=t -c user.email=t@x.invalid commit -qm old --allow-empty
+snap "$TMP/before"
+git -C "$R" checkout -qb new old
+snap "$TMP/after"
+rc_is 1 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
+if grep -q '^commit ' "$TMP/changes"; then exit 1; fi
+for operation in stash notes untracked; do
+  fixture
+  snap "$TMP/before"
+  case "$operation" in
+    stash) printf x > "$R/file"; git -C "$R" add file; git -C "$R" stash -q ;;
+    notes) git -C "$R" notes add -m x ;;
+    untracked) printf x > "$R/new-file" ;;
+  esac
+  snap "$TMP/after"
+  rc_is 1 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
+  if [ "$operation" = untracked ]; then grep -q '^tree .*new-file' "$TMP/changes"
+  else grep -q '^ref ' "$TMP/changes"; fi
+done
+fixture
+wt="$TMP/linked"
+git -C "$R" worktree add -q --detach "$wt" HEAD
+snap "$TMP/before"
+git -C "$wt" commit -qm moved --allow-empty
+snap "$TMP/after"
+rc_is 1 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
+grep -q "^worktree $wt: HEAD .* -> HEAD " "$TMP/changes"
+snap "$TMP/before"
+rm -rf "$wt"
+snap "$TMP/after"
+rc_is 1 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
+grep -qx "tree $wt: unreadable" "$TMP/changes"
 echo 'repo-state tests passed'
