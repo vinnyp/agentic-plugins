@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.3](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.8.2...agent-dispatch-v1.8.3) (2026-10-21)
+
+
+### Bug Fixes
+
+* **agent-dispatch:** lower-case the build-phase task commit subject ([#59](https://github.com/vinnyp/agentic-plugins/issues/59)) ([cbd247f](https://github.com/vinnyp/agentic-plugins/commit/cbd247fb1c49c72de20a5f1870d3cce17790655c))
+
 ## [1.8.2](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.8.1...agent-dispatch-v1.8.2) (2026-10-20)
 
 
