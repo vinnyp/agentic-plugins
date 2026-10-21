@@ -106,11 +106,28 @@ SLUG="$(printf '%s\n' "$out" | sed -n 's/.*PHASE=ok worktree=[^ ]* branch=\([^ ]
 [ -n "$SLUG" ] || { echo "$out"; echo "FAIL: phase should print PHASE=ok worktree=... branch=..."; exit 1; }
 n="$(git -C "$PARENT" rev-list --count "$parent_head".."$SLUG")"
 [ "$n" -eq 2 ] || { echo "FAIL: worktree branch should have 2 task commits, got $n"; exit 1; }
+# #242: config-conventional's subject-case rejects a sentence-case "Task N" subject.
+subjects="$(git -C "$PARENT" log --format=%s --reverse "$parent_head".."$SLUG")"
+want="$(printf 'feat(parentWT): task 1 via codex\nfeat(parentWT): task 2 via codex')"
+[ "$subjects" = "$want" ] || { printf '%s\n' "$subjects"; echo "FAIL: #242 worktree commit subjects should be lower-case conventional"; exit 1; }
 # B2 cross-script path identity: the path build-phase printed IS the registered worktree path.
 WT_PRINTED="$(printf '%s\n' "$out" | sed -n 's/.*PHASE=ok worktree=\([^ ]*\) branch=.*/\1/p')"
 git -C "$PARENT" worktree list --porcelain | grep -Fxq -- "worktree $WT_PRINTED" || { echo "FAIL: printed worktree path not registered (cross-script divergence)"; exit 1; }
 git -C "$PARENT" worktree remove --force "$WT_PRINTED" 2>/dev/null || true
 echo "test (phase --worktree: 2 commits off-main + path identity) PASS"
+
+# #242: the in-place commit site uses the same lower-case conventional subject.
+mkdir -p "$TMP/inplacebin"
+cat > "$TMP/inplacebin/coding-dispatch.sh" <<'STUB'
+#!/usr/bin/env bash
+echo "change" >> "$2/agent_made_this.txt"
+STUB
+chmod +x "$TMP/inplacebin/coding-dispatch.sh"
+INPLACE="$TMP/inplace242"; new_phase_repo "$INPLACE"
+out="$(PATH="$TMP/inplacebin:$PATH" "$SELF_DIR/coding-build-phase.sh" codex "$TMP/plan.md" "$INPLACE" 1 --build-cmd true 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] || { echo "$out"; echo "FAIL: #242 in-place phase should exit 0, got $rc"; exit 1; }
+[ "$(git -C "$INPLACE" log -1 --format=%s)" = "feat(inplace242): task 1 via codex" ] || { git -C "$INPLACE" log -1 --format=%s; echo "FAIL: #242 in-place commit subject should be lower-case conventional"; exit 1; }
+echo "test #242 commit subjects PASS"
 
 
 # #234: unavailable agents block either phase mode without committing.

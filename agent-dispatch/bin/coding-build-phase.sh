@@ -138,12 +138,14 @@ for tid in ${task_ids[@]+"${task_ids[@]}"}; do
     printf '%s\n' "$body"
   } > "$pf"
 
+  # Lower-case subject: config-conventional's subject-case rejects "Task N" (#242).
+  commit_subject="feat($SCOPE): task $tid via $agent"
   echo "════════ dispatching Task $tid → $agent ════════"
   if [ "$WORKTREE" -eq 1 ]; then
     CODING_DISPATCH_TIMEOUT="${CODING_DISPATCH_TIMEOUT:-$_phase_default_timeout}" coding-dispatch.sh --worktree "$agent" "$repo" "$pf" "$BUILD_CMD"
     _dispatch_rc=$?
     if [ "$_dispatch_rc" -eq 0 ]; then
-      ( cd "$WT_DIR" && git add -A && git commit -q -m "feat($SCOPE): Task $tid via $agent" )
+      ( cd "$WT_DIR" && git add -A && git commit -q -m "$commit_subject" )
       echo "✓ Task $tid committed in worktree ($(git -C "$WT_DIR" rev-parse --short HEAD))"
     elif [ "$_dispatch_rc" -eq 6 ]; then
       echo "✗ Task $tid BLOCKED: agent unavailable (capacity/rate limit) — per AGENTS.md, finish this task locally, then resume the phase at the next task."
@@ -161,7 +163,7 @@ for tid in ${task_ids[@]+"${task_ids[@]}"}; do
     CODING_DISPATCH_TIMEOUT="${CODING_DISPATCH_TIMEOUT:-$_phase_default_timeout}" coding-dispatch.sh "$agent" "$repo" "$pf" "$BUILD_CMD"
     _dispatch_rc=$?
     if [ "$_dispatch_rc" -eq 0 ]; then
-      ( cd "$repo" && git add -A && git commit -q -m "feat($SCOPE): Task $tid via $agent" )
+      ( cd "$repo" && git add -A && git commit -q -m "$commit_subject" )
       echo "✓ Task $tid committed ($(git -C "$repo" rev-parse --short HEAD))"
     elif [ "$_dispatch_rc" -eq 6 ]; then
       echo "✗ Task $tid BLOCKED: agent unavailable (capacity/rate limit) — per AGENTS.md, finish this task locally, then resume the phase at the next task."
