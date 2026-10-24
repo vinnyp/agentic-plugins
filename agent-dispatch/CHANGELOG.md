@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.8.4](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.8.3...agent-dispatch-v1.8.4) (2026-10-24)
+
+
+### Bug Fixes
+
+* **agent-dispatch:** exempt mutation suites from the marker guard, visibly ([#62](https://github.com/vinnyp/agentic-plugins/issues/62)) ([462fb02](https://github.com/vinnyp/agentic-plugins/commit/462fb026a05061f2a83d36605d6f8e5713856262))
+* **agent-dispatch:** keep agy review timeouts cross-model via a codex re-run ([#64](https://github.com/vinnyp/agentic-plugins/issues/64)) ([12d4392](https://github.com/vinnyp/agentic-plugins/commit/12d4392dd186cec9b9a1897587d2bf7e99345f5f))
+* **agent-dispatch:** refresh a restored file's mtime past the mutant's second ([#61](https://github.com/vinnyp/agentic-plugins/issues/61)) ([cbd069d](https://github.com/vinnyp/agentic-plugins/commit/cbd069d4da5c4183e01cc9c8cff8996333fe684f))
+* **agent-dispatch:** send the plan preamble with every build-phase task ([#63](https://github.com/vinnyp/agentic-plugins/issues/63)) ([4e18baf](https://github.com/vinnyp/agentic-plugins/commit/4e18baf908169aed64e7c9e77fae76be4ed31da0))
+
 ## [1.8.3](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.8.2...agent-dispatch-v1.8.3) (2026-10-21)
 
 
