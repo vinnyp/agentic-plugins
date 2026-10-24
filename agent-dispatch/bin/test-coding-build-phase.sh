@@ -154,6 +154,8 @@ type: plan
 > **For agentic workers:** executed via `coding-build-phase.sh codex <this plan> ...`. Specs (READ BOTH FIRST, absolute paths): `/abs/specs/a.md` and `/abs/specs/b.md`. Also '/abs/specs/a.md', "/abs/specs/c.md";
 
 > **For agentic workers:** REQUIRED SUB-SKILL: ... Spec: [[2026-06-12-x-design]] and [[2026-06-12-x-design]]
+
+> **For agentic workers:** REQUIRED SUB-SKILL: **docs/b.md**, <docs/c.md>, docs/d.md#goals, [spec](docs/e.md)
 Prose mentioning superpowers: and coding-build-phase.sh stays.
 
 > Ordinary blockquote stays.
@@ -179,7 +181,7 @@ for n237 in 1 2; do
   for want237 in "PLAN CONTEXT" "GOAL-237" "docs/specs/widget-design.md" "RULE-237" "/abs/path/specs/x.md" "Prose mentioning superpowers: and coding-build-phase.sh stays." "Ordinary blockquote stays." "Keep this worker guidance." "stop and report the conflict" "instructions addressed to the orchestrator"; do
     grep -qF "$want237" "$f237" || { cat "$f237"; echo "FAIL: #237 task $n237 prompt missing '$want237'"; exit 1; }
   done
-  for token237 in /abs/path/specs/x.md projects/agent-tooling/specs/2026-06-15-x-spec.md /abs/specs/a.md /abs/specs/b.md /abs/specs/c.md '[[2026-06-12-x-design]]'; do
+  for token237 in /abs/path/specs/x.md projects/agent-tooling/specs/2026-06-15-x-spec.md /abs/specs/a.md /abs/specs/b.md /abs/specs/c.md '[[2026-06-12-x-design]]' docs/b.md docs/c.md docs/d.md docs/e.md; do
     [ "$(grep -cxF "> Spec: $token237" "$f237")" -eq 1 ] || { cat "$f237"; echo "FAIL: missing or duplicate spec $token237"; exit 1; }
   done
   for unwanted237 in 'Executed unattended' 'REQUIRED SUB-SKILL' 'coding-build-phase.sh' 'superpowers:' '> **For agentic workers:**' 'reaches the coding agent' 'type: plan'; do
@@ -230,7 +232,7 @@ PATH="$TMP/ctxbin:$PATH" "$SELF_DIR/coding-build-phase.sh" codex "$TMP/whitespac
 for front237 in unclosed crlf; do
   rm -f "$CTX_DIR"/*
   if [ "$front237" = unclosed ]; then
-    printf '%s\n' '---' 'KEEP-UNCLOSED' '### Task 1: x' body > "$TMP/front.md"
+    printf '%s\n' '---' 'KEEP-UNCLOSED' 'title: x' '> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:x ... `/abs/specs/s.md`' '### Task 1: x' body > "$TMP/front.md"
   else
     printf '%s\r\n' '---' 'HIDE-CRLF' '---' 'KEEP-CRLF' '### Task 1: x' body > "$TMP/front.md"
   fi
@@ -238,6 +240,8 @@ for front237 in unclosed crlf; do
   [ -f "$CTX_DIR/1" ] || { echo 'FAIL: frontmatter prompt not captured'; exit 1; }
   if [ "$front237" = unclosed ]; then
     grep -qxF KEEP-UNCLOSED "$CTX_DIR/1" || { cat "$CTX_DIR/1"; echo 'FAIL: unclosed frontmatter swallowed preamble'; exit 1; }
+    ! grep -qF 'REQUIRED SUB-SKILL' "$CTX_DIR/1" || { cat "$CTX_DIR/1"; echo 'FAIL: unclosed frontmatter leaked banner'; exit 1; }
+    grep -qxF '> Spec: /abs/specs/s.md' "$CTX_DIR/1" || { cat "$CTX_DIR/1"; echo 'FAIL: unclosed frontmatter lost spec'; exit 1; }
   else
     ! grep -qF HIDE-CRLF "$CTX_DIR/1" && grep -qxF KEEP-CRLF "$CTX_DIR/1" || { cat "$CTX_DIR/1"; echo 'FAIL: CRLF frontmatter'; exit 1; }
   fi

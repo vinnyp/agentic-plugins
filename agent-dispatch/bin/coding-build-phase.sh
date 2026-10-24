@@ -110,38 +110,46 @@ extract_task() {
 # other worker guidance. Frontmatter is metadata, not worker context.
 extract_preamble() {
   awk '
+    function filter_line(line) {
+      if (line ~ /^>/ && !quote) banner=(line ~ /^> \*\*For [Aa]gentic workers/)
+      quote=(line ~ /^>/)
+      if (!quote) banner=0
+      if (banner && line ~ /REQUIRED SUB-SKILL|superpowers:|Executed unattended|coding-build-phase.sh|reaches the coding agent/) {
+        # Rescue every reference on the dropped line, independent of prose casing.
+        for (key in seen) delete seen[key]
+        rest=line
+        while (match(rest, /\[\[[^]]+\]\]/)) {
+          token=substr(rest, RSTART, RLENGTH)
+          if (!seen[token]++) print "> Spec: " token
+          rest=substr(rest, RSTART + RLENGTH)
+        }
+        rest=line
+        while (match(rest, /[^][()<>*"\047`[:space:]]+\.md(#[^][()<>*"\047`[:space:]]*)?/)) {
+          token=substr(rest, RSTART, RLENGTH)
+          rest=substr(rest, RSTART + RLENGTH)
+          sub(/#.*/, "", token)
+          if (token ~ /\// && !seen[token]++) print "> Spec: " token
+        }
+        return
+      }
+      print line
+    }
     {sub(/\r$/, "")}
     NR == 1 && $0 == "---" {frontmatter=1; buffered=$0; next}
     frontmatter {
       if ($0 == "---") {frontmatter=0; buffered=""; next}
-      if ($0 ~ /^### Task /) {print buffered; buffered=""; exit}
+      if ($0 ~ /^### Task /) exit
       buffered=buffered ORS $0
       next
     }
     /^### Task / {exit}
-    /^>/ && !quote {banner=($0 ~ /^> \*\*For [Aa]gentic workers/)}
-    {quote=($0 ~ /^>/)}
-    !quote {banner=0}
-    banner && /REQUIRED SUB-SKILL|superpowers:|Executed unattended|coding-build-phase.sh|reaches the coding agent/ {
-      # Rescue every reference on the dropped line, independent of prose casing.
-      for (key in seen) delete seen[key]
-      rest=$0
-      while (match(rest, /\[\[[^]]+\]\]/)) {
-        token=substr(rest, RSTART, RLENGTH)
-        if (!seen[token]++) print "> Spec: " token
-        rest=substr(rest, RSTART + RLENGTH)
+    {filter_line($0)}
+    END {
+      if (buffered != "") {
+        count=split(buffered, lines, ORS)
+        for (i=1; i<=count; i++) filter_line(lines[i])
       }
-      count=split($0, tokens, /[[:space:]`"\047]+/)
-      for (i=1; i<=count; i++) {
-        token=tokens[i]
-        sub(/[.,;:!?)]+$/, "", token)
-        if (token ~ /\// && token ~ /\.md$/ && !seen[token]++)
-          print "> Spec: " token
-      }
-      next
     }
-    {print}
-    END {if (buffered != "") print buffered}
   ' "$plan"
 }
 PLAN_CONTEXT_MAX="${CODING_BUILD_PLAN_CONTEXT_MAX:-12000}"
