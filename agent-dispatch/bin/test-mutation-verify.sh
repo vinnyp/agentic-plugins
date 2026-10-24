@@ -679,13 +679,17 @@ echo "test restored file is newer than mutant artifacts -> PASS"
 # Test 27: same-size Python mutants must not survive in timestamp-based pyc.
 # Start each import early in a second so a plain touch reproduces the bug.
 # ---------------------------------------------------------------------------
-if command -v python3 >/dev/null 2>&1; then
+if command -v python3 >/dev/null 2>&1; then (
+  unset PYTHONDONTWRITEBYTECODE PYTHONPYCACHEPREFIX
   PY27="$TMP/python_cache"; mkdir -p "$PY27"
   printf 'def value(): return 1 == 1\n' > "$PY27/m.py"
   cat > "$PY27/check.py" <<'EOF'
 import importlib.util
 import os
+import sys
 
+# macOS Python may default to a system cache prefix even with env unset.
+sys.pycache_prefix = None
 cache = importlib.util.cache_from_source("m.py")
 if os.path.exists(cache):
     os.unlink(cache)
@@ -703,10 +707,36 @@ EOF
     --mutate-cmd "cd '$PY27' && bash mutate.sh" >"$TMP/out27" 2>&1
   rc=$?
   [ "$rc" -eq 0 ] || { cat "$TMP/out27"; fail "Python cache: expected caught exit 0, got $rc"; }
-  (cd "$PY27" && python3 -c 'import m; assert m.value()') || fail "Python cache: fresh import reused the same-size mutant"
+  set -- "$PY27"/__pycache__/m.*.pyc
+  [ -f "$1" ] || fail "Python cache: mutated run did not write a pyc"
+  (cd "$PY27" && python3 -c 'import sys; sys.pycache_prefix = None; import m; assert m.value()') || fail "Python cache: fresh import reused the same-size mutant"
   echo "test restored Python module invalidates mutant pyc -> PASS"
+) || fail "Python cache regression"
 else
   echo "SKIP: Python cache regression (python3 absent)"
 fi
+
+# ---------------------------------------------------------------------------
+# Test 28: syntax failure must restore newer than artifacts written after
+# the mutation second, even though the mutated test never runs.
+# ---------------------------------------------------------------------------
+F28="$TMP/syntax_mtime_target.txt"
+A28="$TMP/syntax_mtime_artifact"
+printf 'hello world\n' > "$F28"
+cat > "$TMP/syntax_artifact.sh" <<EOF
+#!/usr/bin/env bash
+second=\$(date +%s)
+while [ "\$(date +%s)" -le "\$second" ]; do sleep 0.02; done
+touch "$A28"
+exit 1
+EOF
+bash "$MV" --file "$F28" --test-cmd "grep -q hello '$F28'" \
+  --mutate-sed 's/hello/goodbye/' --syntax-cmd "bash '$TMP/syntax_artifact.sh'" >"$TMP/out28" 2>&1
+rc=$?
+[ "$rc" -eq 2 ] || { cat "$TMP/out28"; fail "syntax restore mtime: expected exit 2, got $rc"; }
+[ "$(cat "$F28")" = "hello world" ] || fail "syntax restore mtime: original content not restored"
+[ -f "$A28" ] || fail "syntax restore mtime: syntax command did not write an artifact"
+[ "$(mtime_sec "$F28")" -gt "$(mtime_sec "$A28")" ] || fail "syntax restore mtime: restored source must be strictly newer than syntax artifacts in whole seconds"
+echo "test syntax failure restores newer than artifacts -> PASS"
 
 echo "ALL PASS"

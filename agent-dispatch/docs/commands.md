@@ -372,7 +372,10 @@ the file by copy (`mktemp`), **never** with git — the pass this exists to prot
 `git checkout -- <file>` on an uncommitted diff, which restores the last commit and throws away
 the in-flight fix while reporting a clean "mutation-proof" result.
 
-A restore refreshes the file’s mtime, forcing one rebuild of dependents.
+A restore refreshes the file's mtime, forcing one rebuild of dependents. After a mutation,
+it waits up to ~1s for the clock to pass the restore's start second before touching the file
+(with a bounded wait and warning if the clock does not advance). This assumes 1-second mtime
+granularity; 2-second FAT/exFAT timestamps are not covered.
 
 `--test-cmd` runs **twice**: once as a baseline against the unmutated file (if that fails, the
 instrument is invalid and it aborts before mutating anything) and once under mutation. The

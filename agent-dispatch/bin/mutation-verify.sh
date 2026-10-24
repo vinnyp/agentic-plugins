@@ -154,20 +154,22 @@ cp -p "$file" "$snap_file" || {
 # the file).
 restored=0
 mut_sec=0
-test_end_sec=0
 # `cp -p` keeps the file's mode, but it also copies the snapshot's ORIGINAL
 # mtime back — older than the mutant's build artifacts — so an mtime-based
 # build (cargo, make) would treat the mutant's artifacts as fresh and keep
 # running the mutant after a byte-identical restore.
-# Wait past both mutation and test completion before touching: Python pyc
-# headers and coarse build timestamps compare whole seconds.
+# Wait past restore entry before touching: all mutant artifacts precede it,
+# and Python pyc headers and coarse build timestamps compare whole seconds.
 restore_file() {
+  if [ "$mut_sec" -gt 0 ]; then
+    entry_sec=$(date +%s)
+  fi
   [ "$restored" -eq 1 ] && return 0
   restored=1
   cp -p "$snap_file" "$file" || return $?
   if [ "$mut_sec" -gt 0 ]; then
     restore_waits=0
-    while [ "$(date +%s)" -le "$mut_sec" ] || [ "$(date +%s)" -le "$test_end_sec" ]; do
+    while [ "$(date +%s)" -le "$entry_sec" ]; do
       if [ "$restore_waits" -ge 15 ]; then
         echo "mutation-verify.sh: warning: clock did not advance before restore touch; dependent builds may remain stale" >&2
         break
@@ -369,10 +371,8 @@ if [ "$have_cover_check" -eq 1 ]; then
     exit 2
   }
   ( eval "$cover_test_cmd" ) || test_rc=$?
-  test_end_sec=$(date +%s)
 else
   ( eval "$test_cmd" ) || test_rc=$?
-  test_end_sec=$(date +%s)
 fi
 
 # Restore now (also covered by the EXIT trap, but do it here so we can
