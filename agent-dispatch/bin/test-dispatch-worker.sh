@@ -553,7 +553,7 @@ case "${1:-}" in
     ;;
 esac
 case "$*" in *models*) printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n' "$AGY_TEST_CODING_PIN" "$AGY_TEST_REVIEW_PIN"; exit 0;; esac
-for i in $(seq 1 60); do printf 'Minor REVIEW LINE %s: no issues found in this pass.\n' "$i"; done
+for i in $(seq 1 60); do printf 'Minor: REVIEW LINE %s: no issues found in this pass.\n' "$i"; done
 STUB
 chmod +x "$TMP/bin/agy"
 # A caller that wants the review file KEPT supplies REVIEW_OUTFILE itself; an unsupplied
@@ -652,7 +652,7 @@ cat > "$AGY_STDIN_FILE"
 touch scratch_evil.py
 git checkout --detach >/dev/null 2>&1 || true
 git init . >/dev/null 2>&1
-for i in $(seq 1 100); do printf 'Minor REVIEW LINE %s ok no issues\n' "$i"; done
+for i in $(seq 1 100); do printf 'Minor: REVIEW LINE %s ok no issues\n' "$i"; done
 STUB
 chmod +x "$TMP/bin/agy"
 : > "$AGY_ARGS_FILE"
@@ -706,7 +706,7 @@ esac
 case "$*" in *models*) printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n' "$AGY_TEST_CODING_PIN" "$AGY_TEST_REVIEW_PIN"; exit 0;; esac
 printf '%s\n' "$*" >> "$AGY_ARGS_FILE"
 cat > "$AGY_STDIN_FILE"
-for i in $(seq 1 60); do printf 'Minor REVIEW LINE %s: non-git target reviewed.\n' "$i"; done
+for i in $(seq 1 60); do printf 'Minor: REVIEW LINE %s: non-git target reviewed.\n' "$i"; done
 STUB
 chmod +x "$TMP/bin/agy"
 : > "$AGY_ARGS_FILE"
@@ -763,7 +763,7 @@ case "${1:-}" in
     ;;
 esac
 case "$*" in *models*) printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n' "$AGY_TEST_CODING_PIN" "$AGY_TEST_REVIEW_PIN"; exit 0;; esac
-for i in $(seq 1 60); do printf 'Minor REVIEW LINE %s: reviewed committed HEAD.\n' "$i"; done
+for i in $(seq 1 60); do printf 'Minor: REVIEW LINE %s: reviewed committed HEAD.\n' "$i"; done
 STUB
 chmod +x "$TMP/bin/agy"
 TIMEOUT=0 "$DW" --runtime agy --review --brief "$BRIEF" --workdir "$R20" >"$TMP/t20.out" 2>"$TMP/t20.err"
@@ -805,7 +805,7 @@ rc=$?
 [ "$rc" -eq 124 ] || fail "timeout-exhausted-after-retry should return rc 124, got $rc"
 [ "$(cat "$AGY_COUNT_FILE")" -eq 2 ] || fail "expected exactly ONE retry (2 agy invocations total), got $(cat "$AGY_COUNT_FILE")"
 grep -q "retrying ONCE" "$TMP/t21.err" || fail "timeout retry did not announce the retry"
-grep -q "Fall back to a LOCAL reviewer" "$TMP/t21.err" || fail "timeout-exhausted-after-retry did not print the fallback hint"
+grep -q "Re-run an agy lens once on codex if codex egress is approved, else use a Claude reviewer" "$TMP/t21.err" || fail "timeout-exhausted-after-retry did not print the fallback hint"
 echo "test 21 (agy review timeout retries once then falls back with hint) PASS"
 
 # 22. Non-regression: an rc=0 short/empty outfile (a real completed short review,
@@ -868,7 +868,7 @@ if [ "$n" -eq 1 ]; then
   printf 'x'
   exit 124
 fi
-for i in $(seq 1 60); do printf 'Minor REVIEW LINE %s: retry succeeded, no issues found.\n' "$i"; done
+for i in $(seq 1 60); do printf 'Minor: REVIEW LINE %s: retry succeeded, no issues found.\n' "$i"; done
 exit 0
 STUB
 chmod +x "$TMP/bin/agy"
@@ -918,7 +918,7 @@ rc=$?
 [ "$rc" -eq 124 ] || fail "long-partial timeout should return BLOCKED rc 124, got $rc"
 [ "$(cat "$AGY_COUNT_FILE")" -eq 2 ] || fail "long-partial timeout should still retry exactly once (2 invocations), got $(cat "$AGY_COUNT_FILE")"
 grep -q "retrying ONCE" "$TMP/t24.err" || fail "long-partial timeout did not retry (byte count wrongly gated the retry)"
-grep -q "Fall back to a LOCAL reviewer" "$TMP/t24.err" || fail "long-partial timeout did not print the fallback hint"
+grep -q "a primary codex lens at rc 124 goes to Claude" "$TMP/t24.err" || fail "long-partial timeout did not print the fallback hint"
 echo "test 24 (long-partial timeout still retries+falls back to rc 124) PASS"
 unset AGY_COUNT_FILE
 
@@ -971,7 +971,7 @@ case "${1:-}" in
     ;;
 esac
 case "$*" in *models*) printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n' "$AGY_TEST_CODING_PIN" "$AGY_TEST_REVIEW_PIN"; exit 0;; esac
-for i in $(seq 1 60); do printf 'Minor REVIEW LINE %s: reviewed despite the dirty tree.\n' "$i"; done
+for i in $(seq 1 60); do printf 'Minor: REVIEW LINE %s: reviewed despite the dirty tree.\n' "$i"; done
 STUB
 chmod +x "$TMP/bin/agy"
 
@@ -1019,7 +1019,7 @@ case "${1:-}" in
     ;;
 esac
 case "$*" in *models*) printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n' "$AGY_TEST_CODING_PIN" "$AGY_TEST_REVIEW_PIN"; exit 0;; esac
-for i in $(seq 1 40); do printf 'Major finding %s: concise evidence.\n' "$i"; done
+for i in $(seq 1 40); do printf 'Major: finding %s concise evidence.\n' "$i"; done
 STUB
 chmod +x "$TMP/bin/agy"
 REVIEW_OUTFILE="$TMP/t29.review.md" TIMEOUT=0 "$DW" --runtime agy --review --brief "$BRIEF" --workdir "$R29" >"$TMP/t29.out" 2>"$TMP/t29.err"
@@ -1112,7 +1112,7 @@ case "${1:-}" in
     ;;
 esac
 case "$*" in *models*) printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon (High)\ncustom-id\tCustom Display\ngpt-oss\tGPT-OSS 120B (Medium)\n' "$AGY_TEST_CODING_PIN" "$AGY_TEST_REVIEW_PIN"; exit 0;; esac
-printf 'Finding at %s. ' "$EVIDENCE_FIXTURE"
+printf '%s\n' "$EVIDENCE_FIXTURE"
 for i in $(seq 1 30); do printf 'Concrete review analysis item %s explains behavior and verification. ' "$i"; done
 STUB
   chmod +x "$TMP/bin/agy"
@@ -1120,6 +1120,13 @@ STUB
   rc=$?
   [ "$rc" -eq 0 ] || fail "$evidence_case-only review should pass, got rc $rc"
 done
+while IFS="$(printf '\t')" read -r want evidence; do
+  export EVIDENCE_FIXTURE="$evidence"
+  # Reuse the file:line stub, placing the fixture at line start.
+  TIMEOUT=0 "$DW" --runtime agy --review --brief "$BRIEF" --workdir "$R31P" >"$TMP/parity.out" 2>"$TMP/parity.err"
+  rc=$?
+  [ "$rc" -eq "$want" ] || fail "evidence parity '$evidence': rc $rc, want $want"
+done < "$SELF_DIR/../test/review-evidence.tsv"
 unset EVIDENCE_FIXTURE
 echo "test 31c-d (both file:line evidence alternatives pass independently) PASS"
 
@@ -1184,7 +1191,7 @@ case "$*" in *models*) printf '%s\tGemini 3.8 Flash (Medium)\n%s\tGemini 4 Argon
 parent_mode="$(stat -c '%a' "$(dirname "$PWD")" 2>/dev/null || stat -f '%Lp' "$(dirname "$PWD")" 2>/dev/null)"
 [ -d .git ] && echo GIT_DIR_DIRECTORY >> "$AGY_ARGS_FILE"
 printf 'PARENT_MODE=%s\n' "$parent_mode" >> "$AGY_ARGS_FILE"
-for i in $(seq 1 40); do printf 'Minor finding %s: worktree location checked.\n' "$i"; done
+for i in $(seq 1 40); do printf 'Minor: finding %s: worktree location checked.\n' "$i"; done
 STUB
 chmod +x "$TMP/bin/agy"
 : > "$AGY_ARGS_FILE"
@@ -1483,7 +1490,7 @@ n=$(cat "$AGY_STUB_COUNT_FILE"); n=$((n + 1)); echo "$n" > "$AGY_STUB_COUNT_FILE
 printf 'PWD=%s\nCALL=%s\n%s\n' "$PWD" "$n" "$*" >> "$AGY_ARGS_FILE"
 cat > "$AGY_STDIN_FILE"
 [ -z "${AGY_STUB_ACTIONS:-}" ] || bash "$AGY_STUB_ACTIONS" "$n"
-for i in $(seq 1 100); do printf 'Minor REVIEW LINE %s src/x.go:1 ok\n' "$i"; done
+for i in $(seq 1 100); do printf 'Minor: REVIEW LINE %s src/x.go:1 ok\n' "$i"; done
 rc=${AGY_STUB_RC:-0}
 if [ -n "${AGY_STUB_RC_ON_CALL:-}" ] && [ "$n" != "$AGY_STUB_RC_ON_CALL" ]; then rc=0; fi
 exit "$rc"
@@ -1618,7 +1625,7 @@ GIT_CONFIG_GLOBAL="$TMP/missing-global" run_cfg_review "$r44" || fail 'missing g
 echo 'test 44 (private flattened global config and absent global config) PASS'
 
 # Source-state contract: actions deliberately target only test-owned repos.
-for i in $(seq 1 100); do printf 'Minor REVIEW LINE %s src/x.go:1 ok\n' "$i"; done > "$TMP/expected-body"
+for i in $(seq 1 100); do printf 'Minor: REVIEW LINE %s src/x.go:1 ok\n' "$i"; done > "$TMP/expected-body"
 export SRC="$TMP/state-source"
 make_git_repo "$SRC"
 git -C "$SRC" remote add origin https://example.invalid/source

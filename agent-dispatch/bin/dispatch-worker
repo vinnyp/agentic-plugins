@@ -878,7 +878,7 @@ dispatch_agy() {
       echo "dispatch-worker: REVIEW FAILED — output too short (${review_bytes}B < ${MIN_REVIEW_BYTES}B min). A rc=0-but-empty/short agy review is NOT a pass; do NOT accept it. Fall back to a LOCAL reviewer (Claude Agent-tool peer-*-reviewer, or Opus verify-the-reviewer) — do NOT retry the wedged agy." >&2
       agy_rc=8
     elif [ "$agy_rc" -eq 0 ] && [ "$REVIEW_REQUIRE_EVIDENCE" != "0" ]; then
-      local _sev='(^|[^[:alnum:]_])(Blocker|Major|Minor|Nit|Critical)([^[:alnum:]_]|$)'
+      local _sev='(^|\|)[[:blank:]]*([-*][[:blank:]]+)?(\*\*|\[)?(Blocker|Major|Minor|Nit|Critical|High|Medium|Low|Info)[[:blank:]]*(:|\]|\*\*|\||\))'
       local _pathslash='(^|[^[:alnum:]_./-])[[:alnum:]_.-]+/[[:alnum:]_./-]*[[:alnum:]_-]:[0-9]+'
       local _pathext='(^|[^[:alnum:]_./-])[[:alnum:]_-]+\.[[:alpha:]][[:alnum:]]*:[0-9]+'
       if [ "$has_rowverdict" -eq 0 ] && ! grep -Eq "$_sev|$_pathslash|$_pathext" "$review_outfile"; then
@@ -886,7 +886,7 @@ dispatch_agy() {
         agy_rc=8
       fi
     elif [ "$retry_skipped" = 0 ] && { [ "$agy_rc" -eq 124 ] || [ "$agy_rc" -eq 137 ]; }; then
-      echo "dispatch-worker: REVIEW FAILED — agy timed out again (rc=$agy_rc, ${review_bytes}B written) after one retry (returning rc 124 BLOCKED). A timed-out review is TRUNCATED and NOT a pass regardless of byte count; do NOT accept it. Fall back to a LOCAL reviewer (Claude Agent-tool peer-*-reviewer, or Opus verify-the-reviewer) — do NOT retry the wedged agy again." >&2
+      echo "dispatch-worker: REVIEW FAILED — agy timed out again (rc=$agy_rc, ${review_bytes}B written) after one retry (returning rc 124 BLOCKED). A timed-out review is TRUNCATED and NOT a pass regardless of byte count; do NOT accept it. Re-run an agy lens once on codex if codex egress is approved, else use a Claude reviewer; a primary codex lens at rc 124 goes to Claude." >&2
       agy_rc=124
     fi
   else

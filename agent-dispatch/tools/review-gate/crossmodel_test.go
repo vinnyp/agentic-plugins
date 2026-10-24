@@ -589,3 +589,48 @@ func TestCodexReviewEvidenceAndRuntime(t *testing.T) {
 		})
 	}
 }
+
+func TestReviewEvidenceParity(t *testing.T) {
+	t.Setenv("DISPATCH_REVIEW_REQUIRE_EVIDENCE", "1")
+	data, err := os.ReadFile("../../test/review-evidence.tsv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		fields := strings.SplitN(line, "\t", 2)
+		t.Run(fields[1], func(t *testing.T) {
+			stubDispatchWorker(t, fields[1]+"\n"+strings.Repeat("review prose ", 100), 0)
+			rc, out := runCapt(t, "cross-model", "--runtime", "codex", "--brief", "brief.md")
+			if strconv.Itoa(rc) != fields[0] {
+				t.Fatalf("rc=%d want %s: %s", rc, fields[0], out)
+			}
+		})
+	}
+}
+
+func TestCrossModelDispositionPins(t *testing.T) {
+	for _, tc := range []struct {
+		name, runtime, body string
+		rc, want            int
+		disabled            bool
+	}{
+		{"path-only", "codex", "src/main.go:12\n" + strings.Repeat("details ", 100), 0, 0, false},
+		{"agy-runtime", "agy", strings.Repeat("details ", 100), 0, 0, false},
+		{"short-row", "codex", "| R1.1 | ALIGN |\n", 0, 0, false},
+		{"rc1-prose", "codex", strings.Repeat("looks fine ", 100), 1, 8, false},
+		{"disabled-evidence", "codex", strings.Repeat("looks fine ", 100), 0, 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.disabled {
+				t.Setenv("DISPATCH_REVIEW_REQUIRE_EVIDENCE", "0")
+			} else {
+				t.Setenv("DISPATCH_REVIEW_REQUIRE_EVIDENCE", "1")
+			}
+			stubDispatchWorker(t, tc.body, tc.rc)
+			rc, out := runCapt(t, "cross-model", "--runtime", tc.runtime, "--brief", "brief.md")
+			if rc != tc.want || !strings.Contains(out, "runtime="+tc.runtime) {
+				t.Fatalf("rc=%d want %d: %s", rc, tc.want, out)
+			}
+		})
+	}
+}

@@ -39,7 +39,7 @@ func rcMeaning(rc int) string {
 	case 10:
 		return "source repo changed during the review window (reviewer or a concurrent session) - inspect the named changes and restore them before committing; the review stands only if every change is known concurrent work; NOT a build failure"
 	case 124:
-		return "blocked (timed out; for agy --review, after one internal retry) — re-run the lens on codex if codex egress is approved, else a Claude reviewer"
+		return "blocked (timed out; for agy --review, after one internal retry) - re-run an agy lens once on codex if codex egress is approved, else use a Claude reviewer; a primary codex lens goes to Claude"
 	default:
 		return fmt.Sprintf("dispatch-worker rc %d", rc)
 	}
@@ -72,8 +72,9 @@ func reviewDispositionRC(rc, bodyBytes int) int {
 	return rc
 }
 
-// Mirror dispatch-worker's evidence alternatives, including requirements row verdicts.
-var reviewEvidence = regexp.MustCompile(`(^|[^[:alnum:]_])(Blocker|Major|Minor|Nit|Critical|High|Medium|Low|Info)([^[:alnum:]_]|$)|(^|[^[:alnum:]_./-])[[:alnum:]_.-]+/[[:alnum:]_./-]*[[:alnum:]_-]:[0-9]+|(^|[^[:alnum:]_./-])[[:alnum:]_-]+\.[[:alpha:]][[:alnum:]]*:[0-9]+`)
+// Mirror dispatch-worker's label-shaped severity and file:line evidence alternatives.
+// Requirements row verdicts are checked separately below.
+var reviewEvidence = regexp.MustCompile(`(?m)(^|\|)[[:blank:]]*([-*][[:blank:]]+)?(\*\*|\[)?(Blocker|Major|Minor|Nit|Critical|High|Medium|Low|Info)[[:blank:]]*(:|\]|\*\*|\||\))|(^|[^[:alnum:]_./-])[[:alnum:]_.-]+/[[:alnum:]_./-]*[[:alnum:]_-]:[0-9]+|(^|[^[:alnum:]_./-])[[:alnum:]_-]+\.[[:alpha:]][[:alnum:]]*:[0-9]+`)
 var reviewRowVerdict = regexp.MustCompile(`(?m)(^|[^[:alnum:]_])(R[0-9]+\.[0-9]+|[EM][0-9]+)([^[:alnum:]_]|$).*(^|[^[:alnum:]_])(ALIGN|OBJECT|ABSTAIN)([^[:alnum:]_]|$)`)
 
 func declaredBriefRepoRoot(brief string) (string, bool) {
@@ -171,7 +172,7 @@ func cmdCrossModel(args []string) int {
 		if *runtime == "codex" && (rc == 0 || rc == 1) {
 			if reviewRowVerdict.MatchString(reviewBody) {
 				dispositionRC = rc
-			} else if bodyBytes > 0 && !reviewEvidence.MatchString(reviewBody) {
+			} else if bodyBytes > 0 && os.Getenv("DISPATCH_REVIEW_REQUIRE_EVIDENCE") != "0" && !reviewEvidence.MatchString(reviewBody) {
 				dispositionRC = 8
 			}
 		}
