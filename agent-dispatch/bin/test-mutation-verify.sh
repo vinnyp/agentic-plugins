@@ -634,4 +634,109 @@ grep -q "MUTANT-UNREACHABLE" "$TMP/out25" && { cat "$TMP/out25"; fail "--cover-c
 [ "$(cat "$GO25/target.go")" = "$before25" ] || fail "--cover-check compile-breaking mutant: file not byte-identical after restore"
 echo "test --cover-check compile-breaking mutant -> CAUGHT PASS"
 
+# ---------------------------------------------------------------------------
+# Test 26: the restored file must look NEWER than anything built from the
+# mutant. mtime-based build tools (cargo's fingerprint,
+# make) skip a rebuild when the source is older than its artifacts. A restore
+# that copies the snapshot's ORIGINAL (old) mtime back leaves the mutant's
+# artifacts looking fresh, so the next run silently executes the mutant.
+# The test-cmd stands in for a build: it writes an artifact on every run, the
+# last one being the under-mutation run.
+# ---------------------------------------------------------------------------
+F26="$TMP/mtime_target.txt"
+A26="$TMP/mtime_artifact"
+REF26="$TMP/mtime_ref"
+printf 'hello world\n' > "$F26"
+touch -t 200001010000 "$F26"
+touch -t 200001020000 "$REF26"
+before26="$(cat "$F26")"
+cat > "$TMP/mtime_test.sh" <<EOF
+#!/usr/bin/env bash
+test_sec=\$(date +%s)
+while [ "\$(date +%s)" -le "\$test_sec" ]; do sleep 0.02; done
+rc=0
+grep -q "hello world" "$F26" || rc=\$?
+touch "$A26"
+exit "\$rc"
+EOF
+chmod +x "$TMP/mtime_test.sh"
+bash "$MV" --file "$F26" --test-cmd "$TMP/mtime_test.sh" --mutate-sed 's/hello/goodbye/' >"$TMP/out26" 2>&1
+rc=$?
+[ "$rc" -eq 0 ] || { cat "$TMP/out26"; fail "restore mtime: expected exit 0 (mutation caught), got $rc"; }
+[ "$(cat "$F26")" = "$before26" ] || fail "restore mtime: file not byte-identical after restore"
+[ "$F26" -nt "$REF26" ] || fail "restore mtime: restored file kept its pre-mutation mtime — an mtime-based build would reuse the mutant's artifacts"
+mtime_sec() {
+  if stat -f %m "$1" >/dev/null 2>&1; then
+    stat -f %m "$1"
+  else
+    stat -c %Y "$1"
+  fi
+}
+[ "$(mtime_sec "$F26")" -gt "$(mtime_sec "$A26")" ] || fail "restore mtime: restored source must be strictly newer than mutant artifacts in whole seconds"
+echo "test restored file is newer than mutant artifacts -> PASS"
+
+# ---------------------------------------------------------------------------
+# Test 27: same-size Python mutants must not survive in timestamp-based pyc.
+# Start each import early in a second so a plain touch reproduces the bug.
+# ---------------------------------------------------------------------------
+if command -v python3 >/dev/null 2>&1; then (
+  unset PYTHONDONTWRITEBYTECODE PYTHONPYCACHEPREFIX
+  PY27="$TMP/python_cache"; mkdir -p "$PY27"
+  printf 'def value(): return 1 == 1\n' > "$PY27/m.py"
+  cat > "$PY27/check.py" <<'EOF'
+import importlib.util
+import os
+import sys
+
+# macOS Python may default to a system cache prefix even with env unset.
+sys.pycache_prefix = None
+cache = importlib.util.cache_from_source("m.py")
+if os.path.exists(cache):
+    os.unlink(cache)
+import m
+assert m.value()
+EOF
+  cat > "$PY27/mutate.sh" <<'EOF'
+#!/usr/bin/env bash
+second=$(date +%s)
+while [ "$(date +%s)" -le "$second" ]; do sleep 0.02; done
+sed 's/==/!=/' m.py > mutant
+cat mutant > m.py
+EOF
+  bash "$MV" --file "$PY27/m.py" --test-cmd "cd '$PY27' && python3 check.py" \
+    --mutate-cmd "cd '$PY27' && bash mutate.sh" >"$TMP/out27" 2>&1
+  rc=$?
+  [ "$rc" -eq 0 ] || { cat "$TMP/out27"; fail "Python cache: expected caught exit 0, got $rc"; }
+  set -- "$PY27"/__pycache__/m.*.pyc
+  [ -f "$1" ] || fail "Python cache: mutated run did not write a pyc"
+  (cd "$PY27" && python3 -c 'import sys; sys.pycache_prefix = None; import m; assert m.value()') || fail "Python cache: fresh import reused the same-size mutant"
+  echo "test restored Python module invalidates mutant pyc -> PASS"
+) || fail "Python cache regression"
+else
+  echo "SKIP: Python cache regression (python3 absent)"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 28: syntax failure must restore newer than artifacts written after
+# the mutation second, even though the mutated test never runs.
+# ---------------------------------------------------------------------------
+F28="$TMP/syntax_mtime_target.txt"
+A28="$TMP/syntax_mtime_artifact"
+printf 'hello world\n' > "$F28"
+cat > "$TMP/syntax_artifact.sh" <<EOF
+#!/usr/bin/env bash
+second=\$(date +%s)
+while [ "\$(date +%s)" -le "\$second" ]; do sleep 0.02; done
+touch "$A28"
+exit 1
+EOF
+bash "$MV" --file "$F28" --test-cmd "grep -q hello '$F28'" \
+  --mutate-sed 's/hello/goodbye/' --syntax-cmd "bash '$TMP/syntax_artifact.sh'" >"$TMP/out28" 2>&1
+rc=$?
+[ "$rc" -eq 2 ] || { cat "$TMP/out28"; fail "syntax restore mtime: expected exit 2, got $rc"; }
+[ "$(cat "$F28")" = "hello world" ] || fail "syntax restore mtime: original content not restored"
+[ -f "$A28" ] || fail "syntax restore mtime: syntax command did not write an artifact"
+[ "$(mtime_sec "$F28")" -gt "$(mtime_sec "$A28")" ] || fail "syntax restore mtime: restored source must be strictly newer than syntax artifacts in whole seconds"
+echo "test syntax failure restores newer than artifacts -> PASS"
+
 echo "ALL PASS"

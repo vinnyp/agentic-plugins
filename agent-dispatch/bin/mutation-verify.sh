@@ -148,15 +148,37 @@ cp -p "$file" "$snap_file" || {
 }
 
 # Restore-on-every-path bookkeeping. `restored` tracks whether a restore
-# attempt has already run. `verify_restore`'s return code (NOT a stored
+# attempt has completed. `verify_restore`'s return code (NOT a stored
 # flag) gates whether cleanup() is allowed to delete the snapshot (see
 # BLOCKER 4: a failed restore must never lose the only surviving copy of
 # the file).
 restored=0
+mut_sec=0
+# `cp -p` keeps the file's mode, but it also copies the snapshot's ORIGINAL
+# mtime back — older than the mutant's build artifacts — so an mtime-based
+# build (cargo, make) would treat the mutant's artifacts as fresh and keep
+# running the mutant after a byte-identical restore.
+# Wait past restore entry before touching: all mutant artifacts precede it,
+# and Python pyc headers and coarse build timestamps compare whole seconds.
 restore_file() {
   [ "$restored" -eq 1 ] && return 0
+  if [ "$mut_sec" -gt 0 ]; then
+    entry_sec=$(date +%s)
+  fi
+  cp -p "$snap_file" "$file" || return $?
+  if [ "$mut_sec" -gt 0 ]; then
+    restore_waits=0
+    while [ "$(date +%s)" -le "$entry_sec" ]; do
+      if [ "$restore_waits" -ge 15 ]; then
+        echo "mutation-verify.sh: warning: clock did not advance before restore touch; dependent builds may remain stale" >&2
+        break
+      fi
+      sleep 0.2
+      restore_waits=$((restore_waits + 1))
+    done
+  fi
+  touch "$file" || echo "mutation-verify.sh: warning: failed to refresh mtime for $file; dependent builds may remain stale" >&2
   restored=1
-  cp -p "$snap_file" "$file"
 }
 verify_restore() {
   cmp -s "$snap_file" "$file"
@@ -290,13 +312,19 @@ done
 if [ "$have_sed" -eq 1 ]; then
   # Read FROM the snapshot, write TO the file — sidesteps GNU-vs-BSD `sed -i`
   # portability entirely.
-  if ! sed "$mutate_sed" "$snap_file" > "$file"; then
+  mutation_rc=0
+  sed "$mutate_sed" "$snap_file" > "$file" || mutation_rc=$?
+  mut_sec=$(date +%s)
+  if [ "$mutation_rc" -ne 0 ]; then
     echo "mutation-verify.sh: sed mutation command failed" >&2
     exit 2
   fi
 else
   # Subshell: a --mutate-cmd that `cd`s must not change this script's cwd.
-  if ! ( eval "$mutate_cmd" ); then
+  mutation_rc=0
+  ( eval "$mutate_cmd" ) || mutation_rc=$?
+  mut_sec=$(date +%s)
+  if [ "$mutation_rc" -ne 0 ]; then
     echo "mutation-verify.sh: --mutate-cmd exited non-zero" >&2
     exit 2
   fi
