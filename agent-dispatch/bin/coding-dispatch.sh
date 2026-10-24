@@ -806,13 +806,26 @@ read -r -a _mut_exempt_globs <<< "${CODING_DISPATCH_MUT_EXEMPT-test-mutants*}"
 if [ "${CODING_DISPATCH_MUT_EXEMPT+x}" = x ]; then
   printf 'mutation-marker guard: override in effect: %s\n' "$CODING_DISPATCH_MUT_EXEMPT"
 fi
+_mut_safe_globs=()
 for _g in ${_mut_exempt_globs[@]+"${_mut_exempt_globs[@]}"}; do
-  [ "$_g" != '*' ] || printf '%s\n' "mutation-marker guard: refusing bare '*' exemption; scanning those files" >&2
+  case "$_g" in */*)
+    printf '%s\n' "mutation-marker guard: refusing exemption '$_g' containing '/'; globs match basenames only" >&2
+    continue ;;
+  esac
+  _mut_broad=false
+  for _probe in zz9-probe.x main.go README; do
+    # shellcheck disable=SC2254 # Probe the literal pattern value.
+    case "$_probe" in $_g) _mut_broad=true; break ;; esac
+  done
+  if [ "$_mut_broad" = true ]; then
+    printf '%s\n' "mutation-marker guard: refusing broad exemption '$_g'; scanning those files" >&2
+    continue
+  fi
+  _mut_safe_globs+=("$_g")
 done
 _mut_record() {
   local _g
-  for _g in ${_mut_exempt_globs[@]+"${_mut_exempt_globs[@]}"}; do
-    [ "$_g" != '*' ] || continue
+  for _g in ${_mut_safe_globs[@]+"${_mut_safe_globs[@]}"}; do
     # shellcheck disable=SC2254 # Match the basename against the literal pattern value.
     case "${1##*/}" in $_g)
       printf 'mutation-marker guard: exempted %s (glob %s) — %s marker line(s) not scanned\n' "$1" "$_g" "$2"
@@ -825,7 +838,7 @@ _mut_record() {
 # so tabs, newlines, and backslashes survive the handoff to Bash unchanged.
 while IFS= read -r -d '' _tf && IFS= read -r -d '' _count; do
   _mut_record "$_tf" "$_count"
-done < <(git diff --no-color --no-ext-diff --find-renames --src-prefix=a/ --dst-prefix=b/ "$BASE" -- | LC_ALL=C awk '
+done < <(git diff --no-color --no-ext-diff --no-relative --no-textconv --find-renames --src-prefix=a/ --dst-prefix=b/ "$BASE" -- | LC_ALL=C awk '
   function unquote(s,    out,i,c,n,j,e,codes) {
     if (substr(s,1,1) != "\"") return s
     s=substr(s,2,length(s)-2)

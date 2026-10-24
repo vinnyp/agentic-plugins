@@ -910,7 +910,7 @@ CODING_DISPATCH_MUT_EXEMPT="" bash "$CD" codex "$P_ms3" "$TMP/prompt" "true" >"$
 grep -q "mutation marker.*(hooks/test-mutants.sh)" "$TMP/out_ms3" || { cat "$TMP/out_ms3"; fail "#236 empty exempt failure should name the suite"; }
 # Exercise each guard boundary independently so a baseline run reports every regression.
 mut_guard_failures=0
-for scenario in quote tab rename subdir untracked directory custom star; do
+for scenario in quote tab rename subdir subdir_relative untracked untracked_quote untracked_tab directory custom star double_star question_star slash; do
   P_guard=$(set -eu; p=$(mktemp -d "${TMPDIR:-/tmp}/mut-guard.XXXXXX"); [ -n "$p" ]; printf '%s' "$p")
   git -C "$P_guard" init -q
   mkdir -p "$P_guard/sub" "$P_guard/test-mutants"
@@ -939,14 +939,26 @@ esac
 STUB
   chmod +x "$TMP/bin/codex"
   guard_workdir="$P_guard"
-  [ "$scenario" != subdir ] || guard_workdir="$P_guard/sub"
+  case "$scenario" in subdir|subdir_relative) guard_workdir="$P_guard/sub" ;; esac
   [ "$scenario" != untracked ] || guard_name=new-marker.sh
+  case "$scenario" in
+    untracked_quote) guard_name='new"marker.sh' ;;
+    untracked_tab) guard_name=$'new\tmarker.sh' ;;
+  esac
   expected=1
   case "$scenario" in rename|custom) expected=0 ;; esac
   if [ "$scenario" = custom ]; then
     GUARD_SCENARIO="$scenario" GUARD_NAME="$guard_name" CODING_DISPATCH_MUT_EXEMPT='suite-a* suite-b*' bash "$CD" codex "$guard_workdir" "$TMP/prompt" true > "$TMP/out_guard_$scenario" 2>&1; rc=$?
-  elif [ "$scenario" = star ]; then
-    GUARD_SCENARIO="$scenario" GUARD_NAME="$guard_name" CODING_DISPATCH_MUT_EXEMPT='*' bash "$CD" codex "$guard_workdir" "$TMP/prompt" true > "$TMP/out_guard_$scenario" 2>&1; rc=$?
+  elif [ "$scenario" = subdir_relative ]; then
+    GUARD_SCENARIO="$scenario" GUARD_NAME="$guard_name" GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=diff.relative GIT_CONFIG_VALUE_0=true bash "$CD" codex "$guard_workdir" "$TMP/prompt" true > "$TMP/out_guard_$scenario" 2>&1; rc=$?
+  elif [[ "$scenario" = star || "$scenario" = double_star || "$scenario" = question_star || "$scenario" = slash ]]; then
+    case "$scenario" in
+      star) guard_glob='*' ;;
+      double_star) guard_glob='**' ;;
+      question_star) guard_glob='?*' ;;
+      slash) guard_glob='suites/*' ;;
+    esac
+    GUARD_SCENARIO="$scenario" GUARD_NAME="$guard_name" CODING_DISPATCH_MUT_EXEMPT="$guard_glob" bash "$CD" codex "$guard_workdir" "$TMP/prompt" true > "$TMP/out_guard_$scenario" 2>&1; rc=$?
   else
     GUARD_SCENARIO="$scenario" GUARD_NAME="$guard_name" bash "$CD" codex "$guard_workdir" "$TMP/prompt" true > "$TMP/out_guard_$scenario" 2>&1; rc=$?
   fi
@@ -955,6 +967,12 @@ STUB
   if [ "$expected" -eq 1 ]; then
     grep -qF "($guard_name)" "$TMP/out_guard_$scenario" || guard_ok=0
   fi
+  case "$scenario" in
+    star|double_star|question_star)
+      grep -qF "mutation-marker guard: refusing broad exemption '$guard_glob'; scanning those files" "$TMP/out_guard_$scenario" || guard_ok=0 ;;
+    slash)
+      grep -qF "mutation-marker guard: refusing exemption '$guard_glob' containing '/'; globs match basenames only" "$TMP/out_guard_$scenario" || guard_ok=0 ;;
+  esac
   if [ "$scenario" = custom ]; then
     for suite in suite-alpha.sh suite-beta.sh; do
       grep -qF "mutation-marker guard: exempted $suite (glob suite-${suite:6:1}*) — 1 marker line(s) not scanned" "$TMP/out_guard_$scenario" || guard_ok=0
