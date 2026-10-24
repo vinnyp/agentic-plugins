@@ -110,27 +110,38 @@ extract_task() {
 # other worker guidance. Frontmatter is metadata, not worker context.
 extract_preamble() {
   awk '
-    NR == 1 && $0 == "---" {frontmatter=1; next}
-    frontmatter {if ($0 == "---") frontmatter=0; next}
+    {sub(/\r$/, "")}
+    NR == 1 && $0 == "---" {frontmatter=1; buffered=$0; next}
+    frontmatter {
+      if ($0 == "---") {frontmatter=0; buffered=""; next}
+      if ($0 ~ /^### Task /) {print buffered; buffered=""; exit}
+      buffered=buffered ORS $0
+      next
+    }
     /^### Task / {exit}
     /^>/ && !quote {banner=($0 ~ /^> \*\*For [Aa]gentic workers/)}
     {quote=($0 ~ /^>/)}
     !quote {banner=0}
     banner && /REQUIRED SUB-SKILL|superpowers:|Executed unattended|coding-build-phase.sh|reaches the coding agent/ {
-      # Spec references may share a line with the invocation being removed.
-      if (match($0, /Spec/)) {
-        spec=substr($0, RSTART + RLENGTH)
-        count=split(spec, tokens, /[[:space:]`]+/)
-        for (i=1; i<=count; i++) {
-          if (tokens[i] ~ /\// && tokens[i] ~ /\.md$/) {
-            print "> Spec: " tokens[i]
-            break
-          }
-        }
+      # Rescue every reference on the dropped line, independent of prose casing.
+      for (key in seen) delete seen[key]
+      rest=$0
+      while (match(rest, /\[\[[^]]+\]\]/)) {
+        token=substr(rest, RSTART, RLENGTH)
+        if (!seen[token]++) print "> Spec: " token
+        rest=substr(rest, RSTART + RLENGTH)
+      }
+      count=split($0, tokens, /[[:space:]`"\047]+/)
+      for (i=1; i<=count; i++) {
+        token=tokens[i]
+        sub(/[.,;:!?)]+$/, "", token)
+        if (token ~ /\// && token ~ /\.md$/ && !seen[token]++)
+          print "> Spec: " token
       }
       next
     }
     {print}
+    END {if (buffered != "") print buffered}
   ' "$plan"
 }
 PLAN_CONTEXT_MAX="${CODING_BUILD_PLAN_CONTEXT_MAX:-12000}"
@@ -143,7 +154,7 @@ case "$plan_context" in *[![:space:]]*) ;; *) plan_context="" ;; esac
 plan_context_note=""
 if [ "${#plan_context}" -gt "$PLAN_CONTEXT_MAX" ]; then
   plan_context_note="[plan context truncated: first $PLAN_CONTEXT_MAX of ${#plan_context} characters shown — read the full plan at $plan]"
-  echo "WARNING: plan context truncated: $plan_context_note"
+  echo "WARNING: ${plan_context_note#\[}" | sed 's/]$//'
   plan_context="${plan_context:0:$PLAN_CONTEXT_MAX}"
 fi
 

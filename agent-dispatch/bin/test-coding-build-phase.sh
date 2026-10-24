@@ -149,6 +149,13 @@ type: plan
 > Only each ### Task N: block reaches the coding agent ...
 > Keep this worker guidance.
 
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development. **Read the spec alongside this plan** — source: `projects/agent-tooling/specs/2026-06-15-x-spec.md`.
+
+> **For agentic workers:** executed via `coding-build-phase.sh codex <this plan> ...`. Specs (READ BOTH FIRST, absolute paths): `/abs/specs/a.md` and `/abs/specs/b.md`. Also '/abs/specs/a.md', "/abs/specs/c.md";
+
+> **For agentic workers:** REQUIRED SUB-SKILL: ... Spec: [[2026-06-12-x-design]] and [[2026-06-12-x-design]]
+Prose mentioning superpowers: and coding-build-phase.sh stays.
+
 > Ordinary blockquote stays.
 
 **Goal:** GOAL-237 ship the widget
@@ -169,11 +176,14 @@ out="$(PATH="$TMP/ctxbin:$PATH" "$SELF_DIR/coding-build-phase.sh" codex "$TMP/pl
 [ -f "$CTX_DIR/1" ] && [ -f "$CTX_DIR/2" ] || { ls "$CTX_DIR"; echo "FAIL: #237 expected two captured prompts"; exit 1; }
 for n237 in 1 2; do
   f237="$CTX_DIR/$n237"
-  for want237 in "PLAN CONTEXT" "GOAL-237" "docs/specs/widget-design.md" "RULE-237" "/abs/path/specs/x.md" "Ordinary blockquote stays." "Keep this worker guidance." "stop and report the conflict" "instructions addressed to the orchestrator"; do
+  for want237 in "PLAN CONTEXT" "GOAL-237" "docs/specs/widget-design.md" "RULE-237" "/abs/path/specs/x.md" "Prose mentioning superpowers: and coding-build-phase.sh stays." "Ordinary blockquote stays." "Keep this worker guidance." "stop and report the conflict" "instructions addressed to the orchestrator"; do
     grep -qF "$want237" "$f237" || { cat "$f237"; echo "FAIL: #237 task $n237 prompt missing '$want237'"; exit 1; }
   done
-  for unwanted237 in 'Executed unattended' 'REQUIRED SUB-SKILL' 'coding-build-phase.sh' 'reaches the coding agent' 'type: plan'; do
-    ! grep -qF "$unwanted237" "$f237" || { echo "FAIL: leaked $unwanted237"; exit 1; }
+  for token237 in /abs/path/specs/x.md projects/agent-tooling/specs/2026-06-15-x-spec.md /abs/specs/a.md /abs/specs/b.md /abs/specs/c.md '[[2026-06-12-x-design]]'; do
+    [ "$(grep -cxF "> Spec: $token237" "$f237")" -eq 1 ] || { cat "$f237"; echo "FAIL: missing or duplicate spec $token237"; exit 1; }
+  done
+  for unwanted237 in 'Executed unattended' 'REQUIRED SUB-SKILL' 'coding-build-phase.sh' 'superpowers:' '> **For agentic workers:**' 'reaches the coding agent' 'type: plan'; do
+    ! grep -vFx "Prose mentioning superpowers: and coding-build-phase.sh stays." "$f237" | grep -qF "$unwanted237" || { cat "$f237"; echo "FAIL: leaked $unwanted237"; exit 1; }
   done
   rule_line="$(grep -nF "RULE-237" "$f237" | head -1 | cut -d: -f1)"
   spec_line="$(grep -nF "TASK SPEC" "$f237" | head -1 | cut -d: -f1)"
@@ -205,15 +215,33 @@ for cap237 in 10 9 08; do
     expected237="$cap237"; [ "$cap237" != 08 ] || expected237=8
     grep -qF "first $expected237 of 10" "$CTX_DIR/1" || { echo 'FAIL: decimal cap/note'; exit 1; }
     grep -qF "full plan at $TMP/boundary.md" "$CTX_DIR/1" || { echo 'FAIL: relative plan not absolutized'; exit 1; }
+    ! printf '%s\n' "$out" | grep -qF 'truncated: [plan context truncated:' || { echo "$out"; echo 'FAIL: duplicate warning text'; exit 1; }
     [ "$(printf '%s\n' "$out" | grep -cF 'WARNING: plan context truncated')" -eq 1 ] || { echo 'FAIL: expected one stdout warning'; exit 1; }
   fi
 done
 out="$(CODING_BUILD_PLAN_CONTEXT_MAX=0 "$SELF_DIR/coding-build-phase.sh" codex "$TMP/plan.md" "$repo237" 1 --build-cmd true)"; rc=$?
 [ "$rc" -eq 2 ] || { echo 'FAIL: zero cap accepted'; exit 1; }
+printf '%s\n' "$out" | grep -qF 'PHASE=error: CODING_BUILD_PLAN_CONTEXT_MAX must be a positive whole number of characters' || { echo "$out"; echo 'FAIL: zero cap diagnostic missing'; exit 1; }
 printf '  \n\t\n### Task 1: x\nbody\n' > "$TMP/whitespace.md"
 rm -f "$CTX_DIR"/*
 PATH="$TMP/ctxbin:$PATH" "$SELF_DIR/coding-build-phase.sh" codex "$TMP/whitespace.md" "$repo237" 1 --build-cmd true >/dev/null
+[ -f "$CTX_DIR/1" ] || { echo 'FAIL: whitespace prompt not captured'; exit 1; }
 ! grep -qF 'PLAN CONTEXT' "$CTX_DIR/1" || { echo 'FAIL: whitespace context emitted'; exit 1; }
+for front237 in unclosed crlf; do
+  rm -f "$CTX_DIR"/*
+  if [ "$front237" = unclosed ]; then
+    printf '%s\n' '---' 'KEEP-UNCLOSED' '### Task 1: x' body > "$TMP/front.md"
+  else
+    printf '%s\r\n' '---' 'HIDE-CRLF' '---' 'KEEP-CRLF' '### Task 1: x' body > "$TMP/front.md"
+  fi
+  PATH="$TMP/ctxbin:$PATH" "$SELF_DIR/coding-build-phase.sh" codex "$TMP/front.md" "$repo237" 1 --build-cmd true >/dev/null
+  [ -f "$CTX_DIR/1" ] || { echo 'FAIL: frontmatter prompt not captured'; exit 1; }
+  if [ "$front237" = unclosed ]; then
+    grep -qxF KEEP-UNCLOSED "$CTX_DIR/1" || { cat "$CTX_DIR/1"; echo 'FAIL: unclosed frontmatter swallowed preamble'; exit 1; }
+  else
+    ! grep -qF HIDE-CRLF "$CTX_DIR/1" && grep -qxF KEEP-CRLF "$CTX_DIR/1" || { cat "$CTX_DIR/1"; echo 'FAIL: CRLF frontmatter'; exit 1; }
+  fi
+done
 unset CTX_DIR
 echo "test #237 plan context reaches every task prompt PASS"
 
