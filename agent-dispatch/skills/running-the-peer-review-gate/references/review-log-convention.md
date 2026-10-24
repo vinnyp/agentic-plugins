@@ -39,6 +39,12 @@ A log contains:
   visible), the date, the mode (`design`, `build`, or `requirements`), the gate outcome, and a named
   **`tier-rationale:`** line: which Tier-2 and Tier-3 lenses ran and why, or `none — <reason>`. A
   named line keeps the rationale present-or-absent-checkable, the way the disposition columns are.
+- **The per-lens runtime block** — under Reviewers, always include one line per persona:
+  `- <persona>: runtime=__ (agy | codex | claude; if substituted: from <runtime>, rc <N>, reason)`.
+  Record the runtime that actually produced each review here, even with no Blocker/Major findings.
+  A substituted lens MUST say so here, including original runtime, rc, and reason. Record a codex
+  substitute as `codex (not capability-tested)`; it does not count toward a capability-confirmed
+  lens claim. A same-model Claude substitution must never be reported as a cross-model pass in the log or a PR body.
 - **Per-reviewer sections** — each reviewer's raw findings.
 - **The verify-the-reviewer disposition table** — the load-bearing part:
 

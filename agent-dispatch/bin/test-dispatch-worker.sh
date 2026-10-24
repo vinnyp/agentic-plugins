@@ -802,7 +802,7 @@ STUB
 chmod +x "$TMP/bin/agy"
 TIMEOUT=0 "$DW" --runtime agy --review --brief "$BRIEF" --workdir "$R21" >"$TMP/t21.out" 2>"$TMP/t21.err"
 rc=$?
-[ "$rc" -eq 8 ] || fail "timeout-exhausted-after-retry should return rc 8, got $rc"
+[ "$rc" -eq 124 ] || fail "timeout-exhausted-after-retry should return rc 124, got $rc"
 [ "$(cat "$AGY_COUNT_FILE")" -eq 2 ] || fail "expected exactly ONE retry (2 agy invocations total), got $(cat "$AGY_COUNT_FILE")"
 grep -q "retrying ONCE" "$TMP/t21.err" || fail "timeout retry did not announce the retry"
 grep -q "Fall back to a LOCAL reviewer" "$TMP/t21.err" || fail "timeout-exhausted-after-retry did not print the fallback hint"
@@ -887,7 +887,7 @@ unset AGY_COUNT_FILE
 # 24. FINDING 1 (interface-lens review follow-up): BOTH timeout branches used to
 # be gated on `review_bytes < MIN_REVIEW_BYTES`. A LONG partial review (>= the
 # floor) that then times out matched NEITHER branch — no retry, no fallback —
-# and leaked the raw rc=124 to the caller instead of the documented rc=8
+# instead of retrying before returning BLOCKED rc=124
 # ("fall back to a LOCAL reviewer"). Byte count says nothing about whether a
 # timed-out review is COMPLETE. The stub always exits 124 but always prints a
 # long (>=2000B) partial, on every call, so this isolates the byte-gating bug
@@ -915,11 +915,11 @@ STUB
 chmod +x "$TMP/bin/agy"
 TIMEOUT=0 "$DW" --runtime agy --review --brief "$BRIEF" --workdir "$R24" >"$TMP/t24.out" 2>"$TMP/t24.err"
 rc=$?
-[ "$rc" -eq 8 ] || fail "long-partial timeout should still fall back to the documented rc 8 (not leak rc=$rc)"
+[ "$rc" -eq 124 ] || fail "long-partial timeout should return BLOCKED rc 124, got $rc"
 [ "$(cat "$AGY_COUNT_FILE")" -eq 2 ] || fail "long-partial timeout should still retry exactly once (2 invocations), got $(cat "$AGY_COUNT_FILE")"
 grep -q "retrying ONCE" "$TMP/t24.err" || fail "long-partial timeout did not retry (byte count wrongly gated the retry)"
 grep -q "Fall back to a LOCAL reviewer" "$TMP/t24.err" || fail "long-partial timeout did not print the fallback hint"
-echo "test 24 (long-partial timeout still retries+falls back to rc 8, not leaked 124) PASS"
+echo "test 24 (long-partial timeout still retries+falls back to rc 124) PASS"
 unset AGY_COUNT_FILE
 
 # 25-28: a brief that NAMES an uncommitted/untracked path in a
@@ -1664,7 +1664,7 @@ for call in 2 1; do
   check_state_run 10
   [ "$(cat "$AGY_STUB_COUNT_FILE")" = "$call" ] || fail 'drift retry count'
   if [ "$call" = 2 ]; then
-    grep -qF 'original_rc=8' "$TMP/cfg.err" || fail 'retry original rc'
+    grep -qF 'original_rc=124' "$TMP/cfg.err" || fail 'retry original rc'
   else
     grep -qF 'original_rc=124' "$TMP/cfg.err" || fail 'skip original rc'
     grep -qF 'skipping the timeout retry' "$TMP/cfg.err" || fail 'skip message absent'

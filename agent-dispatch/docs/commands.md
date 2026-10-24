@@ -287,10 +287,10 @@ so judge those reviews yourself. For a whole round of lenses, see
 | `5` | codex rejected every model at the auth/config layer. Fix auth; **do not** retry as a build. |
 | `6` | codex hit a usage/rate limit. It can exit 0 on a zero-edit no-op, so this is detected from the limit signature *plus* an absence of substantive output. Treat as blocked. |
 | `7` | agy is not authenticated (`agy` and sign in). Do not retry as a build. |
-| `8` | an agy `--review` did not produce a real review (too short, no evidence, or timed out twice) |
+| `8` | review ran but output is below the byte floor or lacks evidence |
 | `9` | effective agy model missing from live `agy models`; update `bin/lib/agy-models.sh` or the override |
 | `10` | source repo changed during the review window or compare could not complete; inspect and restore named changes before committing, discard the body unless every change is known concurrent work, then re-run. Known residual: a review run can still execute a planted `filter.*.clean` during the after-snapshot's `git status`. |
-| `124` | the external `--timeout` bound killed a hung agent — a blocked phase, not a result |
+| `124` | blocked (timeout; after one internal retry for agy `--review`) |
 | other | the runtime's own exit code; native 10 is remapped to 1 during review |
 
 Artifacts (agy `--review` only): the review is also tee'd to a file whose path is printed on
