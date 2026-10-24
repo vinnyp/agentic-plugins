@@ -910,7 +910,20 @@ CODING_DISPATCH_MUT_EXEMPT="" bash "$CD" codex "$P_ms3" "$TMP/prompt" "true" >"$
 grep -q "mutation marker.*(hooks/test-mutants.sh)" "$TMP/out_ms3" || { cat "$TMP/out_ms3"; fail "#236 empty exempt failure should name the suite"; }
 # Exercise each guard boundary independently so a baseline run reports every regression.
 mut_guard_failures=0
-for scenario in quote tab rename subdir subdir_relative untracked untracked_quote untracked_tab directory custom star double_star question_star slash; do
+guard_real_git=$(command -v git)
+mkdir -p "$TMP/guard-bin"
+cat > "$TMP/guard-bin/git" <<'STUB'
+#!/usr/bin/env bash
+for arg in "$@"; do
+  if [ "$arg" = --no-textconv ]; then
+    echo 'injected git diff failure' >&2
+    exit 128
+  fi
+done
+exec "$GUARD_REAL_GIT" "$@"
+STUB
+chmod +x "$TMP/guard-bin/git"
+for scenario in diff_failure quote tab rename subdir subdir_relative untracked untracked_quote untracked_tab directory custom star double_star question_star slash; do
   P_guard=$(set -eu; p=$(mktemp -d "${TMPDIR:-/tmp}/mut-guard.XXXXXX"); [ -n "$p" ]; printf '%s' "$p")
   git -C "$P_guard" init -q
   mkdir -p "$P_guard/sub" "$P_guard/test-mutants"
@@ -949,6 +962,8 @@ STUB
   case "$scenario" in rename|custom) expected=0 ;; esac
   if [ "$scenario" = custom ]; then
     GUARD_SCENARIO="$scenario" GUARD_NAME="$guard_name" CODING_DISPATCH_MUT_EXEMPT='suite-a* suite-b*' bash "$CD" codex "$guard_workdir" "$TMP/prompt" true > "$TMP/out_guard_$scenario" 2>&1; rc=$?
+  elif [ "$scenario" = diff_failure ]; then
+    GUARD_REAL_GIT="$guard_real_git" PATH="$TMP/guard-bin:$PATH" GUARD_SCENARIO="$scenario" GUARD_NAME="$guard_name" bash "$CD" codex "$guard_workdir" "$TMP/prompt" true > "$TMP/out_guard_$scenario" 2>&1; rc=$?
   elif [ "$scenario" = subdir_relative ]; then
     GUARD_SCENARIO="$scenario" GUARD_NAME="$guard_name" GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=diff.relative GIT_CONFIG_VALUE_0=true bash "$CD" codex "$guard_workdir" "$TMP/prompt" true > "$TMP/out_guard_$scenario" 2>&1; rc=$?
   elif [[ "$scenario" = star || "$scenario" = double_star || "$scenario" = question_star || "$scenario" = slash ]]; then
@@ -964,7 +979,9 @@ STUB
   fi
   guard_ok=1
   [ "$rc" -eq "$expected" ] || guard_ok=0
-  if [ "$expected" -eq 1 ]; then
+  if [ "$scenario" = diff_failure ]; then
+    grep -qF 'mutation-marker guard: git diff failed; refusing dispatch' "$TMP/out_guard_$scenario" || guard_ok=0
+  elif [ "$expected" -eq 1 ]; then
     grep -qF "($guard_name)" "$TMP/out_guard_$scenario" || guard_ok=0
   fi
   case "$scenario" in

@@ -834,11 +834,21 @@ _mut_record() {
   done
   [ -n "$_mut_hit" ] || _mut_hit="$1"
 }
+# Keep the diff in the capture directory so the EXIT trap also cleans it on interruption.
+_mut_diff=$(mktemp "$_cap_dir/mutation-diff.XXXXXX") || {
+  note "mutation-marker guard: cannot create diff file; refusing dispatch"
+  exit 1
+}
+if ! git -c diff.relative=false diff --no-color --no-ext-diff --no-textconv --find-renames --src-prefix=a/ --dst-prefix=b/ "$BASE" -- > "$_mut_diff"; then
+  rm -f "$_mut_diff"
+  note "mutation-marker guard: git diff failed; refusing dispatch"
+  exit 1
+fi
 # Decode Git's C-quoted header paths, including octal UTF-8 bytes. Emit NUL records
 # so tabs, newlines, and backslashes survive the handoff to Bash unchanged.
 while IFS= read -r -d '' _tf && IFS= read -r -d '' _count; do
   _mut_record "$_tf" "$_count"
-done < <(git diff --no-color --no-ext-diff --no-relative --no-textconv --find-renames --src-prefix=a/ --dst-prefix=b/ "$BASE" -- | LC_ALL=C awk '
+done < <(LC_ALL=C awk '
   function unquote(s,    out,i,c,n,j,e,codes) {
     if (substr(s,1,1) != "\"") return s
     s=substr(s,2,length(s)-2)
@@ -870,7 +880,8 @@ done < <(git diff --no-color --no-ext-diff --no-relative --no-textconv --find-re
   /^@@ / { hunk=1; next }
   hunk && path != "" && /^\+/ && /(\/\/|#)[[:space:]]*MUT([[:space:]:]|$)/ { count++ }
   END { flush() }
-')
+' "$_mut_diff")
+rm -f "$_mut_diff"
 while IFS= read -r -d '' _uf; do
   [ -f "$_mut_root/$_uf" ] || continue
   _count=$(grep -cE "$_mut_re" "$_mut_root/$_uf" || true)
@@ -887,7 +898,7 @@ fi
 # execution, while the build gate runs the agent's code. An out-of-scope change must be
 # refused without first executing what the agent wrote.
 if [ ${#allow_paths[@]} -gt 0 ]; then
-  _gate_committed=$(git diff --name-only "$BASE"..HEAD 2>/dev/null || true)
+  _gate_committed=$(git -c diff.relative=false diff --name-only "$BASE"..HEAD 2>/dev/null || true)
   _gate_added_intermediate=$(git log --diff-filter=A --format= --name-only "$BASE"..HEAD 2>/dev/null || true)
   # Use --porcelain=v2 + awk: catch modified (1), renamed (2), and untracked (?) files
   # split on tab first to handle rename records (type 2): "newPath\toldPath" → emit only newPath
@@ -927,7 +938,7 @@ fi
 
 # FM4: partial-delivery check — verify all required files were delivered
 if [ ${#require_files[@]} -gt 0 ]; then
-  _fm4_committed=$(git diff --name-only "$BASE"..HEAD 2>/dev/null || true)
+  _fm4_committed=$(git -c diff.relative=false diff --name-only "$BASE"..HEAD 2>/dev/null || true)
   _fm4_added_intermediate=$(git log --diff-filter=A --format= --name-only "$BASE"..HEAD 2>/dev/null || true)
   # split on tab first to handle rename records (type 2): "newPath\toldPath" → emit only newPath
   _fm4_status=$(git status --porcelain=v2 2>/dev/null | awk '/^[12?] / {split($NF,a,"\t"); print a[1]}' || true)
@@ -945,7 +956,7 @@ fi
 if [ ! -f _coding-result.json ] || [ "$marker_status" != "complete" ]; then
   # For a clean tree with per-task commits, git status is empty — read committed files instead.
   if [ -z "$(git status --porcelain)" ] && [ "$(git rev-parse HEAD)" != "$BASE" ]; then
-    diff_files="$(git diff --name-only "$BASE"..HEAD | jq -R . | jq -s -c .)"
+    diff_files="$(git -c diff.relative=false diff --name-only "$BASE"..HEAD | jq -R . | jq -s -c .)"
     note "ℹ no/incomplete marker, build passed (TDD commits) — marker synthesized from committed diff"
   else
     diff_files="$(git status --porcelain | sed 's/^...//' | jq -R . | jq -s -c .)"
