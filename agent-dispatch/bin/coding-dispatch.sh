@@ -30,6 +30,8 @@
 #   env CODING_DISPATCH_RM_ON_FAIL (worktree mode) — 1 = remove the worktree on build failure
 #     instead of salvaging the diff IN the worktree; the patch itself still survives (written
 #     under the PARENT repo's git dir, keyed by slug) — see #118 (FINDING 3 fix).
+#   env CODING_DISPATCH_MUT_EXEMPT whitespace-separated path globs skipped by the mutation-marker
+#     guard (default *test-mutants*): mutation suites carry "# MUT" by design (foundry#236).
 #   env CODING_DISPATCH_CHILD_ENV  whitespace-separated KEY=VALUE pairs exported into the
 #     dispatched agent's environment (e.g. CODING_DISPATCH_CHILD_ENV="MYREPO_LEDGER=off").
 #     Values cannot contain whitespace (the format is whitespace-separated); malformed
@@ -795,15 +797,98 @@ if [ -z "$(git status --porcelain)" ]; then
   fi
 fi
 
-# Refuse to ship mutation-test sentinels before the build gate can bless a poisoned tree.
+# Scan one repo-wide diff so rename pairing and subdirectory workdirs stay intact.
 _mut_re='(//|#)[[:space:]]*MUT([[:space:]:]|$)'
 _mut_hit=""
-git diff "$BASE" -- 2>/dev/null | grep -qE "^\+.*$_mut_re" && _mut_hit=1
-while IFS= read -r _uf; do
-  [ -f "$_uf" ] && grep -qE "$_mut_re" "$_uf" && { _mut_hit=1; break; }
-done < <(git ls-files --others --exclude-standard)
+_mut_root=$(git rev-parse --show-toplevel)
+# read -a splits without pathname expansion.
+read -r -a _mut_exempt_globs <<< "${CODING_DISPATCH_MUT_EXEMPT-test-mutants*}"
+if [ "${CODING_DISPATCH_MUT_EXEMPT+x}" = x ]; then
+  printf 'mutation-marker guard: override in effect: %s\n' "$CODING_DISPATCH_MUT_EXEMPT"
+fi
+_mut_safe_globs=()
+for _g in ${_mut_exempt_globs[@]+"${_mut_exempt_globs[@]}"}; do
+  case "$_g" in */*)
+    printf '%s\n' "mutation-marker guard: refusing exemption '$_g' containing '/'; globs match basenames only" >&2
+    continue ;;
+  esac
+  _mut_broad=false
+  for _probe in zz9-probe.x main.go README; do
+    # shellcheck disable=SC2254 # Probe the literal pattern value.
+    case "$_probe" in $_g) _mut_broad=true; break ;; esac
+  done
+  if [ "$_mut_broad" = true ]; then
+    printf '%s\n' "mutation-marker guard: refusing broad exemption '$_g'; scanning those files" >&2
+    continue
+  fi
+  _mut_safe_globs+=("$_g")
+done
+_mut_record() {
+  local _g
+  for _g in ${_mut_safe_globs[@]+"${_mut_safe_globs[@]}"}; do
+    # shellcheck disable=SC2254 # Match the basename against the literal pattern value.
+    case "${1##*/}" in $_g)
+      printf 'mutation-marker guard: exempted %s (glob %s) — %s marker line(s) not scanned\n' "$1" "$_g" "$2"
+      return ;;
+    esac
+  done
+  [ -n "$_mut_hit" ] || _mut_hit="$1"
+}
+# Keep the diff in the capture directory so the EXIT trap also cleans it on interruption.
+_mut_diff=$(mktemp "$_cap_dir/mutation-diff.XXXXXX") || {
+  note "mutation-marker guard: cannot create diff file; refusing dispatch"
+  exit 1
+}
+if ! git -c diff.relative=false diff --no-color --no-ext-diff --no-textconv --find-renames --src-prefix=a/ --dst-prefix=b/ "$BASE" -- > "$_mut_diff"; then
+  rm -f "$_mut_diff"
+  note "mutation-marker guard: git diff failed; refusing dispatch"
+  exit 1
+fi
+# Decode Git's C-quoted header paths, including octal UTF-8 bytes. Emit NUL records
+# so tabs, newlines, and backslashes survive the handoff to Bash unchanged.
+while IFS= read -r -d '' _tf && IFS= read -r -d '' _count; do
+  _mut_record "$_tf" "$_count"
+done < <(LC_ALL=C awk '
+  function unquote(s,    out,i,c,n,j,e,codes) {
+    if (substr(s,1,1) != "\"") return s
+    s=substr(s,2,length(s)-2)
+    out=""
+    for (i=1;i<=length(s);i++) {
+      c=substr(s,i,1)
+      if (c == "\\") {
+        c=substr(s,++i,1)
+        if (c ~ /[0-7]/) {
+          n=c+0
+          for (j=0;j<2 && substr(s,i+1,1) ~ /[0-7]/;j++) n=n*8+substr(s,++i,1)
+          c=sprintf("%c",n)
+        } else {
+          e=index("abtnvfr",c)
+          if (e) { split("7 8 9 10 11 12 13",codes," "); c=sprintf("%c",codes[e]) }
+        }
+      }
+      out=out c
+    }
+    return out
+  }
+  function flush() { if (count) printf "%s%c%d%c",path,0,count,0; count=0 }
+  /^diff --git / { flush(); path=""; hunk=0; next }
+  /^\+\+\+ / && !hunk {
+    path=substr($0,5); sub(/\t$/, "", path); path=unquote(path)
+    if (path == "/dev/null") path=""; else path=substr(path,3)
+    next
+  }
+  /^@@ / { hunk=1; next }
+  hunk && path != "" && /^\+/ && /(\/\/|#)[[:space:]]*MUT([[:space:]:]|$)/ { count++ }
+  END { flush() }
+' "$_mut_diff")
+rm -f "$_mut_diff"
+while IFS= read -r -d '' _uf; do
+  [ -f "$_mut_root/$_uf" ] || continue
+  _count=$(grep -cE "$_mut_re" "$_mut_root/$_uf" || true)
+  [ "$_count" -eq 0 ] || _mut_record "$_uf" "$_count"
+done < <(git -C "$_mut_root" ls-files -z --others --exclude-standard)
 if [ -n "$_mut_hit" ]; then
-  note "DISPATCH=fail: mutation marker (// MUT / # MUT) present in the dispatched change — a mutation-test sentinel was not restored before the build/commit. Restore the tree to its pre-mutation state and re-dispatch."
+  note "DISPATCH=fail: mutation marker (// MUT / # MUT) present in the dispatched change ($_mut_hit) — a mutation-test sentinel was not restored before the build/commit. Restore the tree to its pre-mutation state and re-dispatch. A leftover mutant must be removed; only a dedicated mutation-suite file named test-mutants* is exempt by default."
   report_fail "mutation marker"
   exit 1
 fi
@@ -813,7 +898,7 @@ fi
 # execution, while the build gate runs the agent's code. An out-of-scope change must be
 # refused without first executing what the agent wrote.
 if [ ${#allow_paths[@]} -gt 0 ]; then
-  _gate_committed=$(git diff --name-only "$BASE"..HEAD 2>/dev/null || true)
+  _gate_committed=$(git -c diff.relative=false diff --name-only "$BASE"..HEAD 2>/dev/null || true)
   _gate_added_intermediate=$(git log --diff-filter=A --format= --name-only "$BASE"..HEAD 2>/dev/null || true)
   # Use --porcelain=v2 + awk: catch modified (1), renamed (2), and untracked (?) files
   # split on tab first to handle rename records (type 2): "newPath\toldPath" → emit only newPath
@@ -853,7 +938,7 @@ fi
 
 # FM4: partial-delivery check — verify all required files were delivered
 if [ ${#require_files[@]} -gt 0 ]; then
-  _fm4_committed=$(git diff --name-only "$BASE"..HEAD 2>/dev/null || true)
+  _fm4_committed=$(git -c diff.relative=false diff --name-only "$BASE"..HEAD 2>/dev/null || true)
   _fm4_added_intermediate=$(git log --diff-filter=A --format= --name-only "$BASE"..HEAD 2>/dev/null || true)
   # split on tab first to handle rename records (type 2): "newPath\toldPath" → emit only newPath
   _fm4_status=$(git status --porcelain=v2 2>/dev/null | awk '/^[12?] / {split($NF,a,"\t"); print a[1]}' || true)
@@ -871,7 +956,7 @@ fi
 if [ ! -f _coding-result.json ] || [ "$marker_status" != "complete" ]; then
   # For a clean tree with per-task commits, git status is empty — read committed files instead.
   if [ -z "$(git status --porcelain)" ] && [ "$(git rev-parse HEAD)" != "$BASE" ]; then
-    diff_files="$(git diff --name-only "$BASE"..HEAD | jq -R . | jq -s -c .)"
+    diff_files="$(git -c diff.relative=false diff --name-only "$BASE"..HEAD | jq -R . | jq -s -c .)"
     note "ℹ no/incomplete marker, build passed (TDD commits) — marker synthesized from committed diff"
   else
     diff_files="$(git status --porcelain | sed 's/^...//' | jq -R . | jq -s -c .)"

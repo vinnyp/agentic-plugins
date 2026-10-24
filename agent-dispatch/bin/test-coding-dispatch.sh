@@ -863,6 +863,152 @@ bash "$CD" codex "$P_perm_t" "$TMP/prompt" "true" >"$TMP/out_perm_t" 2>&1; rc=$?
 [ "$rc" -eq 0 ] || { cat "$TMP/out_perm_t"; fail "#53 permutation/MUTEX non-regression (tracked-diff) should pass, got $rc"; }
 echo "test #53 mutation marker guard PASS"
 
+# foundry#236: a mutation SUITE carries "# MUT" in its mutant definitions by design.
+# Adding a mutant to a test-mutants* basename passes; a sentinel elsewhere still fails
+# and the failure names the file; an empty CODING_DISPATCH_MUT_EXEMPT scans every file.
+mut_suite_parent() {
+  new_parent "$1"; mkdir -p "$1/hooks"
+  printf '%s\n' "mutant 'old' body.sh 's/a/b # MUT old/'" > "$1/hooks/test-mutants.sh"
+  printf '%s\n' 'echo body' > "$1/hooks/body.sh"
+  git -C "$1" add -A; git -C "$1" commit -qm suite
+}
+grep -qE '(//|#)[[:space:]]*MUT([[:space:]:]|$)' <<< "mutant 'new' body.sh 's/echo/true # MUT echo/'" || fail "#236 fixture mutant line must match the marker regex"
+P_ms="$TMP/mut_suite_parent"; mut_suite_parent "$P_ms"
+cat > "$TMP/bin/codex" <<'STUB'
+#!/usr/bin/env bash
+wd=""; while [ $# -gt 0 ]; do [ "$1" = "-C" ] && { wd="$2"; shift 2; continue; }; shift; done
+: "${wd:=$PWD}"
+printf '%s\n' "mutant 'new' body.sh 's/echo/true # MUT echo/'" >> "$wd/hooks/test-mutants.sh"
+printf '%s\n' "mutant 'x' body.sh 's/b/c # MUT b/'" > "$wd/hooks/test-mutants-extra.sh"
+STUB
+chmod +x "$TMP/bin/codex"
+bash "$CD" codex "$P_ms" "$TMP/prompt" "true" >"$TMP/out_ms" 2>&1; rc=$?
+[ "$rc" -eq 0 ] || { cat "$TMP/out_ms"; fail "#236 mutants added to a mutation suite should pass, got $rc"; }
+grep -q "mutation marker" "$TMP/out_ms" && { cat "$TMP/out_ms"; fail "#236 mutation suite tripped the marker guard"; }
+P_ms2="$TMP/mut_suite_body_parent"; mut_suite_parent "$P_ms2"
+cat > "$TMP/bin/codex" <<'STUB'
+#!/usr/bin/env bash
+wd=""; while [ $# -gt 0 ]; do [ "$1" = "-C" ] && { wd="$2"; shift 2; continue; }; shift; done
+: "${wd:=$PWD}"
+printf '%s\n' "mutant 'new' body.sh 's/echo/true # MUT echo/'" >> "$wd/hooks/test-mutants.sh"
+printf '%s\n' 'true || : # MUT' >> "$wd/hooks/body.sh"
+STUB
+chmod +x "$TMP/bin/codex"
+bash "$CD" codex "$P_ms2" "$TMP/prompt" "true" >"$TMP/out_ms2" 2>&1; rc=$?
+[ "$rc" -eq 1 ] || { cat "$TMP/out_ms2"; fail "#236 sentinel left in a hook body should fail rc 1, got $rc"; }
+grep -q "mutation marker.*(hooks/body.sh)" "$TMP/out_ms2" || { cat "$TMP/out_ms2"; fail "#236 failure should name hooks/body.sh"; }
+P_ms3="$TMP/mut_suite_noexempt_parent"; mut_suite_parent "$P_ms3"
+cat > "$TMP/bin/codex" <<'STUB'
+#!/usr/bin/env bash
+wd=""; while [ $# -gt 0 ]; do [ "$1" = "-C" ] && { wd="$2"; shift 2; continue; }; shift; done
+: "${wd:=$PWD}"
+printf '%s\n' "mutant 'new' body.sh 's/echo/true # MUT echo/'" >> "$wd/hooks/test-mutants.sh"
+STUB
+chmod +x "$TMP/bin/codex"
+CODING_DISPATCH_MUT_EXEMPT="" bash "$CD" codex "$P_ms3" "$TMP/prompt" "true" >"$TMP/out_ms3" 2>&1; rc=$?
+[ "$rc" -eq 1 ] || { cat "$TMP/out_ms3"; fail "#236 empty exempt list should scan the suite and fail, got $rc"; }
+grep -q "mutation marker.*(hooks/test-mutants.sh)" "$TMP/out_ms3" || { cat "$TMP/out_ms3"; fail "#236 empty exempt failure should name the suite"; }
+# Exercise each guard boundary independently so a baseline run reports every regression.
+mut_guard_failures=0
+guard_real_git=$(command -v git)
+mkdir -p "$TMP/guard-bin"
+cat > "$TMP/guard-bin/git" <<'STUB'
+#!/usr/bin/env bash
+for arg in "$@"; do
+  if [ "$arg" = --no-textconv ]; then
+    echo 'injected git diff failure' >&2
+    exit 128
+  fi
+done
+exec "$GUARD_REAL_GIT" "$@"
+STUB
+chmod +x "$TMP/guard-bin/git"
+for scenario in diff_failure quote tab rename subdir subdir_relative untracked untracked_quote untracked_tab directory custom star double_star question_star slash; do
+  P_guard=$(set -eu; p=$(mktemp -d "${TMPDIR:-/tmp}/mut-guard.XXXXXX"); [ -n "$p" ]; printf '%s' "$p")
+  git -C "$P_guard" init -q
+  mkdir -p "$P_guard/sub" "$P_guard/test-mutants"
+  guard_name=code.sh
+  case "$scenario" in
+    quote) guard_name='we"ird.sh' ;;
+    tab) guard_name=$'tab\tname.sh' ;;
+    directory) guard_name=test-mutants/real.sh ;;
+  esac
+  printf 'base\n' > "$P_guard/$guard_name"
+  [ "$scenario" != rename ] || printf '# MUT old\n' >> "$P_guard/$guard_name"
+  git -C "$P_guard" add -A
+  git -C "$P_guard" -c user.name=Test -c user.email=test@example.com commit -qm base
+  cat > "$TMP/bin/codex" <<'STUB'
+#!/usr/bin/env bash
+wd=""; while [ $# -gt 0 ]; do [ "$1" = "-C" ] && { wd="$2"; shift 2; continue; }; shift; done
+root=$(git -C "${wd:=$PWD}" rev-parse --show-toplevel)
+case "$GUARD_SCENARIO" in
+  rename) git -C "$root" mv code.sh renamed.sh ;;
+  custom)
+    touch "$root/suite-a*"
+    printf '# MUT a\n' > "$root/suite-alpha.sh"
+    printf '# MUT b\n' > "$root/suite-beta.sh" ;;
+  *) printf '# MUT new\n' >> "$root/$GUARD_NAME" ;;
+esac
+STUB
+  chmod +x "$TMP/bin/codex"
+  guard_workdir="$P_guard"
+  case "$scenario" in subdir|subdir_relative) guard_workdir="$P_guard/sub" ;; esac
+  [ "$scenario" != untracked ] || guard_name=new-marker.sh
+  case "$scenario" in
+    untracked_quote) guard_name='new"marker.sh' ;;
+    untracked_tab) guard_name=$'new\tmarker.sh' ;;
+  esac
+  expected=1
+  case "$scenario" in rename|custom) expected=0 ;; esac
+  if [ "$scenario" = custom ]; then
+    GUARD_SCENARIO="$scenario" GUARD_NAME="$guard_name" CODING_DISPATCH_MUT_EXEMPT='suite-a* suite-b*' bash "$CD" codex "$guard_workdir" "$TMP/prompt" true > "$TMP/out_guard_$scenario" 2>&1; rc=$?
+  elif [ "$scenario" = diff_failure ]; then
+    GUARD_REAL_GIT="$guard_real_git" PATH="$TMP/guard-bin:$PATH" GUARD_SCENARIO="$scenario" GUARD_NAME="$guard_name" bash "$CD" codex "$guard_workdir" "$TMP/prompt" true > "$TMP/out_guard_$scenario" 2>&1; rc=$?
+  elif [ "$scenario" = subdir_relative ]; then
+    GUARD_SCENARIO="$scenario" GUARD_NAME="$guard_name" GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=diff.relative GIT_CONFIG_VALUE_0=true bash "$CD" codex "$guard_workdir" "$TMP/prompt" true > "$TMP/out_guard_$scenario" 2>&1; rc=$?
+  elif [[ "$scenario" = star || "$scenario" = double_star || "$scenario" = question_star || "$scenario" = slash ]]; then
+    case "$scenario" in
+      star) guard_glob='*' ;;
+      double_star) guard_glob='**' ;;
+      question_star) guard_glob='?*' ;;
+      slash) guard_glob='suites/*' ;;
+    esac
+    GUARD_SCENARIO="$scenario" GUARD_NAME="$guard_name" CODING_DISPATCH_MUT_EXEMPT="$guard_glob" bash "$CD" codex "$guard_workdir" "$TMP/prompt" true > "$TMP/out_guard_$scenario" 2>&1; rc=$?
+  else
+    GUARD_SCENARIO="$scenario" GUARD_NAME="$guard_name" bash "$CD" codex "$guard_workdir" "$TMP/prompt" true > "$TMP/out_guard_$scenario" 2>&1; rc=$?
+  fi
+  guard_ok=1
+  [ "$rc" -eq "$expected" ] || guard_ok=0
+  if [ "$scenario" = diff_failure ]; then
+    grep -qF 'mutation-marker guard: git diff failed; refusing dispatch' "$TMP/out_guard_$scenario" || guard_ok=0
+  elif [ "$expected" -eq 1 ]; then
+    grep -qF "($guard_name)" "$TMP/out_guard_$scenario" || guard_ok=0
+  fi
+  case "$scenario" in
+    star|double_star|question_star)
+      grep -qF "mutation-marker guard: refusing broad exemption '$guard_glob'; scanning those files" "$TMP/out_guard_$scenario" || guard_ok=0 ;;
+    slash)
+      grep -qF "mutation-marker guard: refusing exemption '$guard_glob' containing '/'; globs match basenames only" "$TMP/out_guard_$scenario" || guard_ok=0 ;;
+  esac
+  if [ "$scenario" = custom ]; then
+    for suite in suite-alpha.sh suite-beta.sh; do
+      grep -qF "mutation-marker guard: exempted $suite (glob suite-${suite:6:1}*) — 1 marker line(s) not scanned" "$TMP/out_guard_$scenario" || guard_ok=0
+    done
+    grep -qF "override in effect: suite-a* suite-b*" "$TMP/out_guard_$scenario" || guard_ok=0
+  fi
+  if [ "$guard_ok" -eq 0 ]; then
+    echo "FAIL: #236 guard scenario $scenario (rc $rc, expected $expected)"
+    cat "$TMP/out_guard_$scenario"
+    mut_guard_failures=$((mut_guard_failures + 1))
+  fi
+  # Only this fixture, created above, is removed.
+  rm -rf "$P_guard"
+done
+grep -qF 'mutation-marker guard: exempted hooks/test-mutants.sh (glob test-mutants*) — 1 marker line(s) not scanned' "$TMP/out_ms" || mut_guard_failures=$((mut_guard_failures + 1))
+grep -qF 'override in effect: ' "$TMP/out_ms3" || mut_guard_failures=$((mut_guard_failures + 1))
+[ "$mut_guard_failures" -eq 0 ] || fail "#236 guard regressions: $mut_guard_failures"
+echo "test #236 mutation-suite exemption PASS"
+
 # ============================ #118: pre-revert patch snapshot + --keep-on-fail ============================
 
 # (A1) failing gate, UNCOMMITTED shape: patch file is non-empty and its path is printed;
