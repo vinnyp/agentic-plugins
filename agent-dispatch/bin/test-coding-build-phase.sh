@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -uo pipefail
-SELF_DIR="$(cd "$(dirname "$0")" && pwd)"; TMP="$(cd "$(mktemp -d)" && pwd -P)"; trap 'rm -rf "$TMP"' EXIT
+SELF_DIR="$(cd "$(dirname "$0")" && pwd)"; TMP="$(set -eu; p="$(mktemp -d "${TMPDIR:-/tmp}/build-phase.XXXXXX")"; [ -n "$p" ]; cd "$p"; pwd -P)" || exit 1; trap 'rm -rf "$TMP"' EXIT
+export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.com
 # shellcheck disable=SC1091
 . "$SELF_DIR/lib/test-env-reset.sh"
 reset_dispatch_env  # neutralize any operator-exported dispatch vars before the suite runs
@@ -13,13 +14,10 @@ STUB
 chmod +x "$TMP/bin/coding-dispatch.sh"; export PATH="$TMP/bin:$PATH"; export CD_ARGS_FILE="$TMP/cd-args"; export CD_TIMEOUT_FILE="$TMP/cd-timeouts"
 printf '### Task 1: x\nimplement x\n' > "$TMP/plan.md"
 git -C "$TMP" init -q
-git -C "$TMP" config user.email t@t
-git -C "$TMP" config user.name t
 : > "$CD_TIMEOUT_FILE"
 
 new_phase_repo() {
   local p="$1"; mkdir -p "$p"; git -C "$p" init -q
-  git -C "$p" config user.email t@t; git -C "$p" config user.name t
   printf 'base\n' > "$p/tracked.txt"
   git -C "$p" add -A; git -C "$p" commit -qm base
 }
@@ -69,14 +67,13 @@ echo "test #20 phase timeout propagation PASS"
 
 # #60: repo guard accepts a real git worktree (.git is a file) and rejects a plain non-git dir.
 MAIN="$TMP/mainRepo"; mkdir -p "$MAIN"; git -C "$MAIN" init -q
-git -C "$MAIN" config user.email t@t; git -C "$MAIN" config user.name t
 echo base > "$MAIN/f.txt"; git -C "$MAIN" add -A; git -C "$MAIN" commit -qm base
 WT_REPO="$TMP/linkedWT"
 git -C "$MAIN" worktree add -q -b linkedWT "$WT_REPO" HEAD
 out="$("$SELF_DIR/coding-build-phase.sh" codex "$TMP/plan.md" "$WT_REPO" 1 --build-cmd "pytest -q" 2>&1)"; rc=$?
 [ "$rc" -eq 0 ] || { echo "$out"; echo "FAIL: git worktree repo should proceed past repo check, got rc $rc"; exit 1; }
 printf '%s\n' "$out" | grep -q "PHASE=error: not a git repo" && { echo "$out"; echo "FAIL: git worktree was rejected as non-git"; exit 1; }
-NONGIT="$(mktemp -d)"
+NONGIT="$(set -eu; p="$(mktemp -d "${TMPDIR:-/tmp}/build-phase-nongit.XXXXXX")"; [ -n "$p" ]; printf '%s' "$p")" || exit 1
 out="$("$SELF_DIR/coding-build-phase.sh" codex "$TMP/plan.md" "$NONGIT" 1 --build-cmd "pytest -q" 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] || { echo "$out"; echo "FAIL: non-git dir should exit 2, got $rc"; exit 1; }
 printf '%s\n' "$out" | grep -q "PHASE=error: not a git repo: $NONGIT" || { echo "$out"; echo "FAIL: non-git error message missing"; exit 1; }
@@ -95,7 +92,6 @@ echo "change $(date +%s)$RANDOM" >> "$wd/agent_made_this.txt"
 STUB
 chmod +x "$TMP/uniqbin/codex"
 PARENT="$TMP/parentWT"; mkdir -p "$PARENT"; git -C "$PARENT" init -q
-git -C "$PARENT" config user.email t@t; git -C "$PARENT" config user.name t
 echo base > "$PARENT/tracked.txt"; git -C "$PARENT" add -A; git -C "$PARENT" commit -qm base
 parent_head="$(git -C "$PARENT" rev-parse HEAD)"
 printf '### Task 1: a\nimplement a\n### Task 2: b\nimplement b\n' > "$TMP/plan2.md"
@@ -129,6 +125,129 @@ out="$(PATH="$TMP/inplacebin:$PATH" "$SELF_DIR/coding-build-phase.sh" codex "$TM
 [ "$(git -C "$INPLACE" log -1 --format=%s)" = "feat(inplace242): task 1 via codex" ] || { git -C "$INPLACE" log -1 --format=%s; echo "FAIL: #242 in-place commit subject should be lower-case conventional"; exit 1; }
 echo "test #242 commit subjects PASS"
 
+
+# foundry#237: every task prompt carries the plan preamble (goal, spec path, global
+# constraints) ahead of its task spec; orchestrator boilerplate is removed; no preamble
+# means no block; an over-cap preamble is cut with a visible note.
+mkdir -p "$TMP/ctxbin"
+cat > "$TMP/ctxbin/coding-dispatch.sh" <<'STUB'
+#!/usr/bin/env bash
+for a in "$@"; do case "$a" in *.prompt) n=$(( $(find "$CTX_DIR" -type f | wc -l) + 1 )); cp "$a" "$CTX_DIR/$n";; esac; done
+STUB
+chmod +x "$TMP/ctxbin/coding-dispatch.sh"
+cat > "$TMP/plan-ctx.md" <<'PLAN'
+---
+type: plan
+---
+# Widget Implementation Plan
+
+> **For agentic workers:** executed via `coding-build-phase.sh codex <this plan> ...`. Spec (READ FIRST, absolute path): `/abs/path/specs/x.md`
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development.
+>
+> **Executed unattended** via `coding-build-phase.sh codex <this plan> ...`.
+> Only each ### Task N: block reaches the coding agent ...
+> Keep this worker guidance.
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development. **Read the spec alongside this plan** — source: `projects/agent-tooling/specs/2026-06-15-x-spec.md`.
+
+> **For agentic workers:** executed via `coding-build-phase.sh codex <this plan> ...`. Specs (READ BOTH FIRST, absolute paths): `/abs/specs/a.md` and `/abs/specs/b.md`. Also '/abs/specs/a.md', "/abs/specs/c.md";
+
+> **For agentic workers:** REQUIRED SUB-SKILL: ... Spec: [[2026-06-12-x-design]] and [[2026-06-12-x-design]]
+
+> **For agentic workers:** REQUIRED SUB-SKILL: **docs/b.md**, <docs/c.md>, docs/d.md#goals, [spec](docs/e.md)
+Prose mentioning superpowers: and coding-build-phase.sh stays.
+
+> Ordinary blockquote stays.
+
+**Goal:** GOAL-237 ship the widget
+**Spec:** docs/specs/widget-design.md
+
+## Global Constraints
+- RULE-237 never use innerHTML
+
+### Task 1: first
+BODY-ONE
+### Task 2: second
+BODY-TWO
+PLAN
+repo237="$TMP/phase237"; new_phase_repo "$repo237"
+export CTX_DIR="$TMP/ctx237"; mkdir -p "$CTX_DIR"
+out="$(PATH="$TMP/ctxbin:$PATH" "$SELF_DIR/coding-build-phase.sh" codex "$TMP/plan-ctx.md" "$repo237" 1 2 --build-cmd true 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] || { echo "$out"; echo "FAIL: #237 phase should exit 0, got $rc"; exit 1; }
+[ -f "$CTX_DIR/1" ] && [ -f "$CTX_DIR/2" ] || { ls "$CTX_DIR"; echo "FAIL: #237 expected two captured prompts"; exit 1; }
+for n237 in 1 2; do
+  f237="$CTX_DIR/$n237"
+  for want237 in "PLAN CONTEXT" "GOAL-237" "docs/specs/widget-design.md" "RULE-237" "/abs/path/specs/x.md" "Prose mentioning superpowers: and coding-build-phase.sh stays." "Ordinary blockquote stays." "Keep this worker guidance." "stop and report the conflict" "instructions addressed to the orchestrator"; do
+    grep -qF "$want237" "$f237" || { cat "$f237"; echo "FAIL: #237 task $n237 prompt missing '$want237'"; exit 1; }
+  done
+  for token237 in /abs/path/specs/x.md projects/agent-tooling/specs/2026-06-15-x-spec.md /abs/specs/a.md /abs/specs/b.md /abs/specs/c.md '[[2026-06-12-x-design]]' docs/b.md docs/c.md docs/d.md docs/e.md; do
+    [ "$(grep -cxF "> Spec: $token237" "$f237")" -eq 1 ] || { cat "$f237"; echo "FAIL: missing or duplicate spec $token237"; exit 1; }
+  done
+  for unwanted237 in 'Executed unattended' 'REQUIRED SUB-SKILL' 'coding-build-phase.sh' 'superpowers:' '> **For agentic workers:**' 'reaches the coding agent' 'type: plan'; do
+    ! grep -vFx "Prose mentioning superpowers: and coding-build-phase.sh stays." "$f237" | grep -qF "$unwanted237" || { cat "$f237"; echo "FAIL: leaked $unwanted237"; exit 1; }
+  done
+  rule_line="$(grep -nF "RULE-237" "$f237" | head -1 | cut -d: -f1)"
+  spec_line="$(grep -nF "TASK SPEC" "$f237" | head -1 | cut -d: -f1)"
+  [ "$rule_line" -lt "$spec_line" ] || { cat "$f237"; echo "FAIL: #237 plan context must precede the task spec"; exit 1; }
+done
+grep -qF "BODY-ONE" "$CTX_DIR/1" && ! grep -qF "BODY-TWO" "$CTX_DIR/1" || { echo "FAIL: #237 task 1 prompt should carry only its own body"; exit 1; }
+grep -qF "BODY-TWO" "$CTX_DIR/2" && ! grep -qF "BODY-ONE" "$CTX_DIR/2" || { echo "FAIL: #237 task 2 prompt should carry only its own body"; exit 1; }
+rm -f "$CTX_DIR"/*
+out="$(PATH="$TMP/ctxbin:$PATH" "$SELF_DIR/coding-build-phase.sh" codex "$TMP/plan.md" "$repo237" 1 --build-cmd true 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] && [ -f "$CTX_DIR/1" ] || { echo "$out"; echo "FAIL: #237 no-preamble phase should dispatch"; exit 1; }
+! grep -qF "PLAN CONTEXT" "$CTX_DIR/1" || { cat "$CTX_DIR/1"; echo "FAIL: #237 a plan with no preamble must not get a PLAN CONTEXT block"; exit 1; }
+rm -f "$CTX_DIR"/*
+out="$(PATH="$TMP/ctxbin:$PATH" CODING_BUILD_PLAN_CONTEXT_MAX=40 "$SELF_DIR/coding-build-phase.sh" codex "$TMP/plan-ctx.md" "$repo237" 1 --build-cmd true 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] && [ -f "$CTX_DIR/1" ] || { echo "$out"; echo "FAIL: #237 capped phase should dispatch"; exit 1; }
+grep -qF "[plan context truncated: first 40 of" "$CTX_DIR/1" || { cat "$CTX_DIR/1"; echo "FAIL: #237 over-cap preamble needs a truncation note"; exit 1; }
+! grep -qF "RULE-237" "$CTX_DIR/1" || { cat "$CTX_DIR/1"; echo "FAIL: #237 cap was not applied"; exit 1; }
+out="$(PATH="$TMP/ctxbin:$PATH" CODING_BUILD_PLAN_CONTEXT_MAX=lots "$SELF_DIR/coding-build-phase.sh" codex "$TMP/plan-ctx.md" "$repo237" 1 --build-cmd true 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] || { echo "$out"; echo "FAIL: #237 a non-numeric cap should exit 2, got $rc"; exit 1; }
+# Boundary and decimal parsing use a preamble with an exact, known length.
+printf 'abcdefghij\n### Task 1: x\nbody\n### Task 2: y\nbody two\n' > "$TMP/boundary.md"
+for cap237 in 10 9 08; do
+  rm -f "$CTX_DIR"/*
+  out="$(cd "$TMP" && PATH="$TMP/ctxbin:$PATH" CODING_BUILD_PLAN_CONTEXT_MAX="$cap237" "$SELF_DIR/coding-build-phase.sh" codex boundary.md "$repo237" 1 2 --build-cmd true)"; rc=$?
+  [ "$rc" -eq 0 ] && [ -f "$CTX_DIR/1" ] && [ -f "$CTX_DIR/2" ] || { echo "FAIL: cap $cap237 did not dispatch task 1: $out"; exit 1; }
+  if [ "$cap237" = 10 ]; then
+    ! grep -qF 'plan context truncated' "$CTX_DIR/1" || { echo 'FAIL: exact cap truncated'; exit 1; }
+    ! printf '%s' "$out" | grep -qF 'WARNING:' || { echo 'FAIL: exact cap warned'; exit 1; }
+  else
+    expected237="$cap237"; [ "$cap237" != 08 ] || expected237=8
+    grep -qF "first $expected237 of 10" "$CTX_DIR/1" || { echo 'FAIL: decimal cap/note'; exit 1; }
+    grep -qF "full plan at $TMP/boundary.md" "$CTX_DIR/1" || { echo 'FAIL: relative plan not absolutized'; exit 1; }
+    ! printf '%s\n' "$out" | grep -qF 'truncated: [plan context truncated:' || { echo "$out"; echo 'FAIL: duplicate warning text'; exit 1; }
+    [ "$(printf '%s\n' "$out" | grep -cF 'WARNING: plan context truncated')" -eq 1 ] || { echo 'FAIL: expected one stdout warning'; exit 1; }
+  fi
+done
+out="$(CODING_BUILD_PLAN_CONTEXT_MAX=0 "$SELF_DIR/coding-build-phase.sh" codex "$TMP/plan.md" "$repo237" 1 --build-cmd true)"; rc=$?
+[ "$rc" -eq 2 ] || { echo 'FAIL: zero cap accepted'; exit 1; }
+printf '%s\n' "$out" | grep -qF 'PHASE=error: CODING_BUILD_PLAN_CONTEXT_MAX must be a positive whole number of characters' || { echo "$out"; echo 'FAIL: zero cap diagnostic missing'; exit 1; }
+printf '  \n\t\n### Task 1: x\nbody\n' > "$TMP/whitespace.md"
+rm -f "$CTX_DIR"/*
+PATH="$TMP/ctxbin:$PATH" "$SELF_DIR/coding-build-phase.sh" codex "$TMP/whitespace.md" "$repo237" 1 --build-cmd true >/dev/null
+[ -f "$CTX_DIR/1" ] || { echo 'FAIL: whitespace prompt not captured'; exit 1; }
+! grep -qF 'PLAN CONTEXT' "$CTX_DIR/1" || { echo 'FAIL: whitespace context emitted'; exit 1; }
+for front237 in unclosed crlf; do
+  rm -f "$CTX_DIR"/*
+  if [ "$front237" = unclosed ]; then
+    printf '%s\n' '---' 'KEEP-UNCLOSED' 'title: x' '> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:x ... `/abs/specs/s.md`' '### Task 1: x' body > "$TMP/front.md"
+  else
+    printf '%s\r\n' '---' 'HIDE-CRLF' '---' 'KEEP-CRLF' '### Task 1: x' body > "$TMP/front.md"
+  fi
+  PATH="$TMP/ctxbin:$PATH" "$SELF_DIR/coding-build-phase.sh" codex "$TMP/front.md" "$repo237" 1 --build-cmd true >/dev/null
+  [ -f "$CTX_DIR/1" ] || { echo 'FAIL: frontmatter prompt not captured'; exit 1; }
+  if [ "$front237" = unclosed ]; then
+    grep -qxF KEEP-UNCLOSED "$CTX_DIR/1" || { cat "$CTX_DIR/1"; echo 'FAIL: unclosed frontmatter swallowed preamble'; exit 1; }
+    ! grep -qF 'REQUIRED SUB-SKILL' "$CTX_DIR/1" || { cat "$CTX_DIR/1"; echo 'FAIL: unclosed frontmatter leaked banner'; exit 1; }
+    grep -qxF '> Spec: /abs/specs/s.md' "$CTX_DIR/1" || { cat "$CTX_DIR/1"; echo 'FAIL: unclosed frontmatter lost spec'; exit 1; }
+  else
+    ! grep -qF HIDE-CRLF "$CTX_DIR/1" && grep -qxF KEEP-CRLF "$CTX_DIR/1" || { cat "$CTX_DIR/1"; echo 'FAIL: CRLF frontmatter'; exit 1; }
+  fi
+done
+unset CTX_DIR
+echo "test #237 plan context reaches every task prompt PASS"
 
 # #234: unavailable agents block either phase mode without committing.
 printf '#!/usr/bin/env bash\nexit 6\n' > "$TMP/bin/coding-dispatch.sh"
