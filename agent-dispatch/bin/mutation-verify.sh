@@ -153,15 +153,30 @@ cp -p "$file" "$snap_file" || {
 # BLOCKER 4: a failed restore must never lose the only surviving copy of
 # the file).
 restored=0
+mut_sec=0
+test_end_sec=0
 # `cp -p` keeps the file's mode, but it also copies the snapshot's ORIGINAL
 # mtime back — older than the mutant's build artifacts — so an mtime-based
 # build (cargo, make) would treat the mutant's artifacts as fresh and keep
 # running the mutant after a byte-identical restore.
-# `touch` after a successful copy makes the restored source the newest input.
+# Wait past both mutation and test completion before touching: Python pyc
+# headers and coarse build timestamps compare whole seconds.
 restore_file() {
   [ "$restored" -eq 1 ] && return 0
   restored=1
-  cp -p "$snap_file" "$file" && touch "$file"
+  cp -p "$snap_file" "$file" || return $?
+  if [ "$mut_sec" -gt 0 ]; then
+    restore_waits=0
+    while [ "$(date +%s)" -le "$mut_sec" ] || [ "$(date +%s)" -le "$test_end_sec" ]; do
+      if [ "$restore_waits" -ge 15 ]; then
+        echo "mutation-verify.sh: warning: clock did not advance before restore touch; dependent builds may remain stale" >&2
+        break
+      fi
+      sleep 0.2
+      restore_waits=$((restore_waits + 1))
+    done
+  fi
+  touch "$file" || echo "mutation-verify.sh: warning: failed to refresh mtime for $file; dependent builds may remain stale" >&2
 }
 verify_restore() {
   cmp -s "$snap_file" "$file"
@@ -295,13 +310,19 @@ done
 if [ "$have_sed" -eq 1 ]; then
   # Read FROM the snapshot, write TO the file — sidesteps GNU-vs-BSD `sed -i`
   # portability entirely.
-  if ! sed "$mutate_sed" "$snap_file" > "$file"; then
+  mutation_rc=0
+  sed "$mutate_sed" "$snap_file" > "$file" || mutation_rc=$?
+  mut_sec=$(date +%s)
+  if [ "$mutation_rc" -ne 0 ]; then
     echo "mutation-verify.sh: sed mutation command failed" >&2
     exit 2
   fi
 else
   # Subshell: a --mutate-cmd that `cd`s must not change this script's cwd.
-  if ! ( eval "$mutate_cmd" ); then
+  mutation_rc=0
+  ( eval "$mutate_cmd" ) || mutation_rc=$?
+  mut_sec=$(date +%s)
+  if [ "$mutation_rc" -ne 0 ]; then
     echo "mutation-verify.sh: --mutate-cmd exited non-zero" >&2
     exit 2
   fi
@@ -348,8 +369,10 @@ if [ "$have_cover_check" -eq 1 ]; then
     exit 2
   }
   ( eval "$cover_test_cmd" ) || test_rc=$?
+  test_end_sec=$(date +%s)
 else
   ( eval "$test_cmd" ) || test_rc=$?
+  test_end_sec=$(date +%s)
 fi
 
 # Restore now (also covered by the EXIT trap, but do it here so we can

@@ -652,8 +652,12 @@ touch -t 200001020000 "$REF26"
 before26="$(cat "$F26")"
 cat > "$TMP/mtime_test.sh" <<EOF
 #!/usr/bin/env bash
+test_sec=\$(date +%s)
+while [ "\$(date +%s)" -le "\$test_sec" ]; do sleep 0.02; done
+rc=0
+grep -q "hello world" "$F26" || rc=\$?
 touch "$A26"
-grep -q "hello world" "$F26"
+exit "\$rc"
 EOF
 chmod +x "$TMP/mtime_test.sh"
 bash "$MV" --file "$F26" --test-cmd "$TMP/mtime_test.sh" --mutate-sed 's/hello/goodbye/' >"$TMP/out26" 2>&1
@@ -661,7 +665,48 @@ rc=$?
 [ "$rc" -eq 0 ] || { cat "$TMP/out26"; fail "restore mtime: expected exit 0 (mutation caught), got $rc"; }
 [ "$(cat "$F26")" = "$before26" ] || fail "restore mtime: file not byte-identical after restore"
 [ "$F26" -nt "$REF26" ] || fail "restore mtime: restored file kept its pre-mutation mtime — an mtime-based build would reuse the mutant's artifacts"
-[ "$A26" -nt "$F26" ] && fail "restore mtime: an artifact built from the mutant is newer than the restored source"
+mtime_sec() {
+  if stat -f %m "$1" >/dev/null 2>&1; then
+    stat -f %m "$1"
+  else
+    stat -c %Y "$1"
+  fi
+}
+[ "$(mtime_sec "$F26")" -gt "$(mtime_sec "$A26")" ] || fail "restore mtime: restored source must be strictly newer than mutant artifacts in whole seconds"
 echo "test restored file is newer than mutant artifacts -> PASS"
+
+# ---------------------------------------------------------------------------
+# Test 27: same-size Python mutants must not survive in timestamp-based pyc.
+# Start each import early in a second so a plain touch reproduces the bug.
+# ---------------------------------------------------------------------------
+if command -v python3 >/dev/null 2>&1; then
+  PY27="$TMP/python_cache"; mkdir -p "$PY27"
+  printf 'def value(): return 1 == 1\n' > "$PY27/m.py"
+  cat > "$PY27/check.py" <<'EOF'
+import importlib.util
+import os
+
+cache = importlib.util.cache_from_source("m.py")
+if os.path.exists(cache):
+    os.unlink(cache)
+import m
+assert m.value()
+EOF
+  cat > "$PY27/mutate.sh" <<'EOF'
+#!/usr/bin/env bash
+second=$(date +%s)
+while [ "$(date +%s)" -le "$second" ]; do sleep 0.02; done
+sed 's/==/!=/' m.py > mutant
+cat mutant > m.py
+EOF
+  bash "$MV" --file "$PY27/m.py" --test-cmd "cd '$PY27' && python3 check.py" \
+    --mutate-cmd "cd '$PY27' && bash mutate.sh" >"$TMP/out27" 2>&1
+  rc=$?
+  [ "$rc" -eq 0 ] || { cat "$TMP/out27"; fail "Python cache: expected caught exit 0, got $rc"; }
+  (cd "$PY27" && python3 -c 'import m; assert m.value()') || fail "Python cache: fresh import reused the same-size mutant"
+  echo "test restored Python module invalidates mutant pyc -> PASS"
+else
+  echo "SKIP: Python cache regression (python3 absent)"
+fi
 
 echo "ALL PASS"
