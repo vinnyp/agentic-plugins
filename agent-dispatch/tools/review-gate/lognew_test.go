@@ -355,6 +355,7 @@ func yamlLoadProject(t *testing.T, frontmatter string) string {
 }
 
 func TestLogNewPerLensRuntime(t *testing.T) {
+	logNewPersonaFixture(t)
 	rc, out := runCapt(t, "log-new", "--topic", "runtime", "--persona", "peer-code-reviewer", "--persona", "peer-test-reviewer", "--stdout")
 	if rc != 0 {
 		t.Fatal(rc)
