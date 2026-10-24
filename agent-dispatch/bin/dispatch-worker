@@ -878,10 +878,10 @@ dispatch_agy() {
       echo "dispatch-worker: REVIEW FAILED — output too short (${review_bytes}B < ${MIN_REVIEW_BYTES}B min). A rc=0-but-empty/short agy review is NOT a pass; do NOT accept it. Fall back to a LOCAL reviewer (Claude Agent-tool peer-*-reviewer, or Opus verify-the-reviewer) — do NOT retry the wedged agy." >&2
       agy_rc=8
     elif [ "$agy_rc" -eq 0 ] && [ "$REVIEW_REQUIRE_EVIDENCE" != "0" ]; then
-      local _sev='(^|\|)[[:blank:]]*([-*][[:blank:]]+)?(\*\*|\[)?(Blocker|Major|Minor|Nit|Critical|High|Medium|Low|Info)[[:blank:]]*(:|\]|\*\*|\||\))'
+      local _sev='(^|\|)[[:blank:]]*((#{1,6}|[0-9]+[.)]|[-*])[[:blank:]]+)*(\*\*|\[)*((Blocker|Major|Minor|Nit|Critical|High|Medium|Low|Info)([[:blank:]]*(:|\]|\*\*|\||\))|[[:blank:]]+[-—][[:blank:]]+)|Severity:[[:blank:]]*(\*\*)?[[:blank:]]*(Blocker|Major|Minor|Nit|Critical|High|Medium|Low|Info)(([[:blank:]]*(:|\]|\*\*|\||\))|[[:blank:]]+[-—][[:blank:]]+)|[[:blank:]]*$))'
       local _pathslash='(^|[^[:alnum:]_./-])[[:alnum:]_.-]+/[[:alnum:]_./-]*[[:alnum:]_-]:[0-9]+'
       local _pathext='(^|[^[:alnum:]_./-])[[:alnum:]_-]+\.[[:alpha:]][[:alnum:]]*:[0-9]+'
-      if [ "$has_rowverdict" -eq 0 ] && ! grep -Eq "$_sev|$_pathslash|$_pathext" "$review_outfile"; then
+      if [ "$has_rowverdict" -eq 0 ] && ! grep -Eiq "$_sev" "$review_outfile" && ! grep -Eq "$_pathslash|$_pathext" "$review_outfile"; then
         echo "dispatch-worker: REVIEW FAILED — review produced no labelled severity or file:line evidence (and no requirements-mode per-row ALIGN/OBJECT/ABSTAIN verdict) and is not a pass. Fall back to a LOCAL reviewer (Claude Agent-tool peer-*-reviewer, or Opus verify-the-reviewer) — do NOT retry the wedged agy." >&2
         agy_rc=8
       fi

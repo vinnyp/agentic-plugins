@@ -74,7 +74,7 @@ func reviewDispositionRC(rc, bodyBytes int) int {
 
 // Mirror dispatch-worker's label-shaped severity and file:line evidence alternatives.
 // Requirements row verdicts are checked separately below.
-var reviewEvidence = regexp.MustCompile(`(?m)(^|\|)[[:blank:]]*([-*][[:blank:]]+)?(\*\*|\[)?(Blocker|Major|Minor|Nit|Critical|High|Medium|Low|Info)[[:blank:]]*(:|\]|\*\*|\||\))|(^|[^[:alnum:]_./-])[[:alnum:]_.-]+/[[:alnum:]_./-]*[[:alnum:]_-]:[0-9]+|(^|[^[:alnum:]_./-])[[:alnum:]_-]+\.[[:alpha:]][[:alnum:]]*:[0-9]+`)
+var reviewEvidence = regexp.MustCompile(`(?m)(^|\|)[[:blank:]]*((#{1,6}|[0-9]+[.)]|[-*])[[:blank:]]+)*(\*\*|\[)*((?i:Blocker|Major|Minor|Nit|Critical|High|Medium|Low|Info)([[:blank:]]*(:|\]|\*\*|\||\))|[[:blank:]]+[-—][[:blank:]]+)|(?i:Severity):[[:blank:]]*(\*\*)?[[:blank:]]*(?i:Blocker|Major|Minor|Nit|Critical|High|Medium|Low|Info)(([[:blank:]]*(:|\]|\*\*|\||\))|[[:blank:]]+[-—][[:blank:]]+)|[[:blank:]]*$))|(^|[^[:alnum:]_./-])[[:alnum:]_.-]+/[[:alnum:]_./-]*[[:alnum:]_-]:[0-9]+|(^|[^[:alnum:]_./-])[[:alnum:]_-]+\.[[:alpha:]][[:alnum:]]*:[0-9]+`)
 var reviewRowVerdict = regexp.MustCompile(`(?m)(^|[^[:alnum:]_])(R[0-9]+\.[0-9]+|[EM][0-9]+)([^[:alnum:]_]|$).*(^|[^[:alnum:]_])(ALIGN|OBJECT|ABSTAIN)([^[:alnum:]_]|$)`)
 
 func declaredBriefRepoRoot(brief string) (string, bool) {
