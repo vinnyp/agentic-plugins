@@ -121,6 +121,9 @@ plan- and design-scale gates.
   `--runtime agy` ↔ `--runtime codex`, keeping `--review` on either. Pairs well with
   verify-the-reviewer for a high-stakes pre-merge or pre-publish gate. (The capability test above
   was run on `agy`; codex-as-reviewer rides the same recipe but has not been capability-tested.)
+  When an agy lens is BLOCKED (rc 124) or unauthenticated (rc 7), re-run it once on codex before
+  you fall back to a same-model Claude reviewer, so the lens keeps its independence. The rc table
+  in SKILL.md is the authority on that order.
 
 Exit **10** means the source repo changed during the review window. Inspect and restore the
 named changes before committing; discard the body unless every change is known concurrent

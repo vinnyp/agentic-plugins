@@ -238,9 +238,19 @@ pass**; say so in the tier-rationale log entry (Phase 2).
   - **9** — agy model not offered → fix the pin or pass `--model` to `review-gate cross-model`, then re-run; do NOT fall back to a Claude reviewer.
   - **5/6** — codex auth or rate limit → **not a build failure**. Fix the auth/ratelimit and re-run
     `cross-model` for that lens.
-  - **7** — agy not authenticated, **8** — empty/short or evidence-free review, **124** — BLOCKED
-    (timeout or wedged) → **run a Claude reviewer for that lens instead** (the fallback below). Do
-    **not** retry blindly; the CLI does not retry on rc 8 either.
+  - **7** (agy not authenticated) or **124** (BLOCKED: timed out or wedged) on an **agy** lens →
+    the runtime was unavailable, so the review content is not in question. Re-run that lens **once on
+    the other different-model runtime**, `"$RG" cross-model --runtime codex` with the same brief,
+    so the lens stays cross-model. This is allowed only where the egress note above permits that
+    provider for this repo. If codex also fails (rc 5/6/124, or a short or empty body), or its
+    egress is not acceptable, **run a Claude reviewer for that lens instead** (the fallback below).
+    A codex lens that returns rc 124 goes straight to the Claude fallback.
+  - **8** — empty/short or evidence-free review → **run a Claude reviewer for that lens instead**
+    (the fallback below). The failure is in the review's content, not in the runtime's
+    availability, so a runtime swap does not address it. Do **not** retry blindly; the CLI does not
+    retry on rc 8 either.
+  - **Record the runtime that actually reviewed each lens** (agy / codex / Claude) in the review
+    log's disposition table. A same-model substitution must be visible in the log, never silent.
 
 - **Fallback ownership — honor the dispatch gate and inspect the body.** If a `cross-model`-only
   lens returns rc **8**, or a short or empty review body, run a **Claude** Agent-tool reviewer for
@@ -251,7 +261,8 @@ pass**; say so in the tier-rationale log entry (Phase 2).
   rc with an empty body (rc 1 has been observed twice) gets the same treatment — a lens that
   returned nothing has not been reviewed, whatever it exited with. Read the per-brief **body
   length** from the run summary and apply the rule mechanically; never read a non-enumerated rc as
-  "no prescribed action". Exception: rc 10 requires source-repo inspection and restoration before re-running,
+  "no prescribed action". The one step that comes before the Claude reviewer: an agy lens at rc
+  7/124 first gets the single codex re-run described above. Exception: rc 10 requires source-repo inspection and restoration before re-running,
   regardless of the review body. rc 5/6/9 keep their distinct "not a build failure, fix the
   auth/ratelimit/model pin and re-run" handling.
 
