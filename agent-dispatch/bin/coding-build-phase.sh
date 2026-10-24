@@ -56,6 +56,7 @@ agent="${1:?usage: <codex|agy> <plan.md> <repo-dir> <task-id...> [--worktree] --
 case "$agent" in --*) echo "coding-build-phase: ERROR — flag '$agent' must come AFTER the positionals: <codex|agy> <plan.md> <repo-dir> <task-id...> [--worktree] [--build-cmd ...]"; exit 2 ;; esac
 plan="${2:?plan.md}"; repo="${3:?repo-dir}"; shift 3
 [ -f "$plan" ] || { echo "PHASE=error: plan not found: $plan"; exit 2; }
+plan="$(cd "$(dirname "$plan")" && pwd -P)/$(basename "$plan")"
 git -C "$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "PHASE=error: not a git repo: $repo"; exit 2; }
 refuse_if_review_pinned "$repo"
 # Commit scope: derive from the repo dir basename (override with CODING_COMMIT_SCOPE).
@@ -105,23 +106,44 @@ extract_task() {
 
 # extract_preamble: print the plan text above the first "### Task " heading — the plan's
 # Goal, spec path and Global Constraints, which no task block carries (vinnyp/foundry#237).
-# The superpowers "> **For agentic workers:**" execution banner is dropped: it tells the
-# ORCHESTRATOR which skill to run and would misdirect the worker.
+# In worker banners, remove driver instructions but preserve spec references and
+# other worker guidance. Frontmatter is metadata, not worker context.
 extract_preamble() {
   awk '
+    NR == 1 && $0 == "---" {frontmatter=1; next}
+    frontmatter {if ($0 == "---") frontmatter=0; next}
     /^### Task / {exit}
-    /^> \*\*For [Aa]gentic workers/ {next}
+    /^>/ && !quote {banner=($0 ~ /^> \*\*For [Aa]gentic workers/)}
+    {quote=($0 ~ /^>/)}
+    !quote {banner=0}
+    banner && /REQUIRED SUB-SKILL|superpowers:|Executed unattended|coding-build-phase.sh|reaches the coding agent/ {
+      # Spec references may share a line with the invocation being removed.
+      if (match($0, /Spec/)) {
+        spec=substr($0, RSTART + RLENGTH)
+        count=split(spec, tokens, /[[:space:]`]+/)
+        for (i=1; i<=count; i++) {
+          if (tokens[i] ~ /\// && tokens[i] ~ /\.md$/) {
+            print "> Spec: " tokens[i]
+            break
+          }
+        }
+      }
+      next
+    }
     {print}
   ' "$plan"
 }
 PLAN_CONTEXT_MAX="${CODING_BUILD_PLAN_CONTEXT_MAX:-12000}"
 case "$PLAN_CONTEXT_MAX" in ''|*[!0-9]*) echo "PHASE=error: CODING_BUILD_PLAN_CONTEXT_MAX must be a whole number of characters"; exit 2 ;; esac
+PLAN_CONTEXT_MAX=$((10#$PLAN_CONTEXT_MAX))
+[ "$PLAN_CONTEXT_MAX" -gt 0 ] || { echo "PHASE=error: CODING_BUILD_PLAN_CONTEXT_MAX must be a positive whole number of characters"; exit 2; }
 plan_context="$(extract_preamble)"
 # Whitespace-only preamble = no plan context block at all.
 case "$plan_context" in *[![:space:]]*) ;; *) plan_context="" ;; esac
 plan_context_note=""
 if [ "${#plan_context}" -gt "$PLAN_CONTEXT_MAX" ]; then
   plan_context_note="[plan context truncated: first $PLAN_CONTEXT_MAX of ${#plan_context} characters shown — read the full plan at $plan]"
+  echo "WARNING: plan context truncated: $plan_context_note"
   plan_context="${plan_context:0:$PLAN_CONTEXT_MAX}"
 fi
 
@@ -157,8 +179,11 @@ for tid in ${task_ids[@]+"${task_ids[@]}"}; do
     echo "  If anything fails, do NOT write that file."
     echo
     if [ -n "$plan_context" ]; then
-      echo "PLAN CONTEXT (shared by every task — goal, spec and global constraints; the task spec"
-      echo "below wins on any conflict, and the touch-only constraint above still applies):"
+      echo "PLAN CONTEXT (shared by every task — goal, spec and global constraints):"
+      echo "Any instructions addressed to the orchestrator (which skill to run, how to invoke"
+      echo "the build driver) are not for you. The touch-only constraint above still applies."
+      echo "If the plan context and the task spec conflict, stop and report the conflict"
+      echo "instead of guessing; do not claim success."
       echo "======================================================================"
       printf '%s\n' "$plan_context"
       [ -z "$plan_context_note" ] || printf '%s\n' "$plan_context_note"

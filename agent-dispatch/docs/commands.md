@@ -145,8 +145,12 @@ it in the delegation contract, dispatches it, and commits on success. Every task
 carries the plan's preamble (everything above the first `### Task ` heading: goal, spec path,
 global constraints) under a `PLAN CONTEXT` banner ahead of the task spec, so plan-wide rules
 reach the worker without being restated per task. The superpowers `> **For agentic workers:**`
-banner line is dropped, and the block is capped at `CODING_BUILD_PLAN_CONTEXT_MAX` characters
-with a visible truncation note. Stops at the first failure
+banner has only orchestrator boilerplate removed; spec references and other worker guidance
+are kept. Leading YAML frontmatter is dropped, and whitespace-only preambles produce no
+context block. The block is capped at `CODING_BUILD_PLAN_CONTEXT_MAX` characters, with a
+truncation note naming the absolute plan path and one stdout warning per phase. The prompt
+clarifies that orchestrator instructions are not for the worker and requires it to stop and
+report conflicts between plan context and task spec instead of guessing or claiming success. Stops at the first failure
 (the dispatch has already reverted or salvaged). `--build-cmd` is required — set `CODING_BUILD_CMD`
 instead if you prefer. Commit scope defaults to the repo directory's basename
 (`CODING_COMMIT_SCOPE` overrides). Exit codes: `0` phase complete, `1` a task failed
@@ -643,7 +647,7 @@ FAIL. So an `--install` that skipped an entrypoint (a foreign symlink it refused
 | `PEER_REVIEW_LOG_ARCHIVE` | `review-log-status --archive` | existing directory outside the log repository for ignored-log snapshots; unset leaves the log local-only |
 | `CODING_DISPATCH_PREAMBLE` | `coding-dispatch.sh` | path to the file holding the dispatch-preamble block (default: the plugin's `docs/dispatch-preamble.md`). A missing or empty block is a hard refusal (exit 2) before any side effect — a brief without the ground rules is the failure this exists to prevent. |
 | `CODING_BUILD_CMD` | `coding-build-phase.sh` | default for `--build-cmd` |
-| `CODING_BUILD_PLAN_CONTEXT_MAX` | `coding-build-phase.sh` | `12000` — character cap on the plan-preamble `PLAN CONTEXT` block sent with every task; a longer preamble is cut with a note naming the plan path |
+| `CODING_BUILD_PLAN_CONTEXT_MAX` | `coding-build-phase.sh` | `12000` — character cap on the plan-preamble `PLAN CONTEXT` block sent with every task; positive decimal integer (leading zeros accepted; zero rejected with exit 2). A longer preamble is cut with a worker note naming the absolute plan path and one stdout warning per phase |
 | `CODING_COMMIT_SCOPE` | `coding-build-phase.sh` | conventional-commit scope (default: repo dir basename) |
 | `AGY_MODEL` | `coding-dispatch.sh` | agy model for edit dispatches (default: coding pin in `bin/lib/agy-models.sh`) |
 | `DISPATCH_NO_VENV` | `gate-run.sh` via `lib/gate-env.sh` | any value = same as `--no-venv` |
