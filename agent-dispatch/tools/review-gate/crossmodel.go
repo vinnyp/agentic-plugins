@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -38,7 +39,7 @@ func rcMeaning(rc int) string {
 	case 10:
 		return "source repo changed during the review window (reviewer or a concurrent session) - inspect the named changes and restore them before committing; the review stands only if every change is known concurrent work; NOT a build failure"
 	case 124:
-		return "timeout - BLOCKED"
+		return "blocked (timed out; for agy --review, after one internal retry) - re-run an agy lens once on codex if codex egress is approved, else use a Claude reviewer; a primary codex lens goes to Claude"
 	default:
 		return fmt.Sprintf("dispatch-worker rc %d", rc)
 	}
@@ -70,6 +71,11 @@ func reviewDispositionRC(rc, bodyBytes int) int {
 	}
 	return rc
 }
+
+// Mirror dispatch-worker's label-shaped severity and file:line evidence alternatives.
+// Requirements row verdicts are checked separately below.
+var reviewEvidence = regexp.MustCompile(`(?m)(^|\|)[[:blank:]]*((#{1,6}|[0-9]+[.)]|[-*])[[:blank:]]+)*(\*\*|\[)*((?i:Blocker|Major|Minor|Nit|Critical|High|Medium|Low|Info)([[:blank:]]*(:|\]|\*\*|\||\))|[[:blank:]]+[-—][[:blank:]]+)|(?i:Severity):[[:blank:]]*(\*\*)?[[:blank:]]*(?i:Blocker|Major|Minor|Nit|Critical|High|Medium|Low|Info)(([[:blank:]]*(:|\]|\*\*|\||\))|[[:blank:]]+[-—][[:blank:]]+)|[[:blank:]]*$))|(^|[^[:alnum:]_./-])[[:alnum:]_.-]+/[[:alnum:]_./-]*[[:alnum:]_-]:[0-9]+|(^|[^[:alnum:]_./-])[[:alnum:]_-]+\.[[:alpha:]][[:alnum:]]*:[0-9]+`)
+var reviewRowVerdict = regexp.MustCompile(`(?m)(^|[^[:alnum:]_])(R[0-9]+\.[0-9]+|[EM][0-9]+)([^[:alnum:]_]|$).*(^|[^[:alnum:]_])(ALIGN|OBJECT|ABSTAIN)([^[:alnum:]_]|$)`)
 
 func declaredBriefRepoRoot(brief string) (string, bool) {
 	b, err := os.ReadFile(brief)
@@ -163,13 +169,20 @@ func cmdCrossModel(args []string) int {
 		reviewBody := stdout.String()
 		bodyBytes := len(reviewBody)
 		dispositionRC := reviewDispositionRC(rc, bodyBytes)
+		if *runtime == "codex" && (rc == 0 || rc == 1) {
+			if reviewRowVerdict.MatchString(reviewBody) {
+				dispositionRC = rc
+			} else if bodyBytes > 0 && os.Getenv("DISPATCH_REVIEW_REQUIRE_EVIDENCE") != "0" && !reviewEvidence.MatchString(reviewBody) {
+				dispositionRC = 8
+			}
+		}
 		state := ""
 		for _, line := range strings.Split(stderr.String(), "\n") {
 			if value, ok := strings.CutPrefix(line, "DISPATCH_REVIEW_STATE="); ok {
 				state, _, _ = strings.Cut(value, " ")
 			}
 		}
-		fmt.Fprintf(&summary, "- brief %d (%s): rc %d - %s (body_bytes=%d)", i+1, b, dispositionRC, rcMeaning(dispositionRC), bodyBytes)
+		fmt.Fprintf(&summary, "- brief %d (%s): rc %d - %s (body_bytes=%d) runtime=%s", i+1, b, dispositionRC, rcMeaning(dispositionRC), bodyBytes, *runtime)
 		if state != "" {
 			fmt.Fprintf(&summary, " state=%s", state)
 		}

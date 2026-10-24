@@ -122,6 +122,8 @@ plan- and design-scale gates.
   verify-the-reviewer for a high-stakes pre-merge or pre-publish gate. (The capability test above
   was run on `agy`; codex-as-reviewer rides the same recipe but has not been capability-tested.)
 
+  [SKILL.md § Dispatch](../SKILL.md#4-dispatch) is the authority for rc handling and the codex re-run.
+
 Exit **10** means the source repo changed during the review window. Inspect and restore the
 named changes before committing; discard the body unless every change is known concurrent
 work, then re-run. The clone mirrors refs at dispatch time; origin's fetch and push URLs

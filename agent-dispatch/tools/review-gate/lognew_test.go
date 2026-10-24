@@ -353,3 +353,17 @@ func yamlLoadProject(t *testing.T, frontmatter string) string {
 	}
 	return strings.TrimRight(stdout.String(), "\n")
 }
+
+func TestLogNewPerLensRuntime(t *testing.T) {
+	logNewPersonaFixture(t)
+	rc, out := runCapt(t, "log-new", "--topic", "runtime", "--persona", "peer-code-reviewer", "--persona", "peer-test-reviewer", "--stdout")
+	if rc != 0 {
+		t.Fatal(rc)
+	}
+	for _, persona := range []string{"peer-code-reviewer", "peer-test-reviewer"} {
+		want := "- " + persona + ": runtime=__ (agy | codex | claude; if substituted: from <runtime>, rc <N>, reason)"
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing %q: %s", want, out)
+		}
+	}
+}

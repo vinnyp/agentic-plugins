@@ -177,20 +177,15 @@ from a real build failure and NOT retry it as a build):
   6   codex hit a usage/rate limit (it can EXIT 0 on a zero-edit no-op — wait for
       the reset shown in the output, then re-dispatch; treat as BLOCKED).
   7   agy not authenticated (run \`agy\` to sign in) — do NOT retry as a build.
-  8   agy --review is NOT a pass: rc=0 output is below DISPATCH_MIN_REVIEW_BYTES
-      or lacks labelled-severity/file:line review evidence (a requirements-mode
-      per-row ALIGN/OBJECT/ABSTAIN verdict table also counts as evidence), OR a timeout
-      (rc=124/137) also failed on retry —
-      regardless of how many bytes the timed-out attempt wrote (a long partial is
-      still truncated, not complete). Fall back to a LOCAL reviewer.
+  8   review ran but output is below the byte floor or lacks review evidence
+      (a requirements-mode per-row ALIGN/OBJECT/ABSTAIN table counts as evidence).
+      Fall back to a LOCAL reviewer.
   9   agy effective model missing from live models; update bin/lib/agy-models.sh
       or pass --model (MODEL). No dispatch was started.
   10  --review: the source repo's config, hooks, commit identity, an unreadable after-snapshot, or a compare that could not complete triggered a review failure (see DISPATCH_REVIEW_STATE)
   DISPATCH_REVIEW_STATE=clean|warn(<n>)|critical(<n>)|skipped(<reason>) original_rc=<n> is emitted on stderr for every --review run.
-  124 the external --timeout bound killed a hung peer agent (treat as BLOCKED). For
-      agy --review specifically, a single 124/137 is retried once internally and only
-      surfaces as rc 8 (not a bare 124) if the retry ALSO times out; other runtimes/
-      modes still surface a bare 124 on the first timeout.
+  124 blocked (timeout; after one internal retry for agy --review).
+      Other runtimes/modes surface 124 on the first timeout.
   --module-dir D     Directory containing the go.mod to verify with --require-dep
                      (default: \$MODULE_DIR or the current dir).
   --workdir D        Repo root the worker edits (absolute). For the agy runtime this
@@ -842,8 +837,8 @@ dispatch_agy() {
     # review is COMPLETE (a truncated mid-sentence review can still be long).
     # ANY timeout/kill retries the SAME call ONCE before giving up, regardless
     # of how many bytes were produced. Bounded to one retry (no loop): if the
-    # retry is ALSO a timeout, fall through to the rc check below, which fails
-    # closed exactly like the rc=0-short-output case.
+    # retry is ALSO a timeout, fall through to the rc check below, which blocks
+    # with rc 124 (BLOCKED).
     if [ "$retry_skipped" = 0 ] && { [ "$agy_rc" -eq 124 ] || [ "$agy_rc" -eq 137 ]; }; then
       echo "dispatch-worker: agy review timed out (rc=$agy_rc, ${review_bytes}B written before the kill) — retrying ONCE before falling back." >&2
       agy_rc=0
@@ -883,16 +878,16 @@ dispatch_agy() {
       echo "dispatch-worker: REVIEW FAILED — output too short (${review_bytes}B < ${MIN_REVIEW_BYTES}B min). A rc=0-but-empty/short agy review is NOT a pass; do NOT accept it. Fall back to a LOCAL reviewer (Claude Agent-tool peer-*-reviewer, or Opus verify-the-reviewer) — do NOT retry the wedged agy." >&2
       agy_rc=8
     elif [ "$agy_rc" -eq 0 ] && [ "$REVIEW_REQUIRE_EVIDENCE" != "0" ]; then
-      local _sev='(^|[^[:alnum:]_])(Blocker|Major|Minor|Nit|Critical)([^[:alnum:]_]|$)'
+      local _sev='(^|\|)[[:blank:]]*((#{1,6}|[0-9]+[.)]|[-*])[[:blank:]]+)*(\*\*|\[)*((Blocker|Major|Minor|Nit|Critical|High|Medium|Low|Info)([[:blank:]]*(:|\]|\*\*|\||\))|[[:blank:]]+[-—][[:blank:]]+)|Severity:[[:blank:]]*(\*\*)?[[:blank:]]*(Blocker|Major|Minor|Nit|Critical|High|Medium|Low|Info)(([[:blank:]]*(:|\]|\*\*|\||\))|[[:blank:]]+[-—][[:blank:]]+)|[[:blank:]]*$))'
       local _pathslash='(^|[^[:alnum:]_./-])[[:alnum:]_.-]+/[[:alnum:]_./-]*[[:alnum:]_-]:[0-9]+'
       local _pathext='(^|[^[:alnum:]_./-])[[:alnum:]_-]+\.[[:alpha:]][[:alnum:]]*:[0-9]+'
-      if [ "$has_rowverdict" -eq 0 ] && ! grep -Eq "$_sev|$_pathslash|$_pathext" "$review_outfile"; then
+      if [ "$has_rowverdict" -eq 0 ] && ! grep -Eiq "$_sev" "$review_outfile" && ! grep -Eq "$_pathslash|$_pathext" "$review_outfile"; then
         echo "dispatch-worker: REVIEW FAILED — review produced no labelled severity or file:line evidence (and no requirements-mode per-row ALIGN/OBJECT/ABSTAIN verdict) and is not a pass. Fall back to a LOCAL reviewer (Claude Agent-tool peer-*-reviewer, or Opus verify-the-reviewer) — do NOT retry the wedged agy." >&2
         agy_rc=8
       fi
     elif [ "$retry_skipped" = 0 ] && { [ "$agy_rc" -eq 124 ] || [ "$agy_rc" -eq 137 ]; }; then
-      echo "dispatch-worker: REVIEW FAILED — agy timed out again (rc=$agy_rc, ${review_bytes}B written) after one retry. A timed-out review is TRUNCATED and NOT a pass regardless of byte count; do NOT accept it. Fall back to a LOCAL reviewer (Claude Agent-tool peer-*-reviewer, or Opus verify-the-reviewer) — do NOT retry the wedged agy again." >&2
-      agy_rc=8
+      echo "dispatch-worker: REVIEW FAILED — agy timed out again (rc=$agy_rc, ${review_bytes}B written) after one retry (returning rc 124 BLOCKED). A timed-out review is TRUNCATED and NOT a pass regardless of byte count; do NOT accept it. Re-run an agy lens once on codex if codex egress is approved, else use a Claude reviewer; a primary codex lens at rc 124 goes to Claude." >&2
+      agy_rc=124
     fi
   else
     run_with_timeout agy "${model_args[@]}" < "$agy_brief"

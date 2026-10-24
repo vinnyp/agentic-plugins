@@ -220,9 +220,14 @@ differ sharply by runtime — this is not a general `--review` contract:
   `<repo>/../.worktrees/dispatch-review-wt.XXXXXX` (falling back to
   `${XDG_CACHE_HOME:-~/.cache}/dispatch-review-worktrees/`, then `$TMPDIR`), removed on exit. Two
   gates decide whether the review counts: a byte backstop (`DISPATCH_MIN_REVIEW_BYTES`, default
-  1200) and an evidence gate requiring a labelled severity (Blocker/Major/Minor/Nit/Critical) or a
-  `file:line` citation. Failing either is exit 8 — **not** a pass. A single timeout is retried once
-  internally; a second timeout is also exit 8. And if the real tree is dirty *and* the brief names
+  1200) and an evidence gate requiring a case-insensitive severity label
+  (Blocker/Major/Minor/Nit/Critical/High/Medium/Low/Info) or a `file:line` citation. Severity labels
+  must start a line or table cell, optionally after heading,
+  numbered/list, bold or bracket prefixes, and end with `:`, `]`, `**`, `|`, `)`, or a spaced
+  dash (` — ` / ` - `). Explicit `Severity:` fields (including `**Severity:**`) may also end
+  at the line boundary; prose such as “Low risk overall” does not count. Failing either is
+  exit 8 — **not** a pass. A single timeout is retried once internally; a second timeout is exit 124.
+  And if the real tree is dirty *and* the brief names
   one of the uncommitted paths, it refuses (exit 2) before launching, because a review of a tree
   missing the file it was briefed on is worse than no review — a dirty tree whose dirty files are
   not named in the brief only warns, and `--allow-dirty` (`DISPATCH_ALLOW_DIRTY=1`) opts out.
@@ -287,10 +292,10 @@ so judge those reviews yourself. For a whole round of lenses, see
 | `5` | codex rejected every model at the auth/config layer. Fix auth; **do not** retry as a build. |
 | `6` | codex hit a usage/rate limit. It can exit 0 on a zero-edit no-op, so this is detected from the limit signature *plus* an absence of substantive output. Treat as blocked. |
 | `7` | agy is not authenticated (`agy` and sign in). Do not retry as a build. |
-| `8` | an agy `--review` did not produce a real review (too short, no evidence, or timed out twice) |
+| `8` | review ran but output is below the byte floor or lacks evidence |
 | `9` | effective agy model missing from live `agy models`; update `bin/lib/agy-models.sh` or the override |
 | `10` | source repo changed during the review window or compare could not complete; inspect and restore named changes before committing, discard the body unless every change is known concurrent work, then re-run. Known residual: a review run can still execute a planted `filter.*.clean` during the after-snapshot's `git status`. |
-| `124` | the external `--timeout` bound killed a hung agent — a blocked phase, not a result |
+| `124` | blocked (timeout; after one internal retry for agy `--review`) |
 | other | the runtime's own exit code; native 10 is remapped to 1 during review |
 
 Artifacts (agy `--review` only): the review is also tee'd to a file whose path is printed on

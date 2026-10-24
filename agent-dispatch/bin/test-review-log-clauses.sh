@@ -18,6 +18,17 @@ require() {
   grep -Fq -- "$2" "$1" || fail "$1 lacks: $2"
 }
 
+require "$skill" 'rc 2/3/9/10 rules take precedence'
+require "$skill" '0 bytes at rc 0, 1 or 8, or at any rc not otherwise enumerated'
+require "$skill" 'short (non-empty) body at an unlisted rc'
+require "$plugin_dir/skills/running-the-peer-review-gate/references/different-model-reviews.md" '[SKILL.md § Dispatch](../SKILL.md#4-dispatch) is the authority for rc handling and the codex re-run'
+require "$skill" 'cross-model --runtime codex --brief <same brief>'
+require "$skill" 'Codex egress is default DENY; explicit operator approval for this repo is required.'
+require "$skill" 'codex (not capability-tested)'
+require "$skill" 'per-lens runtime block'
+require "$convention" 'per-lens runtime block'
+require "$skill" 'A same-model Claude substitution must never be reported as a cross-model pass in the log or a PR body.'
+
 require "$skill" 'review-log-status --archive <log-path>'
 require "$skill" "Quote the CLI's"
 require "$skill" 'first stdout word'

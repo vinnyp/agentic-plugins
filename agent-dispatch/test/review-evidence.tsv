@@ -1,0 +1,15 @@
+0	High: investigate
+8	High-level, looks fine
+8	Low risk overall
+0	**Major**
+0	| Minor |
+0	src/main.go:12
+0	[MAJOR] §4 Rollout — gap
+0	1. **Major** — x
+0	### Major: x
+0	**[Major]** x
+0	Severity: Major
+0	- **Severity:** High
+0	[BLOCKER] Task 3 — sequencing gap
+0	- [nit] wording
+8	Overall: no major concerns

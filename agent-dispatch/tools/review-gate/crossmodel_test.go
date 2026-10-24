@@ -221,8 +221,8 @@ func TestCrossModelRc124Blocked(t *testing.T) {
 	if rc != 124 {
 		t.Fatalf("rc=%d want 124", rc)
 	}
-	if !strings.Contains(out, "timeout - BLOCKED") || !strings.Contains(out, "BLOCKED") {
-		t.Fatalf("rc124 must surface literal BLOCKED meaning: %q", out)
+	if !strings.Contains(out, "blocked (timed out; for agy --review, after one internal retry)") {
+		t.Fatalf("rc124 must explain the blocked timeout: %q", out)
 	}
 }
 
@@ -233,7 +233,7 @@ func TestCrossModelInfraCodesPreserveEmptyBodyDisposition(t *testing.T) {
 		want string
 	}{
 		{name: "model_missing", rc: 9, want: "agy model not offered: fix lib/agy-models.sh or pass a model, then re-run; NOT a build failure"},
-		{name: "timeout", rc: 124, want: "timeout - BLOCKED"},
+		{name: "timeout", rc: 124, want: "blocked (timed out; for agy --review, after one internal retry)"},
 		{name: "codex_auth", rc: 5, want: "codex auth rejected"},
 		{name: "dispatch_worker", rc: 2, want: "dispatch-worker usage error or dirty-tree refusal"},
 		{name: "runtime_missing", rc: 3, want: "runtime binary not on PATH"},
@@ -263,7 +263,7 @@ exit `+strconv.Itoa(tc.rc)+`
 }
 
 func TestCrossModelThreadsFlags(t *testing.T) {
-	callLog := stubDispatchWorker(t, strings.Repeat("review details ", 200), 0)
+	callLog := stubDispatchWorker(t, "Minor: main.go:12 details\n"+strings.Repeat("review details ", 200), 0)
 	b := writeBrief(t, "b1.md")
 	rc, _ := runCapt(t, "cross-model", "--runtime", "codex", "--timeout", "9m", "--model", "custom-id", "--brief", b)
 	if rc != 0 {
@@ -278,7 +278,7 @@ func TestCrossModelThreadsFlags(t *testing.T) {
 }
 
 func TestCrossModelThreadsWorkdir(t *testing.T) {
-	callLog := stubDispatchWorker(t, strings.Repeat("review details ", 200), 0)
+	callLog := stubDispatchWorker(t, "Minor: main.go:12 details\n"+strings.Repeat("review details ", 200), 0)
 	b := writeBrief(t, "b1.md")
 	workdir := t.TempDir()
 	rc, _ := runCapt(t, "cross-model", "--runtime", "agy", "--brief", b, "--workdir", workdir)
@@ -292,7 +292,7 @@ func TestCrossModelThreadsWorkdir(t *testing.T) {
 }
 
 func TestCrossModelDefaultsWorkdirFromBriefRepoRoot(t *testing.T) {
-	callLog := stubDispatchWorker(t, strings.Repeat("review details ", 200), 0)
+	callLog := stubDispatchWorker(t, "Minor: main.go:12 details\n"+strings.Repeat("review details ", 200), 0)
 	dir := t.TempDir()
 	b := filepath.Join(dir, "brief.md")
 	const briefRoot = "/tmp/review-gate-brief-root"
@@ -311,7 +311,7 @@ func TestCrossModelDefaultsWorkdirFromBriefRepoRoot(t *testing.T) {
 }
 
 func TestCrossModelExplicitWorkdirOverridesBriefRepoRoot(t *testing.T) {
-	callLog := stubDispatchWorker(t, strings.Repeat("review details ", 200), 0)
+	callLog := stubDispatchWorker(t, "Minor: main.go:12 details\n"+strings.Repeat("review details ", 200), 0)
 	dir := t.TempDir()
 	b := filepath.Join(dir, "brief.md")
 	const briefRoot = "/tmp/review-gate-brief-root"
@@ -432,7 +432,7 @@ func TestCrossModelRc6(t *testing.T) {
 }
 
 func TestCrossModelMultiBriefSerializedSummary(t *testing.T) {
-	callLog := stubDispatchWorker(t, strings.Repeat("review details ", 200), 0)
+	callLog := stubDispatchWorker(t, "Minor: main.go:12 details\n"+strings.Repeat("review details ", 200), 0)
 	b1, b2 := writeBrief(t, "b1.md"), writeBrief(t, "b2.md")
 	rc, out := runCapt(t, "cross-model", "--runtime", "agy", "--brief", b1, "--brief", b2)
 	if rc != 0 {
@@ -484,7 +484,7 @@ func readFile(t *testing.T, p string) string {
 
 func TestCrossModelOmitsEmptyModel(t *testing.T) {
 	for _, args := range [][]string{nil, {"--model", ""}} {
-		callLog := stubDispatchWorker(t, strings.Repeat("review details ", 200), 0)
+		callLog := stubDispatchWorker(t, "Minor: main.go:12 details\n"+strings.Repeat("review details ", 200), 0)
 		b := writeBrief(t, "default-model.md")
 		rc, _ := runCapt(t, append([]string{"cross-model", "--runtime", "agy", "--brief", b}, args...)...)
 		if rc != 0 {
@@ -564,5 +564,73 @@ exit 0
 	}
 	if strings.Contains(summary, "state=clean") || strings.Contains(summary, "original_rc=") {
 		t.Fatalf("summary must contain only the last state token: %q", summary)
+	}
+}
+
+func TestCodexReviewEvidenceAndRuntime(t *testing.T) {
+	for _, tc := range []struct {
+		name, evidence string
+		want           int
+	}{
+		{"prose", "", 8},
+		{"finding", "Major: src/main.go:12 broken\n", 0},
+		{"security", "High: investigate\n", 0},
+		{"requirements", "| R1.1 | ALIGN |\n", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stubDispatchWorker(t, tc.evidence+strings.Repeat("review prose ", 100), 0)
+			rc, out := runCapt(t, "cross-model", "--runtime", "codex", "--brief", "brief.md")
+			if rc != tc.want {
+				t.Fatalf("rc=%d want %d: %s", rc, tc.want, out)
+			}
+			if !strings.Contains(out, "runtime=codex") {
+				t.Fatalf("missing runtime: %s", out)
+			}
+		})
+	}
+}
+
+func TestReviewEvidenceParity(t *testing.T) {
+	t.Setenv("DISPATCH_REVIEW_REQUIRE_EVIDENCE", "1")
+	data, err := os.ReadFile("../../test/review-evidence.tsv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		fields := strings.SplitN(line, "\t", 2)
+		t.Run(fields[1], func(t *testing.T) {
+			stubDispatchWorker(t, fields[1]+"\n"+strings.Repeat("review prose ", 100), 0)
+			rc, out := runCapt(t, "cross-model", "--runtime", "codex", "--brief", "brief.md")
+			if strconv.Itoa(rc) != fields[0] {
+				t.Fatalf("rc=%d want %s: %s", rc, fields[0], out)
+			}
+		})
+	}
+}
+
+func TestCrossModelDispositionPins(t *testing.T) {
+	for _, tc := range []struct {
+		name, runtime, body string
+		rc, want            int
+		disabled            bool
+	}{
+		{"path-only", "codex", "src/main.go:12\n" + strings.Repeat("details ", 100), 0, 0, false},
+		{"agy-runtime", "agy", strings.Repeat("details ", 100), 0, 0, false},
+		{"short-row", "codex", "| R1.1 | ALIGN |\n", 0, 0, false},
+		{"rc1-prose", "codex", strings.Repeat("looks fine ", 100), 1, 8, false},
+		{"disabled-evidence", "codex", strings.Repeat("looks fine ", 100), 0, 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.disabled {
+				t.Setenv("DISPATCH_REVIEW_REQUIRE_EVIDENCE", "0")
+			} else {
+				t.Setenv("DISPATCH_REVIEW_REQUIRE_EVIDENCE", "1")
+			}
+			stubDispatchWorker(t, tc.body, tc.rc)
+			rc, out := runCapt(t, "cross-model", "--runtime", tc.runtime, "--brief", "brief.md")
+			if rc != tc.want || !strings.Contains(out, "runtime="+tc.runtime) {
+				t.Fatalf("rc=%d want %d: %s", rc, tc.want, out)
+			}
+		})
 	}
 }

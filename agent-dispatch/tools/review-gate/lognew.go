@@ -179,7 +179,11 @@ func renderLogSkeleton(date, topic, mode string, personas []string) logSkeleton 
 	fmt.Fprintf(&b, "# Peer-review gate — %s (%s)\n\n", topic, date)
 	fmt.Fprintf(&b, "**Mode:** %s. **Reviewers:** %s. **persona-version:** %s.\n\n",
 		modeOr(mode), strings.Join(personas, ", "), version)
-	b.WriteString("## Findings\n\n")
+	b.WriteString("**Per-lens runtime:**\n\n")
+	for _, p := range personas {
+		fmt.Fprintf(&b, "- %s: runtime=__ (agy | codex | claude; if substituted: from <runtime>, rc <N>, reason)\n", p)
+	}
+	b.WriteString("\n## Findings\n\n")
 	for _, p := range personas {
 		fmt.Fprintf(&b, "### %s\n\n(paste findings)\n\n", p)
 	}
