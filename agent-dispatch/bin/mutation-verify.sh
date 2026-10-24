@@ -148,7 +148,7 @@ cp -p "$file" "$snap_file" || {
 }
 
 # Restore-on-every-path bookkeeping. `restored` tracks whether a restore
-# attempt has already run. `verify_restore`'s return code (NOT a stored
+# attempt has completed. `verify_restore`'s return code (NOT a stored
 # flag) gates whether cleanup() is allowed to delete the snapshot (see
 # BLOCKER 4: a failed restore must never lose the only surviving copy of
 # the file).
@@ -161,11 +161,10 @@ mut_sec=0
 # Wait past restore entry before touching: all mutant artifacts precede it,
 # and Python pyc headers and coarse build timestamps compare whole seconds.
 restore_file() {
+  [ "$restored" -eq 1 ] && return 0
   if [ "$mut_sec" -gt 0 ]; then
     entry_sec=$(date +%s)
   fi
-  [ "$restored" -eq 1 ] && return 0
-  restored=1
   cp -p "$snap_file" "$file" || return $?
   if [ "$mut_sec" -gt 0 ]; then
     restore_waits=0
@@ -179,6 +178,7 @@ restore_file() {
     done
   fi
   touch "$file" || echo "mutation-verify.sh: warning: failed to refresh mtime for $file; dependent builds may remain stale" >&2
+  restored=1
 }
 verify_restore() {
   cmp -s "$snap_file" "$file"
