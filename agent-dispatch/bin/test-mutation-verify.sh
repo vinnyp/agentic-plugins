@@ -739,4 +739,23 @@ rc=$?
 [ "$(mtime_sec "$F28")" -gt "$(mtime_sec "$A28")" ] || fail "syntax restore mtime: restored source must be strictly newer than syntax artifacts in whole seconds"
 echo "test syntax failure restores newer than artifacts -> PASS"
 
+# ---------------------------------------------------------------------------
+# Test 29: baseline exiting 141 (SIGPIPE under pipefail, e.g. piping a noisy
+# test runner into `grep -q`) exits 2 and emits an actionable SIGPIPE /
+# `grep -q` diagnostic hint, leaving the target file byte-identical.
+# ---------------------------------------------------------------------------
+F29="$TMP/sigpipe_baseline.txt"
+printf 'hello world\n' > "$F29"
+before29="$(cat "$F29")"
+bash "$MV" --file "$F29" \
+  --test-cmd "(exit 141)" \
+  --mutate-sed 's/hello/goodbye/' >"$TMP/out29" 2>&1
+rc=$?
+[ "$rc" -eq 2 ] || { cat "$TMP/out29"; fail "sigpipe baseline: expected exit 2, got $rc"; }
+grep -q "baseline exited 141" "$TMP/out29" || { cat "$TMP/out29"; fail "sigpipe baseline: expected baseline exited 141 message"; }
+grep -q "SIGPIPE" "$TMP/out29" || { cat "$TMP/out29"; fail "sigpipe baseline: expected SIGPIPE diagnostic hint"; }
+grep -q "grep -q" "$TMP/out29" || { cat "$TMP/out29"; fail "sigpipe baseline: expected grep -q diagnostic hint"; }
+[ "$(cat "$F29")" = "$before29" ] || fail "sigpipe baseline: file not byte-identical after abort"
+echo "test baseline exit 141 emits SIGPIPE / grep -q hint -> PASS"
+
 echo "ALL PASS"

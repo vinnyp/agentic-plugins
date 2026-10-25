@@ -285,8 +285,11 @@ mutation-verify.sh --file <path> --test-cmd "<the gate>" --mutate-sed '<expr>' \
 
 `--syntax-cmd` is the leg that matters most and the one hand-rolling always omits: a malformed
 mutant produces a syntax error, the test "fails" (or "passes") for the wrong reason, and the result
-is indistinguishable from a genuine verdict. **Never add a git-state check to
-`mutation-verify.sh`** — being git-free is precisely what makes it safe on uncommitted work.
+is indistinguishable from a genuine verdict. Pass the test runner's own exit status as `--test-cmd`
+(never pipe into `grep -q` or `head` — `mutation-verify.sh` runs under `pipefail`, so an early pipe
+close kills the runner with `SIGPIPE` / exit 141 and fails the unmutated baseline). **Never add a
+git-state check to `mutation-verify.sh`** — being git-free is precisely what makes it safe on
+uncommitted work.
 
 ### 7. Keep the review log (a working record — verify where it landed with `review-log-status`)
 
