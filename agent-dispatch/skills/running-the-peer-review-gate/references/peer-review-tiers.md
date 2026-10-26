@@ -295,7 +295,9 @@ It snapshots the target file by **copy** into a temp dir outside the repo, mutat
 restores from the copy, and verifies byte-identity — immune to commit state, and it **never invokes
 git**. Exit codes: `0` mutation caught (the test genuinely isolates), `1` mutation not caught
 (false-green test), `2` harness error (bad args, a no-op mutation, a failed restore, or an invalid
-baseline). Use it for every mutation-verify pass, orchestrator or reviewer alike.
+baseline). `--test-cmd` runs under `pipefail`: pass the test runner's own exit status, and never
+pipe into `grep -q` or `head` (early pipe close sends `SIGPIPE` / exit 141 to the upstream runner
+and aborts the baseline). Use it for every mutation-verify pass, orchestrator or reviewer alike.
 
 **Concurrent mutation-DOING reviewers — isolate them, or make them read-only.** When you dispatch
 two or more reviewers that themselves RUN mutations (mutate a file → run the test → restore), do

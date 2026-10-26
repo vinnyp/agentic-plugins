@@ -128,7 +128,7 @@ check no brief still contains the literal `{{DIRTY_PATHS}}`. The four clauses ar
 
 - **Never touch a file you did not create.** `rm`, `git checkout`, `git restore`, `git reset`, `git clean` and `git stash` are forbidden against any path outside your task's declared files. Treat unknown files as foreign and leave them. This binds every dispatched agent — a coding worker, a reviewer, a research or archival subagent, any runtime — not only a `coding-dispatch.sh` run.
 - **These paths are already dirty and are not yours:** {{DIRTY_PATHS}}. Reverting or deleting one of them is the failure this rule exists to prevent.
-- **You do not run the long gate.** Run every command in the foreground and let it finish. A subagent cannot receive a completion notification, so a backgrounded command hangs forever with nothing to wake it; if you catch yourself writing "I'll wait for the notification", that IS the violation. Never kill or signal a process you did not start.
+- **You do not run the long gate.** Run every command in the foreground and let it finish. A subagent cannot receive a completion notification, so a backgrounded command hangs forever with nothing to wake it; if you catch yourself writing "I'll wait for the notification", that IS the violation. Never kill or signal a process you did not start. Bound any load generator you start (`yes`, `node -e 'for(;;);'`, a spin loop) with `timeout -k`, and make sure it is gone before you return: a burner left behind holds a shared machine's cores for hours.
 - **Scratch repos fail closed.** Create a throwaway repo only under an absolute `mktemp -d "${TMPDIR:-/tmp}/<name>.XXXXXX"`, in a script running `set -eu`, and abort if the path is empty. Every `git config`, `checkout`, `branch`, `merge`, `commit` or `push` in it carries `-C <that path>`. Pass an identity per command (`-c user.name=… -c user.email=…`, or `GIT_AUTHOR_*`/`GIT_COMMITTER_*` env), never with `git config`, and never `--global`. `git -C ""` silently runs in the current directory, and in a linked worktree `git config` rewrites the shared repository's config.
 
 The third clause matters most here: a reviewer given Bash will otherwise background the suite it was
@@ -285,8 +285,11 @@ mutation-verify.sh --file <path> --test-cmd "<the gate>" --mutate-sed '<expr>' \
 
 `--syntax-cmd` is the leg that matters most and the one hand-rolling always omits: a malformed
 mutant produces a syntax error, the test "fails" (or "passes") for the wrong reason, and the result
-is indistinguishable from a genuine verdict. **Never add a git-state check to
-`mutation-verify.sh`** — being git-free is precisely what makes it safe on uncommitted work.
+is indistinguishable from a genuine verdict. Pass the test runner's own exit status as `--test-cmd`
+(never pipe into `grep -q` or `head` — `mutation-verify.sh` runs under `pipefail`, so an early pipe
+close kills the runner with `SIGPIPE` / exit 141 and fails the unmutated baseline). **Never add a
+git-state check to `mutation-verify.sh`** — being git-free is precisely what makes it safe on
+uncommitted work.
 
 ### 7. Keep the review log (a working record — verify where it landed with `review-log-status`)
 
