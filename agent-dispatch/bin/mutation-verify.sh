@@ -54,13 +54,14 @@
 #
 # Knock-out (issue foundry#259; requires --expect-fail-output):
 #   --knockout-cmd <cmd> is the same test command with only the hazard test
-#     deselected, by a form that matches exactly one test (cargo -- --exact
-#     --skip, go -skip '^Name$', node --test-skip-pattern='/^name$/', pytest
-#     --deselect <full node id>). It must start with --test-cmd and differ from
-#     it, pass green on the unmutated copy, print something different from the
-#     full baseline, not print any expected text there, and contain every
-#     --knockout-expect-output line (the runner's deselection count) (exit 2
-#     otherwise). On the same mutated copy, and only when the main run would
+#     deselected, by an exact form (supported: cargo -- --exact --skip, go -v
+#     -skip '^Name$' with an awk count, pytest --deselect <full node id>; see
+#     docs/commands.md). --knockout-expect-output (the runner's count line) is
+#     required, matched as a whole number (no digit right before or after it),
+#     and must not appear in the full run. The knock-out must start with
+#     --test-cmd and differ from it, pass green on the unmutated copy, print
+#     something different from the full baseline, not print any expected text
+#     there, and contain every count line (exit 2 otherwise). On the same mutated copy, and only when the main run would
 #     be CAUGHT, the expected text must disappear; if it persists, another test
 #     prints it (or the deselect missed) and the run exits 2. The verdict names
 #     the command, its exit code on the mutant and the count line. Without it,
@@ -92,7 +93,7 @@ usage: mutation-verify.sh --file <path> --test-cmd <shell-command> \
          [--expect-anchor <str>] [--expect-marker <str>] \
          [--syntax-cmd <shell-command>] [--cover-check <line-or-symbol>] \
          [--expect-fail-output <str>] \
-         [--knockout-cmd <shell-command> [--knockout-expect-output <str>]] \
+         [--knockout-cmd <shell-command> --knockout-expect-output <str>] \
          [(--control-sed <sed-expr> | --control-cmd <shell-command>) \
           --control-expect-fail-output <str> \
           [--control-anchor <str>] [--control-marker <str>]] \
@@ -113,11 +114,12 @@ asserts the target line/function in --file had non-zero coverage. With
 --expect-fail-output may be repeated; a RED mutated run whose output lacks
 any of them failed for an unrelated reason and exits 3, not CAUGHT. Empty or
 multi-line text, or text the passing baseline prints, exits 2.
---knockout-cmd (requires --expect-fail-output) is --test-cmd plus an exact
-deselect of only the hazard test; it must pass on the unmutated copy, print
-something different from the full baseline, and contain every
---knockout-expect-output line; on the mutant the expected text must disappear,
-or the run exits 2.
+--knockout-cmd (requires --expect-fail-output and --knockout-expect-output) is
+--test-cmd plus an exact deselect of only the hazard test; it must pass on the
+unmutated copy, print something different from the full baseline, and contain
+every --knockout-expect-output line as a whole number (a line the full run
+already prints is refused); on the mutant the expected text must disappear, or
+the run exits 2.
 --control-sed / --control-cmd (requires --expect-fail-output and
 --control-expect-fail-output) applies a control mutation that breaks a
 different behavior, on a fresh copy, when the main run would be CAUGHT. It must
@@ -303,6 +305,15 @@ if [ "$have_knockout" -eq 1 ]; then
       echo "mutation-verify.sh: --knockout-cmd must start with --test-cmd (the same command plus a deselect of the hazard test): $knockout_cmd" >&2
       exit 2 ;;
   esac
+  _have_count=0
+  for _k in ${knockout_expect_outputs[@]+"${knockout_expect_outputs[@]}"}; do
+    _have_count=1
+    break
+  done
+  if [ "$_have_count" -eq 0 ]; then
+    echo "mutation-verify.sh: --knockout-cmd requires --knockout-expect-output: the runner's line showing exactly one test was deselected (it is the only proof of the knock-out's scope)" >&2
+    exit 2
+  fi
 else
   for _k in ${knockout_expect_outputs[@]+"${knockout_expect_outputs[@]}"}; do
     echo "mutation-verify.sh: --knockout-expect-output requires --knockout-cmd" >&2
@@ -401,6 +412,24 @@ cleanup() {
 trap cleanup EXIT
 trap 'cleanup; trap - INT; kill -s INT $$' INT
 trap 'cleanup; trap - TERM; kill -s TERM $$' TERM
+
+# has_whole_line_text <text> <file>: does <file> contain <text> with no digit
+# immediately before or after it? ("1 filtered out" must not match
+# "11 filtered out"; "tests 1" must not match "tests 12".)
+has_whole_line_text() {
+  MV_WHOLE_TEXT="$1" awk '
+    BEGIN { t = ENVIRON["MV_WHOLE_TEXT"]; n = length(t); found = 0 }
+    {
+      line = $0; off = 0
+      while ((i = index(line, t)) > 0) {
+        pre = (off + i > 1) ? substr($0, off + i - 1, 1) : ""
+        post = substr($0, off + i + n, 1)
+        if (pre !~ /[0-9]/ && post !~ /[0-9]/) { found = 1; exit }
+        off += i; line = substr($0, off + 1)
+      }
+    }
+    END { exit found ? 0 : 1 }' "$2"
+}
 
 shell_quote() {
   printf '%q' "$1"
@@ -573,10 +602,15 @@ if [ "$have_knockout" -eq 1 ]; then
     exit 2
   fi
   # Scope proof: a runner line showing exactly one test was deselected
-  # (pytest "1 deselected", cargo "1 filtered out").
+  # (pytest "1 deselected", cargo "1 filtered out"), matched as a whole number,
+  # and not already printed by the full run (a filter in --test-cmd).
   for _k in ${knockout_expect_outputs[@]+"${knockout_expect_outputs[@]}"}; do
-    if ! grep -F -q -- "$_k" "$knockout_base_out"; then
-      echo "mutation-verify.sh: KNOCK-OUT SCOPE UNPROVEN — the knock-out baseline output lacks --knockout-expect-output: $_k" >&2
+    if has_whole_line_text "$_k" "$baseline_out"; then
+      echo "mutation-verify.sh: KNOCK-OUT SCOPE UNPROVEN — the full, unmutated run already prints the --knockout-expect-output line, so it cannot show the knock-out's deselection: $_k" >&2
+      exit 2
+    fi
+    if ! has_whole_line_text "$_k" "$knockout_base_out"; then
+      echo "mutation-verify.sh: KNOCK-OUT SCOPE UNPROVEN — the knock-out baseline output lacks --knockout-expect-output as a whole number (a digit right before or after it does not count): $_k" >&2
       exit 2
     fi
   done

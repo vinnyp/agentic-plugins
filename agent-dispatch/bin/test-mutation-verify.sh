@@ -1308,7 +1308,7 @@ fi
 if [ "\$deselect" != sibling ]; then
   check "\$(sed -n 's/^banner=//p' "$F67")" hello || { echo "--- FAIL: sibling"; rc=1; }
 fi
-[ -n "\$deselect" ] && echo "knock-out pass: \$deselect deselected"
+[ -n "\$deselect" ] && echo "1 deselected"
 exit \$rc
 EOF
 chmod +x "$TMP/ko_suite.sh"
@@ -1319,17 +1319,17 @@ ko_run() {
 }
 
 # 67: the text disappears without the hazard test -> CAUGHT, attributed.
-ko_run "$TMP/out67" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "AssertionError: value mismatch" --knockout-cmd "$KO"
+ko_run "$TMP/out67" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "AssertionError: value mismatch" --knockout-cmd "$KO" --knockout-expect-output "1 deselected"
 rc=$?
 [ "$rc" -eq 0 ] || { cat "$TMP/out67"; fail "knock-out removes the text: expected exit 0, got $rc"; }
-grep -F -q "; knock-out \`$KO\` (exited 0 on the mutant, deselection count NOT shown) removed the expected text, so it is attributed to the test(s) that command deselects" "$TMP/out67" || { cat "$TMP/out67"; fail "knock-out removes the text: CAUGHT line must record the knock-out command, its exit code and the missing count"; }
-[ "$(grep -c "knock-out pass: hazard deselected" "$TMP/out67")" -eq 2 ] || { cat "$TMP/out67"; fail "knock-out removes the text: the baseline and mutated knock-out runs must both run and print"; }
+grep -F -q "; knock-out \`$KO\` (exited 0 on the mutant, deselection shown by '1 deselected') removed the expected text, so it is attributed to the test(s) that command deselects" "$TMP/out67" || { cat "$TMP/out67"; fail "knock-out removes the text: CAUGHT line must record the knock-out command, its exit code and the count line"; }
+[ "$(grep -c "^1 deselected$" "$TMP/out67")" -eq 2 ] || { cat "$TMP/out67"; fail "knock-out removes the text: the baseline and mutated knock-out runs must both run and print"; }
 [ "$(cat "$F67")" = "$before67" ] || fail "knock-out removes the text: file not byte-identical after restore"
 echo "test knock-out removes the text -> CAUGHT PASS"
 
 # 68: the reviewer's shared-helper case: the hazard test PASSES, a sibling
 # fails through the same helper message -> the text persists -> exit 2.
-ko_run "$TMP/out68" --mutate-sed 's/^banner=hello$/banner=bye/' --expect-fail-output "AssertionError: value mismatch" --knockout-cmd "$KO"
+ko_run "$TMP/out68" --mutate-sed 's/^banner=hello$/banner=bye/' --expect-fail-output "AssertionError: value mismatch" --knockout-cmd "$KO" --knockout-expect-output "1 deselected"
 rc=$?
 [ "$rc" -eq 2 ] || { cat "$TMP/out68"; fail "text persists under the knock-out: expected exit 2, got $rc"; }
 grep -F -q "TEXT PERSISTS WITHOUT THE HAZARD TEST — the knock-out run on the same mutant also printed: AssertionError: value mismatch" "$TMP/out68" || { cat "$TMP/out68"; fail "text persists under the knock-out: expected the message naming the text"; }
@@ -1338,7 +1338,7 @@ grep -q "mutation CAUGHT" "$TMP/out68" && { cat "$TMP/out68"; fail "text persist
 echo "test text persisting without the hazard test -> exit 2 PASS"
 
 # 69: a broken knock-out (red on the unmutated copy) is refused before mutating.
-ko_run "$TMP/out69" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "AssertionError: value mismatch" --knockout-cmd "$TMP/ko_suite.sh --bogus-flag"
+ko_run "$TMP/out69" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "AssertionError: value mismatch" --knockout-cmd "$TMP/ko_suite.sh --bogus-flag" --knockout-expect-output "1 deselected"
 rc=$?
 [ "$rc" -eq 2 ] || { cat "$TMP/out69"; fail "broken knock-out: expected exit 2, got $rc"; }
 grep -q "KNOCK-OUT BROKEN" "$TMP/out69" || { cat "$TMP/out69"; fail "broken knock-out: expected the message"; }
@@ -1347,7 +1347,7 @@ echo "test broken knock-out (red baseline) -> exit 2 PASS"
 
 # 70: a knock-out whose passing baseline already prints the text is refused.
 ko_run "$TMP/out70" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "AssertionError: value mismatch" \
-  --knockout-cmd "$KO --echo-text"
+  --knockout-cmd "$KO --echo-text" --knockout-expect-output "1 deselected"
 rc=$?
 [ "$rc" -eq 2 ] || { cat "$TMP/out70"; fail "knock-out baseline prints the text: expected exit 2, got $rc"; }
 grep -q "already appears in the passing knock-out baseline output" "$TMP/out70" || { cat "$TMP/out70"; fail "knock-out baseline prints the text: expected the message"; }
@@ -1366,7 +1366,7 @@ ko_run "$TMP/out72" --mutate-sed 's/^guard=on$/guard=off/' --knockout-cmd "$KO"
 rc=$?
 [ "$rc" -eq 2 ] || { cat "$TMP/out72"; fail "knock-out without --expect-fail-output: expected exit 2, got $rc"; }
 grep -q "requires --expect-fail-output" "$TMP/out72" || { cat "$TMP/out72"; fail "knock-out without --expect-fail-output: expected the message"; }
-grep -q "knock-out pass" "$TMP/out72" && { cat "$TMP/out72"; fail "knock-out without --expect-fail-output: must refuse before running"; }
+grep -q "^1 deselected$" "$TMP/out72" && { cat "$TMP/out72"; fail "knock-out without --expect-fail-output: must refuse before running"; }
 ko_run "$TMP/out72b" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "AssertionError: value mismatch" --knockout-cmd "$KO" --knockout-cmd "$KO"
 rc=$?
 [ "$rc" -eq 2 ] || { cat "$TMP/out72b"; fail "duplicate --knockout-cmd: expected exit 2, got $rc"; }
@@ -1375,18 +1375,18 @@ echo "test knock-out argument errors -> exit 2 PASS"
 
 # 73: ordering: a RED main run without the expected text stays exit 3; the
 # knock-out does not run on the mutant.
-ko_run "$TMP/out73" --mutate-sed 's/^banner=hello$/banner=bye/' --expect-fail-output "--- FAIL: hazard" --knockout-cmd "$KO"
+ko_run "$TMP/out73" --mutate-sed 's/^banner=hello$/banner=bye/' --expect-fail-output "--- FAIL: hazard" --knockout-cmd "$KO" --knockout-expect-output "1 deselected"
 rc=$?
 [ "$rc" -eq 3 ] || { cat "$TMP/out73"; fail "knock-out ordering: expected exit 3, got $rc"; }
 grep -q "RED FOR AN UNRELATED REASON (.*; knock-out not run)" "$TMP/out73" || { cat "$TMP/out73"; fail "knock-out ordering: exit-3 line must say the knock-out did not run"; }
-[ "$(grep -c "knock-out pass: hazard deselected" "$TMP/out73")" -eq 1 ] || { cat "$TMP/out73"; fail "knock-out ordering: the knock-out must run only on the baseline"; }
+[ "$(grep -c "^1 deselected$" "$TMP/out73")" -eq 1 ] || { cat "$TMP/out73"; fail "knock-out ordering: the knock-out must run only on the baseline"; }
 echo "test a RED main run without the text stays exit 3 with a knock-out PASS"
 
 # 74: a GREEN main run stays exit 1 and the knock-out does not run on the mutant.
-ko_run "$TMP/out74" --mutate-cmd "printf 'extra=1\n' >> '$F67'" --expect-fail-output "AssertionError: value mismatch" --knockout-cmd "$KO"
+ko_run "$TMP/out74" --mutate-cmd "printf 'extra=1\n' >> '$F67'" --expect-fail-output "AssertionError: value mismatch" --knockout-cmd "$KO" --knockout-expect-output "1 deselected"
 rc=$?
 [ "$rc" -eq 1 ] || { cat "$TMP/out74"; fail "green main with knock-out: expected exit 1, got $rc"; }
-[ "$(grep -c "knock-out pass: hazard deselected" "$TMP/out74")" -eq 1 ] || { cat "$TMP/out74"; fail "green main with knock-out: the knock-out must run only on the baseline"; }
+[ "$(grep -c "^1 deselected$" "$TMP/out74")" -eq 1 ] || { cat "$TMP/out74"; fail "green main with knock-out: the knock-out must run only on the baseline"; }
 [ "$(cat "$F67")" = "$before67" ] || fail "knock-out tests: file not byte-identical after restore"
 echo "test a GREEN main run skips the knock-out -> exit 1 PASS"
 
@@ -1402,7 +1402,7 @@ echo "test empty --knockout-cmd -> exit 2 PASS"
 
 # 76: a knock-out that is not the test command plus a deselect is refused
 # (`true` would otherwise pass every other check and print nothing).
-ko_run "$TMP/out76" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "AssertionError: value mismatch" --knockout-cmd "true"
+ko_run "$TMP/out76" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "AssertionError: value mismatch" --knockout-cmd "echo knock-out"
 rc=$?
 [ "$rc" -eq 2 ] || { cat "$TMP/out76"; fail "knock-out not starting with test-cmd: expected exit 2, got $rc"; }
 grep -q "must start with --test-cmd" "$TMP/out76" || { cat "$TMP/out76"; fail "knock-out not starting with test-cmd: expected the message"; }
@@ -1410,7 +1410,7 @@ echo "test knock-out that is not test-cmd plus a deselect -> exit 2 PASS"
 
 # 77: a knock-out whose baseline output is byte-identical to the full
 # baseline's (it deselected nothing visible) is refused before mutating.
-ko_run "$TMP/out77" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "AssertionError: value mismatch" --knockout-cmd "$TMP/ko_suite.sh --deselect ''"
+ko_run "$TMP/out77" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "AssertionError: value mismatch" --knockout-cmd "$TMP/ko_suite.sh --deselect ''" --knockout-expect-output "1 deselected"
 rc=$?
 [ "$rc" -eq 2 ] || { cat "$TMP/out77"; fail "knock-out changed nothing: expected exit 2, got $rc"; }
 grep -q "KNOCK-OUT CHANGED NOTHING" "$TMP/out77" || { cat "$TMP/out77"; fail "knock-out changed nothing: expected the message"; }
@@ -1420,15 +1420,15 @@ echo "test knock-out that changes nothing -> exit 2 PASS"
 # 78: --knockout-expect-output (the runner's deselection count) must appear in
 # the knock-out baseline; the CAUGHT verdict quotes it; it needs a knock-out.
 ko_run "$TMP/out78a" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "AssertionError: value mismatch" --knockout-cmd "$KO" \
-  --knockout-expect-output "knock-out pass: hazard deselected"
-rc=$?
-[ "$rc" -eq 0 ] || { cat "$TMP/out78a"; fail "knock-out scope shown: expected exit 0, got $rc"; }
-grep -F -q "deselection shown by 'knock-out pass: hazard deselected') removed the expected text" "$TMP/out78a" || { cat "$TMP/out78a"; fail "knock-out scope shown: verdict must quote the scope line"; }
-ko_run "$TMP/out78b" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "AssertionError: value mismatch" --knockout-cmd "$KO" \
   --knockout-expect-output "1 deselected"
 rc=$?
+[ "$rc" -eq 0 ] || { cat "$TMP/out78a"; fail "knock-out scope shown: expected exit 0, got $rc"; }
+grep -F -q "deselection shown by '1 deselected') removed the expected text" "$TMP/out78a" || { cat "$TMP/out78a"; fail "knock-out scope shown: verdict must quote the scope line"; }
+ko_run "$TMP/out78b" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "AssertionError: value mismatch" --knockout-cmd "$KO" \
+  --knockout-expect-output "2 deselected"
+rc=$?
 [ "$rc" -eq 2 ] || { cat "$TMP/out78b"; fail "knock-out scope unproven: expected exit 2, got $rc"; }
-grep -q "KNOCK-OUT SCOPE UNPROVEN .*1 deselected" "$TMP/out78b" || { cat "$TMP/out78b"; fail "knock-out scope unproven: expected the message"; }
+grep -q "KNOCK-OUT SCOPE UNPROVEN .*2 deselected" "$TMP/out78b" || { cat "$TMP/out78b"; fail "knock-out scope unproven: expected the message"; }
 ko_run "$TMP/out78c" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "AssertionError: value mismatch" --knockout-expect-output "1 deselected"
 rc=$?
 [ "$rc" -eq 2 ] || { cat "$TMP/out78c"; fail "--knockout-expect-output without a knock-out: expected exit 2, got $rc"; }
@@ -1459,9 +1459,13 @@ func TestParse(t *testing.T)      { check(t, Parse("abc"), 3) }
 func TestParseEmpty(t *testing.T) { check(t, Parse(""), 0) }
 EOF
 before79="$(cat "$GO79/target.go")"
-bash "$MV" --file "$GO79/target.go" --test-cmd "cd '$GO79' && go test -count=1 ." \
+# The documented go form: -v (deterministic output), one package, an anchored
+# -skip, and an awk count line (go prints no deselection count of its own).
+GO79_TEST="cd '$GO79' && go test -v -count=1 ."
+GO79_COUNT="2>&1 | awk '{ print } /^=== RUN/ { n++ } END { print \"knock-out ran \" n \" tests\" }'"
+bash "$MV" --file "$GO79/target.go" --test-cmd "$GO79_TEST" \
   --mutate-sed 's/return 0/return 1/' --expect-fail-output "value mismatch" \
-  --knockout-cmd "cd '$GO79' && go test -count=1 . -skip '^TestParse\$'" >"$TMP/out79" 2>&1
+  --knockout-cmd "$GO79_TEST -skip '^TestParse\$' $GO79_COUNT" --knockout-expect-output "knock-out ran 1 tests" >"$TMP/out79" 2>&1
 rc=$?
 [ "$rc" -eq 2 ] || { cat "$TMP/out79"; fail "go exact knock-out, sibling catches: expected exit 2, got $rc"; }
 grep -q "TEXT PERSISTS WITHOUT THE HAZARD TEST" "$TMP/out79" || { cat "$TMP/out79"; fail "go exact knock-out, sibling catches: expected the persists message"; }
@@ -1471,13 +1475,13 @@ echo "test a go exact knock-out refuses a sibling-only catch PASS"
 # 80: the knock-out with SEVERAL expected texts: every one must disappear.
 # Both lines are mutated, so the hazard and the sibling both fail; the hazard's
 # own line disappears under the knock-out, the shared helper line does not.
-for order in first second; do
-  if [ "$order" = first ]; then
+for order in second first; do
+  if [ "$order" = second ]; then
     set -- --expect-fail-output "--- FAIL: hazard" --expect-fail-output "AssertionError: value mismatch"
   else
     set -- --expect-fail-output "AssertionError: value mismatch" --expect-fail-output "--- FAIL: hazard"
   fi
-  ko_run "$TMP/out80" --mutate-cmd "printf 'guard=off\nbanner=bye\n' > '$F67'" "$@" --knockout-cmd "$KO"
+  ko_run "$TMP/out80" --mutate-cmd "printf 'guard=off\nbanner=bye\n' > '$F67'" "$@" --knockout-cmd "$KO" --knockout-expect-output "1 deselected"
   rc=$?
   [ "$rc" -eq 2 ] || { cat "$TMP/out80"; fail "knock-out, several texts, shared one listed $order: expected exit 2, got $rc"; }
   grep -F -q "TEXT PERSISTS WITHOUT THE HAZARD TEST — the knock-out run on the same mutant also printed: AssertionError: value mismatch" "$TMP/out80" || { cat "$TMP/out80"; fail "knock-out, several texts, shared one listed $order: expected the message naming the shared text"; }
@@ -1488,7 +1492,7 @@ echo "test knock-out with several expected texts (every one must disappear) PASS
 
 # 81: a knock-out baseline that prints the SECOND of two expected texts is refused.
 ko_run "$TMP/out81" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "--- FAIL: hazard" \
-  --expect-fail-output "AssertionError: value mismatch" --knockout-cmd "$KO --echo-text"
+  --expect-fail-output "AssertionError: value mismatch" --knockout-cmd "$KO --echo-text" --knockout-expect-output "1 deselected"
 rc=$?
 [ "$rc" -eq 2 ] || { cat "$TMP/out81"; fail "knock-out baseline prints the second text: expected exit 2, got $rc"; }
 grep -F -q "already appears in the passing knock-out baseline output: AssertionError: value mismatch" "$TMP/out81" || { cat "$TMP/out81"; fail "knock-out baseline prints the second text: expected the message naming it"; }
@@ -1496,12 +1500,12 @@ echo "test knock-out baseline printing the second expected text -> exit 2 PASS"
 
 # 82: knock-out plus control: the CAUGHT line carries both clauses in order;
 # when the text persists, the control never runs.
-ko_run "$TMP/out82a" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "--- FAIL: hazard" --knockout-cmd "$KO" \
+ko_run "$TMP/out82a" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "--- FAIL: hazard" --knockout-cmd "$KO" --knockout-expect-output "1 deselected" \
   --syntax-cmd "grep -q . '$F67'" --control-sed 's/^banner=hello$/banner=bye/' --control-expect-fail-output "--- FAIL: sibling"
 rc=$?
 [ "$rc" -eq 0 ] || { cat "$TMP/out82a"; fail "knock-out plus control: expected exit 0, got $rc"; }
 grep -q "removed the expected text, so it is attributed to the test(s) that command deselects; control went RED for its own reason without the expected text)" "$TMP/out82a" || { cat "$TMP/out82a"; fail "knock-out plus control: CAUGHT line must carry the knock-out then the control clause"; }
-ko_run "$TMP/out82b" --mutate-sed 's/^banner=hello$/banner=bye/' --expect-fail-output "AssertionError: value mismatch" --knockout-cmd "$KO" \
+ko_run "$TMP/out82b" --mutate-sed 's/^banner=hello$/banner=bye/' --expect-fail-output "AssertionError: value mismatch" --knockout-cmd "$KO" --knockout-expect-output "1 deselected" \
   --control-sed 's/^guard=on$/guard=off/' --control-expect-fail-output "--- FAIL: hazard"
 rc=$?
 [ "$rc" -eq 2 ] || { cat "$TMP/out82b"; fail "text persists with a control: expected exit 2, got $rc"; }
@@ -1509,5 +1513,115 @@ grep -q "TEXT PERSISTS WITHOUT THE HAZARD TEST" "$TMP/out82b" || { cat "$TMP/out
 grep -q -- "--- FAIL: hazard" "$TMP/out82b" && { cat "$TMP/out82b"; fail "text persists with a control: the control must not run"; }
 [ "$(cat "$F67")" = "$before67" ] || fail "knock-out plus control: file not byte-identical after restore"
 echo "test knock-out plus control ordering and verdict PASS"
+
+# 79b: the same go form as a positive control: a mutant only TestParse
+# catches loses its text under the knock-out -> CAUGHT with the count line.
+bash "$MV" --file "$GO79/target.go" --test-cmd "$GO79_TEST" \
+  --mutate-sed 's/return len(s)/return len(s)+1/' --expect-fail-output "value mismatch" \
+  --knockout-cmd "$GO79_TEST -skip '^TestParse\$' $GO79_COUNT" --knockout-expect-output "knock-out ran 1 tests" >"$TMP/out79b" 2>&1
+rc=$?
+[ "$rc" -eq 0 ] || { cat "$TMP/out79b"; fail "go exact knock-out, hazard catches: expected exit 0, got $rc"; }
+grep -F -q "deselection shown by 'knock-out ran 1 tests') removed the expected text" "$TMP/out79b" || { cat "$TMP/out79b"; fail "go exact knock-out, hazard catches: verdict must quote the count line"; }
+[ "$(cat "$GO79/target.go")" = "$before79" ] || fail "go exact knock-out positive control: file not byte-identical after restore"
+echo "test a go exact knock-out attributes a hazard-only catch PASS"
+
+# Fixture for tests 83-85: a suite with a weak hazard test and ten tests that
+# share its name prefix, one of which really catches the mutant.
+F83="$TMP/prefix_target.txt"
+printf 'value=1\n' > "$F83"
+before83="$(cat "$F83")"
+cat > "$TMP/prefix_suite.sh" <<EOF
+#!/usr/bin/env bash
+# tests: haz (weak), haz_1 (the real catcher), haz_2..haz_10, other.
+# --deselect <prefix> removes every test whose name starts with <prefix>
+# (pytest's node-id prefix match / cargo's substring --skip).
+shape="\$1"; shift
+prefixes=""
+while [ "\${1:-}" = "--deselect" ]; do prefixes="\$prefixes \$2"; shift 2; done
+ran=0; gone=0; rc=0
+for t in haz haz_1 haz_2 haz_3 haz_4 haz_5 haz_6 haz_7 haz_8 haz_9 haz_10 other; do
+  skip=0
+  for p in \$prefixes; do case "\$t" in "\$p"*) skip=1 ;; esac; done
+  if [ "\$skip" -eq 1 ]; then gone=\$((gone+1)); continue; fi
+  ran=\$((ran+1))
+  if [ "\$t" = haz_1 ] && ! grep -q '^value=1\$' "$F83"; then echo "SIBLING_SAW_WRONG_VALUE"; rc=1; fi
+done
+if [ "\$shape" = pytest ]; then
+  if [ "\$gone" -gt 0 ]; then echo "\$ran passed, \$gone deselected"; else echo "\$ran passed"; fi
+else
+  echo "test result: ok. \$ran passed; 0 failed; 0 ignored; 0 measured; \$gone filtered out"
+fi
+exit \$rc
+EOF
+chmod +x "$TMP/prefix_suite.sh"
+
+# 83/84: the round-8 false CAUGHT through a substring count line. A prefix /
+# substring deselect removes the hazard AND ten same-prefix tests (one of them
+# the sibling that really catches the mutant); the runner reports "11". The
+# declared "1" must not match "11", so the run is refused, not CAUGHT.
+for shape in pytest cargo; do
+  if [ "$shape" = pytest ]; then count="1 deselected"; else count="1 filtered out"; fi
+  bash "$MV" --file "$F83" --test-cmd "$TMP/prefix_suite.sh $shape" --mutate-sed 's/^value=1$/value=2/' \
+    --expect-fail-output "SIBLING_SAW_WRONG_VALUE" --knockout-cmd "$TMP/prefix_suite.sh $shape --deselect haz" \
+    --knockout-expect-output "$count" >"$TMP/out83" 2>&1
+  rc=$?
+  [ "$rc" -eq 2 ] || { cat "$TMP/out83"; fail "$shape over-broad deselect with count '$count': expected exit 2, got $rc"; }
+  grep -q "KNOCK-OUT SCOPE UNPROVEN .*as a whole number" "$TMP/out83" || { cat "$TMP/out83"; fail "$shape over-broad deselect: expected the whole-number refusal"; }
+  grep -q "mutation CAUGHT" "$TMP/out83" && { cat "$TMP/out83"; fail "$shape over-broad deselect: must not report CAUGHT"; }
+  [ "$(cat "$F83")" = "$before83" ] || fail "$shape over-broad deselect: file not byte-identical"
+done
+echo "test a count line matches as a whole number (1 vs 11) PASS"
+
+# 85: a count line the full, unmutated run already prints (a filter in
+# --test-cmd) cannot show the knock-out's deselection.
+bash "$MV" --file "$F83" --test-cmd "$TMP/prefix_suite.sh pytest --deselect other" --mutate-sed 's/^value=1$/value=2/' \
+  --expect-fail-output "SIBLING_SAW_WRONG_VALUE" --knockout-cmd "$TMP/prefix_suite.sh pytest --deselect other --deselect haz_1" \
+  --knockout-expect-output "1 deselected" >"$TMP/out85" 2>&1
+rc=$?
+[ "$rc" -eq 2 ] || { cat "$TMP/out85"; fail "count line in the full run: expected exit 2, got $rc"; }
+grep -q "the full, unmutated run already prints the --knockout-expect-output line" "$TMP/out85" || { cat "$TMP/out85"; fail "count line in the full run: expected the message"; }
+echo "test a count line the full run already prints -> exit 2 PASS"
+
+# 86: --knockout-cmd without --knockout-expect-output is refused before running.
+ko_run "$TMP/out86" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "AssertionError: value mismatch" --knockout-cmd "$KO"
+rc=$?
+[ "$rc" -eq 2 ] || { cat "$TMP/out86"; fail "knock-out without a count line: expected exit 2, got $rc"; }
+grep -q "requires --knockout-expect-output" "$TMP/out86" || { cat "$TMP/out86"; fail "knock-out without a count line: expected the message"; }
+grep -q -- "--- FAIL: hazard" "$TMP/out86" && { cat "$TMP/out86"; fail "knock-out without a count line: must refuse before running"; }
+echo "test a knock-out without a count line -> exit 2 PASS"
+
+# 87: the round-8 cargo case on the real runner (skipped without cargo): an
+# unanchored --skip removes the sibling too and prints "11 filtered out"; the
+# exact form keeps it and the text persists. Neither may report CAUGHT.
+if command -v cargo >/dev/null 2>&1; then
+  RS87="$TMP/rs_knockout"; mkdir -p "$RS87/src"
+  printf '[package]\nname = "ko87"\nversion = "0.1.0"\nedition = "2021"\n\n[lib]\npath = "src/lib.rs"\n' > "$RS87/Cargo.toml"
+  {
+    printf 'pub fn parse(s: &str) -> usize { if s.is_empty() { 0 } else { s.len() } }\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n'
+    printf '    fn check(got: usize, want: usize) { assert!(got == want, "value mismatch"); }\n'
+    printf '    #[test] fn parse_ok() { check(parse("abc"), 3); }\n'
+    printf '    #[test] fn parse_ok_empty() { check(parse(""), 0); }\n'
+    for i in 2 3 4 5 6 7 8 9 10; do printf '    #[test] fn parse_ok_n%s() { check(parse("x"), 1); }\n' "$i"; done
+    printf '}\n'
+  } > "$RS87/src/lib.rs"
+  before87="$(cat "$RS87/src/lib.rs")"
+  RS87_TEST="cd '$RS87' && CARGO_TARGET_DIR='$TMP/rs87-target' cargo test -q --offline"
+  bash "$MV" --file "$RS87/src/lib.rs" --test-cmd "$RS87_TEST" --mutate-sed 's/{ 0 } else/{ 1 } else/' \
+    --expect-fail-output "value mismatch" --knockout-cmd "$RS87_TEST -- --skip parse_ok" \
+    --knockout-expect-output "1 filtered out" >"$TMP/out87a" 2>&1
+  rc=$?
+  [ "$rc" -eq 2 ] || { cat "$TMP/out87a"; fail "cargo substring --skip: expected exit 2, got $rc"; }
+  grep -q "KNOCK-OUT SCOPE UNPROVEN" "$TMP/out87a" || { cat "$TMP/out87a"; fail "cargo substring --skip: expected the scope refusal"; }
+  bash "$MV" --file "$RS87/src/lib.rs" --test-cmd "$RS87_TEST" --mutate-sed 's/{ 0 } else/{ 1 } else/' \
+    --expect-fail-output "value mismatch" --knockout-cmd "$RS87_TEST -- --exact --skip tests::parse_ok" \
+    --knockout-expect-output "1 filtered out" >"$TMP/out87b" 2>&1
+  rc=$?
+  [ "$rc" -eq 2 ] || { cat "$TMP/out87b"; fail "cargo exact --skip, sibling catches: expected exit 2, got $rc"; }
+  grep -q "TEXT PERSISTS WITHOUT THE HAZARD TEST" "$TMP/out87b" || { cat "$TMP/out87b"; fail "cargo exact --skip, sibling catches: expected the persists message"; }
+  [ "$(cat "$RS87/src/lib.rs")" = "$before87" ] || fail "cargo knock-out: file not byte-identical after restore"
+  echo "test cargo knock-out: substring refused, exact form keeps the sibling PASS"
+else
+  echo "SKIP: cargo knock-out (cargo absent)"
+fi
 
 echo "ALL PASS"
