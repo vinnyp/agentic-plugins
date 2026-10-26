@@ -744,12 +744,15 @@ echo "test syntax failure restores newer than artifacts -> PASS"
 # Test 29: baseline exiting 141 (SIGPIPE under pipefail, e.g. piping a noisy
 # test runner into `grep -q`) exits 2 and emits an actionable SIGPIPE /
 # `grep -q` diagnostic hint, leaving the target file byte-identical.
+# The writer is perl resetting SIGPIPE itself: a shell cannot un-ignore a signal
+# it inherited as ignored (GitHub's runner starts jobs that way), so `trap - PIPE`
+# left `yes` exiting 1 on EPIPE there instead of dying of SIGPIPE (141).
 # ---------------------------------------------------------------------------
 F29="$TMP/sigpipe_baseline.txt"
 printf 'hello world\n' > "$F29"
 before29="$(cat "$F29")"
 bash "$MV" --file "$F29" \
-  --test-cmd "(trap - PIPE; yes | grep -q y)" \
+  --test-cmd "perl -e '\$SIG{PIPE}=\"DEFAULT\"; print \"y\\n\" while 1' | grep -q y" \
   --mutate-sed 's/hello/goodbye/' >"$TMP/out29" 2>&1
 rc=$?
 [ "$rc" -eq 2 ] || { cat "$TMP/out29"; fail "sigpipe baseline: expected exit 2, got $rc"; }
