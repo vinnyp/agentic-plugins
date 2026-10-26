@@ -23,7 +23,7 @@
 #   test-cmd exits NON-ZERO under the mutation (went RED) -> exit 0
 #     (CAUGHT). With --expect-fail-output, only when the RED run's output
 #     holds every expected text; otherwise -> exit 3 (RED for an unrelated
-#     reason: the hazard assertion did not catch this mutant).
+#     reason: the hazard assertion is not shown to have caught this mutant).
 #   test-cmd exits ZERO under the mutation (stayed GREEN)  -> false-green
 #     test -> exit 1.
 #   Bad args, missing file, a failing baseline, a no-op mutation, failed
@@ -77,7 +77,8 @@ Exactly one of --mutate-sed or --mutate-cmd is required.
 --syntax-cmd runs after mutation and before the test, for example:
   --syntax-cmd "python -m py_compile path/to/file.py"
 --cover-check runs the mutated Go test command with -coverprofile and
-asserts the target line/function in --file had non-zero coverage.
+asserts the target line/function in --file had non-zero coverage. With
+--expect-fail-output, the baseline also runs with -coverprofile.
 --expect-fail-output may be repeated; a RED mutated run whose output lacks
 any of them failed for an unrelated reason and exits 3, not CAUGHT. Empty or
 multi-line text, or text the passing baseline prints, exits 2.
@@ -349,7 +350,9 @@ else
   ( eval "$test_cmd" ) || baseline_rc=$?
 fi
 if [ "$baseline_rc" -ne 0 ]; then
-  echo "mutation-verify.sh: test-cmd does not pass before mutation (baseline exited $baseline_rc) — the instrument is invalid" >&2
+  baseline_note=""
+  [ "$baseline_cmd" = "$test_cmd" ] || baseline_note=", run with -coverprofile added for --cover-check"
+  echo "mutation-verify.sh: test-cmd does not pass before mutation (baseline exited $baseline_rc$baseline_note) — the instrument is invalid" >&2
   exit 2
 fi
 # An --expect-fail-output string that a PASSING run already prints (a test
@@ -479,7 +482,7 @@ if [ "$test_rc" -ne 0 ]; then
     for _o in "${expect_fail_outputs[@]}"; do
       if ! grep -F -q -- "$_o" "$mutated_out"; then
         echo "mutation-verify.sh: ${verdict_prefix}RED FOR AN UNRELATED REASON (test-cmd exited $test_rc under mutation$reachability_suffix) — expected failure text absent: $_o" >&2
-        echo "mutation-verify.sh: the hazard assertion is not shown to have caught this mutant; treat it as a surviving mutant (a test gap), and do not change the expected text after seeing this output" >&2
+        echo "mutation-verify.sh: the hazard assertion is not shown to have caught this mutant; treat it as a surviving mutant (a test gap). Change the expected text only if this output shows the hazard assertion itself failing at its own location (see docs/commands.md)" >&2
         exit 3
       fi
     done

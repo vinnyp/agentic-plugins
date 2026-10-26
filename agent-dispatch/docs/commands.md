@@ -403,18 +403,27 @@ actually landed, `--syntax-cmd` rejects a mutation that merely broke the parse, 
 `--expect-fail-output` checks the cause of a red run: the mutated run's combined output must
 contain each given text, or the run failed for an unrelated reason, such as a changed error
 message, and it exits `3` instead of reporting a catch. Treat exit `3` as a surviving mutant (a
-test gap), and fix the text before the run, never after seeing a red result; if the text itself
-was wrong, record the new text in the review log before a fresh run, and keep the exit-`3` run on
-record next to it.
+test gap). Fix the text before the run. Replacing it after an exit `3` is legitimate only when
+that run's output shows the hazard assertion itself failing at its own location (pytest's `>`
+marker or `<file>.py:<line>` on the hazard assertion's line; Go's `<file>_test.go:<line>` of
+that assertion), so only the rendering of the text was wrong. Then cite that location and both
+runs in the review log. Otherwise the exit `3` stands as a survivor: a text copied from a red
+run's output passes a rerun of the same deterministic mutant by construction.
 
-Choosing the text: it must include framing the test runner adds when the hazard assertion fails,
-because the bare message literal is also in the test source, and some runners print source on
-any failure. pytest's traceback prints the failing test function's source, including the message
-of a passing assertion above the failing one; use the rendered `AssertionError: <message>` line,
-not the bare message. Go prints `<file>_test.go:<line>: <message>` for `t.Fatal`; include the
-file and line. Otherwise build the message from runtime values. Do not use runner-wide failure
-text (`FAILED`, `AssertionError`, `panicked`, `not ok`), the product's error text, or a test name:
-a failing run prints them for any cause. It is a presence check over all output, so it cannot
+Choosing the text: it must identify the hazard assertion uniquely and as it fails.
+- **Unique:** its message literal appears exactly once in the test sources (check with
+  `grep -rF '<message>' <test dirs>`), or the text carries the runner's location for that
+  assertion (pytest's `<file>.py:<line>: AssertionError` line; Go's `<file>_test.go:<line>:`
+  prefix). A message several assertions share ("command failed") passes every other guard. A
+  shared helper reports its own location for every caller (in Go, unless it calls `t.Helper()`).
+- **As it fails:** use the line the runner renders for a failure, not the bare literal, which is
+  also in the test source; pytest's traceback prints the failing test function's source,
+  including the message of a passing assertion above the failing one. The rendering depends on
+  the assertion type: pytest shows a bare `assert x, msg` as `AssertionError: msg`, a
+  unittest-style assert as `AssertionError: <detail> : msg`, and `pytest.fail` as `Failed: msg`.
+  Go prints `<file>_test.go:<line>: msg` for `t.Fatal`.
+- **Not:** runner-wide failure text (`FAILED`, `AssertionError`, `panicked`, `not ok`), the
+  product's error text, or a test name; a failing run prints them for any cause. It is a presence check over all output, so it cannot
 separate causes inside one snapshot or diff assertion. Empty, whitespace-only or multi-line text is
 refused, and so is text the passing baseline already prints (exit `2`; with `--cover-check`, the
 baseline runs with `-coverprofile` too). A caught verdict names the matched text, so the review
