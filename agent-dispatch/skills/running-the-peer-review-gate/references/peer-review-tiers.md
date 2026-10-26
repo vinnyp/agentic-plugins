@@ -298,15 +298,19 @@ It snapshots the target file by **copy** into a temp dir outside the repo, mutat
 restores from the copy, and verifies byte-identity — immune to commit state, and it **never invokes
 git**. Exit codes: `0` mutation caught, `1` mutation not caught (false-green test), `2` harness
 error (bad args, a no-op mutation, a failed restore, an invalid baseline, an unusable
-`--expect-fail-output` text, a refused knock-out: red on the unmutated copy, identical to the test
-command, or still printing the expected text on the mutant, or a refused control: its text already
+`--expect-fail-output` text, a refused knock-out: empty, not the test command plus a deselect,
+red on the unmutated copy, changing nothing, missing its `--knockout-expect-output`, or still
+printing the expected text on the mutant, or a refused control: its text already
 in the main run, inert, red for an unrelated reason, or printing the expected text), `3` with `--expect-fail-output`, a RED run that failed for an
 unrelated reason (treat it as a surviving mutant). Use it for every mutation-verify pass,
 orchestrator or reviewer alike, and pass BOTH `--expect-fail-output` with the hazard assertion's
 rendered failure line (see the skill's mutation rules for how to choose it) AND
-`--knockout-cmd` (the test command with only the hazard test deselected): a caught result then
-shows the text was present, names it, and shows it disappears without the hazard test. A control
-mutant is recommended, not required; a control refusal stands. When mutation-verify.sh is
+`--knockout-cmd` (the test command with only the hazard test deselected, by an exact form: cargo
+`-- --exact --skip`, go `-skip '^TestName$'`, node `--test-skip-pattern='/^name$/'`, pytest the full
+node id; plus `--knockout-expect-output` with the runner's deselection count where it prints one):
+a caught result then shows the text was present, names it, and shows it disappears when that
+command runs. A control mutant is recommended, not required; a control refusal stands; record
+every control you tried, including refused ones. When mutation-verify.sh is
 unavailable, the runner cannot deselect the single hazard test, or no hazard-specific text exists,
 the mutant is UNPROVEN, never CAUGHT.
 

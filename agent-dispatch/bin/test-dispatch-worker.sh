@@ -684,8 +684,11 @@ grep -q "MUTATING code to prove something" "$AGY_STDIN_FILE" || fail "hermetic r
 # plus a knock-out (control recommended), and UNPROVEN (never CAUGHT) as the fallback.
 grep -q "mutation-verify.sh with BOTH --expect-fail-output" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not require --expect-fail-output for mutation checks"
 grep -q "AND --knockout-cmd (the same test command with only the hazard test deselected" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not require a knock-out"
+grep -q "The deselect must match exactly one test: cargo test -- --exact --skip" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not require an exact deselect"
+grep -q "a control refusal stands; report every control you tried, including refused ones" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not say a control refusal stands and must be reported"
+grep -q "or whose deselect is not exact, is UNPROVEN" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not make an inexact deselect UNPROVEN"
 grep -q "A control mutant (--control-sed or --control-cmd with --control-expect-fail-output) is recommended, not required" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not mark the control as recommended"
-grep -q "a CAUGHT whose knock-out clause says it did not run is UNPROVEN" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not bind the knock-out clause to CAUGHT"
+grep -q "a CAUGHT whose knock-out clause says it did not run, or whose deselect is not exact, is UNPROVEN" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not bind the knock-out clause to CAUGHT"
 grep -q "the runner cannot deselect the single hazard test" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not state the no-deselect fallback"
 grep -q "report that mutant as UNPROVEN, never CAUGHT" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not state the UNPROVEN fallback"
 # Intent: the hermetic preamble must NAME the isolated worktree. It must NOT do so with the

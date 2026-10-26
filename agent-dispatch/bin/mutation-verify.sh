@@ -54,13 +54,17 @@
 #
 # Knock-out (issue foundry#259; requires --expect-fail-output):
 #   --knockout-cmd <cmd> is the same test command with only the hazard test
-#     deselected (pytest --deselect, cargo test -- --skip, go test -skip,
-#     node --test-skip-pattern). It must differ from --test-cmd, pass green on
-#     the unmutated copy, and not print any expected text there (exit 2
+#     deselected, by a form that matches exactly one test (cargo -- --exact
+#     --skip, go -skip '^Name$', node --test-skip-pattern='/^name$/', pytest
+#     --deselect <full node id>). It must start with --test-cmd and differ from
+#     it, pass green on the unmutated copy, print something different from the
+#     full baseline, not print any expected text there, and contain every
+#     --knockout-expect-output line (the runner's deselection count) (exit 2
 #     otherwise). On the same mutated copy, and only when the main run would
 #     be CAUGHT, the expected text must disappear; if it persists, another test
-#     prints it and the run exits 2. Without it, CAUGHT says the knock-out did
-#     not run.
+#     prints it (or the deselect missed) and the run exits 2. The verdict names
+#     the command, its exit code on the mutant and the count line. Without it,
+#     CAUGHT says the knock-out did not run.
 #
 # Control mutant (issue foundry#259; requires --expect-fail-output; recommended):
 #   --control-sed <expr> | --control-cmd <cmd> (with --control-expect-fail-output,
@@ -87,7 +91,8 @@ usage() {
 usage: mutation-verify.sh --file <path> --test-cmd <shell-command> \
          [--expect-anchor <str>] [--expect-marker <str>] \
          [--syntax-cmd <shell-command>] [--cover-check <line-or-symbol>] \
-         [--expect-fail-output <str>] [--knockout-cmd <shell-command>] \
+         [--expect-fail-output <str>] \
+         [--knockout-cmd <shell-command> [--knockout-expect-output <str>]] \
          [(--control-sed <sed-expr> | --control-cmd <shell-command>) \
           --control-expect-fail-output <str> \
           [--control-anchor <str>] [--control-marker <str>]] \
@@ -108,9 +113,11 @@ asserts the target line/function in --file had non-zero coverage. With
 --expect-fail-output may be repeated; a RED mutated run whose output lacks
 any of them failed for an unrelated reason and exits 3, not CAUGHT. Empty or
 multi-line text, or text the passing baseline prints, exits 2.
---knockout-cmd (requires --expect-fail-output) is the test command with only the
-hazard test deselected; it must pass on the unmutated copy, and on the mutant
-the expected text must disappear, or the run exits 2.
+--knockout-cmd (requires --expect-fail-output) is --test-cmd plus an exact
+deselect of only the hazard test; it must pass on the unmutated copy, print
+something different from the full baseline, and contain every
+--knockout-expect-output line; on the mutant the expected text must disappear,
+or the run exits 2.
 --control-sed / --control-cmd (requires --expect-fail-output and
 --control-expect-fail-output) applies a control mutation that breaks a
 different behavior, on a fresh copy, when the main run would be CAUGHT. It must
@@ -144,6 +151,7 @@ control_markers=()
 control_expect_outputs=()
 knockout_cmd=""
 have_knockout=0
+knockout_expect_outputs=()
 
 require_value() {
   # $1 = flag name, $2 = remaining arg count after the flag
@@ -197,7 +205,21 @@ while [ $# -gt 0 ]; do
     --knockout-cmd)
       require_value "--knockout-cmd" "$#"
       [ "$have_knockout" -eq 1 ] && { echo "mutation-verify.sh: --knockout-cmd given twice" >&2; exit 2; }
+      case "$2" in
+        *[![:space:]]*) : ;;
+        *) echo "mutation-verify.sh: --knockout-cmd must not be empty or whitespace-only" >&2; exit 2 ;;
+      esac
       knockout_cmd="$2"; have_knockout=1; shift 2 ;;
+    --knockout-expect-output)
+      require_value "--knockout-expect-output" "$#"
+      case "$2" in
+        *[![:space:]]*) : ;;
+        *) echo "mutation-verify.sh: --knockout-expect-output must not be empty or whitespace-only" >&2; exit 2 ;;
+      esac
+      case "$2" in
+        *$'\n'*|*$'\r'*) echo "mutation-verify.sh: --knockout-expect-output must be a single line" >&2; exit 2 ;;
+      esac
+      knockout_expect_outputs+=("$2"); shift 2 ;;
     --control-anchor) require_value "--control-anchor" "$#"; control_anchors+=("$2"); shift 2 ;;
     --control-marker) require_value "--control-marker" "$#"; control_markers+=("$2"); shift 2 ;;
     -h|--help) usage; exit 2 ;;
@@ -275,6 +297,17 @@ if [ "$have_knockout" -eq 1 ]; then
     echo "mutation-verify.sh: --knockout-cmd is identical to --test-cmd; it must be the test command with only the hazard test deselected" >&2
     exit 2
   fi
+  case "$knockout_cmd" in
+    "$test_cmd"*) : ;;
+    *)
+      echo "mutation-verify.sh: --knockout-cmd must start with --test-cmd (the same command plus a deselect of the hazard test): $knockout_cmd" >&2
+      exit 2 ;;
+  esac
+else
+  for _k in ${knockout_expect_outputs[@]+"${knockout_expect_outputs[@]}"}; do
+    echo "mutation-verify.sh: --knockout-expect-output requires --knockout-cmd" >&2
+    exit 2
+  done
 fi
 if [ ! -e "$file" ]; then
   echo "mutation-verify.sh: --file does not exist: $file" >&2
@@ -498,26 +531,6 @@ for _c in ${control_expect_outputs[@]+"${control_expect_outputs[@]}"}; do
   fi
 done
 
-# Knock-out baseline: the hazard-deselected command must pass on the
-# unmutated copy (a bad flag or runner error would otherwise "confirm" by
-# printing nothing), and must not already print any expected text.
-if [ "$have_knockout" -eq 1 ]; then
-  knockout_base_rc=0
-  knockout_base_out="$snap_dir/knockout-baseline.out"
-  ( eval "$knockout_cmd" ) >"$knockout_base_out" 2>&1 || knockout_base_rc=$?
-  cat "$knockout_base_out"
-  if [ "$knockout_base_rc" -ne 0 ]; then
-    echo "mutation-verify.sh: KNOCK-OUT BROKEN — --knockout-cmd does not pass before mutation (exited $knockout_base_rc); a broken knock-out would confirm by printing nothing" >&2
-    exit 2
-  fi
-  for _o in "${expect_fail_outputs[@]}"; do
-    if grep -F -q -- "$_o" "$knockout_base_out"; then
-      echo "mutation-verify.sh: --expect-fail-output text already appears in the passing knock-out baseline output: $_o" >&2
-      exit 2
-    fi
-  done
-fi
-
 # Applied-verification, part 1 (applied-verification): assert every expected anchor is
 # present in the ORIGINAL file before mutating. The post-hoc cmp check below only
 # infers a zero-match from unchanged bytes, which a --mutate-cmd that writes
@@ -536,6 +549,38 @@ for _a in ${control_anchors[@]+"${control_anchors[@]}"}; do
     exit 2
   fi
 done
+
+# Knock-out baseline: the hazard-deselected command must pass on the
+# unmutated copy (a bad flag or runner error would otherwise "confirm" by
+# printing nothing), and must not already print any expected text.
+if [ "$have_knockout" -eq 1 ]; then
+  knockout_base_rc=0
+  knockout_base_out="$snap_dir/knockout-baseline.out"
+  ( eval "$knockout_cmd" ) >"$knockout_base_out" 2>&1 || knockout_base_rc=$?
+  cat "$knockout_base_out"
+  if [ "$knockout_base_rc" -ne 0 ]; then
+    echo "mutation-verify.sh: KNOCK-OUT BROKEN — --knockout-cmd does not pass before mutation (exited $knockout_base_rc); a broken knock-out would confirm by printing nothing" >&2
+    exit 2
+  fi
+  for _o in "${expect_fail_outputs[@]}"; do
+    if grep -F -q -- "$_o" "$knockout_base_out"; then
+      echo "mutation-verify.sh: --expect-fail-output text already appears in the passing knock-out baseline output: $_o" >&2
+      exit 2
+    fi
+  done
+  if [ ! -s "$knockout_base_out" ] || cmp -s "$knockout_base_out" "$baseline_out"; then
+    echo "mutation-verify.sh: KNOCK-OUT CHANGED NOTHING — the knock-out baseline printed nothing, or exactly what the full baseline printed; it cannot show which tests it deselected" >&2
+    exit 2
+  fi
+  # Scope proof: a runner line showing exactly one test was deselected
+  # (pytest "1 deselected", cargo "1 filtered out").
+  for _k in ${knockout_expect_outputs[@]+"${knockout_expect_outputs[@]}"}; do
+    if ! grep -F -q -- "$_k" "$knockout_base_out"; then
+      echo "mutation-verify.sh: KNOCK-OUT SCOPE UNPROVEN — the knock-out baseline output lacks --knockout-expect-output: $_k" >&2
+      exit 2
+    fi
+  done
+fi
 
 # Mutate.
 if [ "$have_sed" -eq 1 ]; then
@@ -620,7 +665,8 @@ if [ "$have_knockout" -eq 1 ] && [ "$test_rc" -ne 0 ]; then
   done
   if [ "$_all_present" -eq 1 ]; then
     knockout_out="$snap_dir/knockout-run.out"
-    ( eval "$knockout_cmd" ) >"$knockout_out" 2>&1 || :
+    knockout_rc=0
+    ( eval "$knockout_cmd" ) >"$knockout_out" 2>&1 || knockout_rc=$?
     cat "$knockout_out"
     knockout_ran=1
   fi
@@ -678,12 +724,21 @@ fi
 if [ "$knockout_ran" -eq 1 ]; then
   for _o in "${expect_fail_outputs[@]}"; do
     if grep -F -q -- "$_o" "$knockout_out"; then
-      echo "mutation-verify.sh: TEXT PERSISTS WITHOUT THE HAZARD TEST — the knock-out run (hazard test deselected) on the same mutant also printed: $_o" >&2
-      echo "mutation-verify.sh: the text cannot be attributed to the hazard test; record the main mutant as UNPROVEN" >&2
+      echo "mutation-verify.sh: TEXT PERSISTS WITHOUT THE HAZARD TEST — the knock-out run on the same mutant also printed: $_o" >&2
+      echo "mutation-verify.sh: another test prints it, or the knock-out did not deselect the hazard test (unknown ids are often silently ignored); record the main mutant as UNPROVEN" >&2
       exit 2
     fi
   done
-  knockout_suffix="; knock-out removed the expected text (attributed to the deselected hazard test)"
+  knockout_scope=""
+  for _k in ${knockout_expect_outputs[@]+"${knockout_expect_outputs[@]}"}; do
+    knockout_scope="$knockout_scope${knockout_scope:+, }'$_k'"
+  done
+  if [ -n "$knockout_scope" ]; then
+    knockout_scope=", deselection shown by $knockout_scope"
+  else
+    knockout_scope=", deselection count NOT shown"
+  fi
+  knockout_suffix="; knock-out \`$knockout_cmd\` (exited $knockout_rc on the mutant$knockout_scope) removed the expected text, so it is attributed to the test(s) that command deselects"
 fi
 
 # Control mutant: only when the main run would be CAUGHT. Same fresh-copy

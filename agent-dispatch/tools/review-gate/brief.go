@@ -249,9 +249,13 @@ func contains(xs []string, x string) bool {
 const mutationCheckRule = "\nMutation checks (required for any mutant you report): run each one through " +
 	"`mutation-verify.sh`, in an isolated copy or worktree (never a checkout another reviewer is using), with BOTH " +
 	"`--expect-fail-output '<the line only the hazard test prints when it fails>'` AND " +
-	"`--knockout-cmd '<the same test command with only the hazard test deselected>'` (pytest --deselect, " +
-	"cargo test -- --skip, go test -skip, node --test-skip-pattern). A control mutant (`--control-sed` or " +
-	"`--control-cmd` with `--control-expect-fail-output`) is recommended, not required; a control refusal stands. " +
+	"`--knockout-cmd '<the same test command with only the hazard test deselected>'`. The deselect must match " +
+	"exactly one test: cargo test -- --exact --skip <path::name>; go test -skip '^TestName$' ('^TestName$/^sub$' for " +
+	"a subtest); node --test-skip-pattern='/^name$/'; pytest --deselect <full node id> (a prefix match). Pass the " +
+	"runner's deselection count as `--knockout-expect-output` where it prints one (pytest '1 deselected', cargo " +
+	"'1 filtered out'). A control mutant (`--control-sed` or `--control-cmd` with `--control-expect-fail-output`) " +
+	"is recommended, not required; a control refusal stands; record every control you tried, including refused ones. " +
 	"Every CAUGHT you report quotes the verdict's matched: text and its knock-out and control clauses; a CAUGHT " +
-	"whose knock-out clause says it did not run is UNPROVEN. If mutation-verify.sh is unavailable, the runner cannot " +
-	"deselect the single hazard test, or no hazard-specific text exists, record that mutant as UNPROVEN, never CAUGHT.\n"
+	"whose knock-out clause says it did not run, or whose deselect is not exact, is UNPROVEN. If mutation-verify.sh " +
+	"is unavailable, the runner cannot deselect the single hazard test, or no hazard-specific text exists, record " +
+	"that mutant as UNPROVEN, never CAUGHT.\n"

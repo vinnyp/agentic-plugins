@@ -380,7 +380,7 @@ mutation-verify.sh --file <path> --test-cmd <cmd>
                    [--expect-anchor <str>]... [--expect-marker <str>]...
                    [--syntax-cmd <cmd>] [--cover-check <line-or-symbol>]
                    [--expect-fail-output <str>]...
-                   [--knockout-cmd <cmd>]
+                   [--knockout-cmd <cmd> [--knockout-expect-output <str>]...]
                    [(--control-sed <expr> | --control-cmd <cmd>)
                     --control-expect-fail-output <str>...
                     [--control-anchor <str>]... [--control-marker <str>]...]
@@ -442,19 +442,40 @@ together on stdout once the run finishes. Without the flag, a caught verdict say
 not checked.
 
 **Knock-out.** `--knockout-cmd` (only with `--expect-fail-output`) is the same test command with
-only the hazard test deselected; the caller supplies the runner's form (pytest `--deselect
-<nodeid>`, `cargo test -- --skip <name>`, `go test -skip <regex>`, `node --test-skip-pattern`).
-It is refused (exit `2`) when it is identical to `--test-cmd`, when it is red on the unmutated
-copy (a bad flag or runner error would otherwise "confirm" by printing nothing), or when its
-passing baseline already prints an expected text. It runs on the same mutated copy only when the
-main run would be CAUGHT (a RED run without the expected text stays exit `3`; a GREEN one stays
-exit `1`). If its output still contains any expected text, another test prints it: the text cannot
-be attributed to the hazard test, and the run is refused (exit `2`, naming the text). Only when the
-text disappears does CAUGHT stand, and the verdict says "knock-out removed the expected text";
-without a knock-out it says "knock-out NOT run". What it shows: with the hazard test removed and
-everything else the same, the mutant no longer produces the text, so the text came from the hazard
-test. What it does not show: that the hazard test failed for the reason its message names, or
-anything about a run that deselects more than the hazard test. The review gate requires it.
+only the hazard test deselected. The deselect must match exactly one test; the default forms do
+not (pytest `--deselect` matches a node-id prefix, cargo `--skip` a substring, go `-skip` and node
+`--test-skip-pattern` an unanchored regex), and a sibling with a common name prefix is the very
+test the knock-out exists to keep. Use the exact forms:
+- cargo: `cargo test -- --exact --skip <path::name>` (prints `1 filtered out`);
+- go: `go test -skip '^TestName$'`, or `'^TestName$/^sub$'` for a subtest;
+- node: `node --test --test-skip-pattern='/^name$/'`;
+- pytest: `--deselect <full node id, including any [param] id>` (prints `1 deselected`).
+
+Where the runner prints a deselection count, pass that line as `--knockout-expect-output`; it must
+appear in the knock-out baseline, and the verdict quotes it (otherwise the verdict says the count
+was not shown). Refusals, all exit `2`: an empty command; one that does not start with
+`--test-cmd` (the same command plus a deselect) or is identical to it; one that is red on the
+unmutated copy (a bad flag or runner error would otherwise "confirm" by printing nothing); one whose
+baseline prints an expected text, prints nothing, or prints exactly what the full baseline printed
+(it changed nothing visible); a missing `--knockout-expect-output` line. It runs on the same mutated
+copy only when the main run would be CAUGHT (a RED run without the expected text stays exit `3`; a
+GREEN one stays exit `1`). If its output still contains any expected text, another test prints it,
+or the deselect missed the hazard test (unknown ids are often silently ignored): the run is refused
+(exit `2`, naming the text). Only when the text disappears does CAUGHT stand; the verdict names the
+command, its exit code on the mutant and the deselection count, and attributes the text to the
+test(s) that command deselects. Without a knock-out it says "knock-out NOT run".
+
+What it shows: with that command's tests removed and everything else the same, this mutant no
+longer produces the text. What it does not show: that exactly one test was removed (only the
+exact form and the count line show that); that the hazard test failed for the reason its message
+names; or anything beyond one run. A sibling that prints the text only sometimes (flaky), or only
+because of state the hazard test leaves behind (order dependence), can vanish without the hazard
+test having printed it. Use a deterministic order, and prefer a run-all command: a fail-fast run stops at
+the first failure, so the knock-out can stop before a later test that would print the text (the
+verdict shows the knock-out's exit code on the mutant for that reason); never combine fail-fast
+with a randomized order (`pytest -p randomly -x`, `go test -shuffle=on -failfast`). The tool cannot
+see which tests the command deselected; only the exact form and the count line show that. The review gate requires the
+knock-out; a CAUGHT whose deselect is not exact is UNPROVEN.
 
 **Control mutant (recommended, not required).** `--control-sed` / `--control-cmd` (only with `--expect-fail-output`, and
 always with `--control-expect-fail-output`, the line the control's own test prints when it fails)
@@ -471,7 +492,10 @@ and a GREEN one stays exit `1`, whatever the control is. Refusals, all exit `2`:
 
 Otherwise the verdict says the control "went RED for its own reason without the expected text",
 flagged `[UNVERIFIED CONTROL]` unless `--syntax-cmd` checked the control's copy (a marker proves
-the edit landed, not that the file is valid). Without a control, a caught verdict says the control did not run. Without any
+the edit landed, not that the file is valid). The main mutant keeps its older rule: a marker or a
+`--syntax-cmd` clears `[UNVERIFIED APPLICATION]`, because a broken main mutant shows up as a RED
+run the expected text then has to explain, while a broken control would pass its check by
+crashing. Without a control, a caught verdict says the control did not run. Without any
 control flag, behavior is otherwise unchanged.
 
 What one passing control shows, and what it does not: it shows that this one other failure does
