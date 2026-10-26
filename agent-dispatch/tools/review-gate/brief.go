@@ -211,6 +211,7 @@ func cmdBrief(args []string) int {
 			"A review with no findings and no disposition table has not run.\n")
 	default:
 		fmt.Fprintf(&b, "Verify the following DIFF against the real contracts:\n- range: %s\n", *rng)
+		b.WriteString(mutationCheckRule)
 	}
 	if len(sources) > 0 {
 		b.WriteString("\nContract sources to READ:\n")
@@ -238,3 +239,13 @@ func contains(xs []string, x string) bool {
 	}
 	return false
 }
+
+// mutationCheckRule is appended to every build-mode brief (both routes), so
+// every reviewer the gate dispatches gets the same mutation-check contract
+// (foundry#259): a mutant counts as CAUGHT only when the hazard's own failure
+// text appears AND a control mutant shows that text is specific to it.
+const mutationCheckRule = "\nMutation checks (required for any mutant you report): run each one through " +
+	"`mutation-verify.sh` with BOTH `--expect-fail-output '<the line only the hazard test prints when it fails>'` " +
+	"AND a control mutant (`--control-sed` or `--control-cmd`: a mutation in the same file or function that " +
+	"breaks a different, tested behavior). If no hazard-specific text exists, or no valid control can be " +
+	"built (the control is inert, or its failure also prints the text), record that mutant as UNPROVEN, never CAUGHT.\n"

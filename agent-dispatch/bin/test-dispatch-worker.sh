@@ -680,6 +680,11 @@ grep -qF -- '-C "$tmp"' "$AGY_STDIN_FILE" || fail "hermetic review preamble miss
 grep -qF 'the real repository is untouched' "$AGY_STDIN_FILE" && fail "hermetic review preamble still promises the real repository is untouched"
 grep -qF 'DISPOSABLE, DETACHED git worktree' "$AGY_STDIN_FILE" && fail "hermetic review preamble still describes a linked worktree"
 grep -q "MUTATING code to prove something" "$AGY_STDIN_FILE" || fail "hermetic review preamble did not permit mutation checks"
+# foundry#259: the permission comes with the contract — expected failure text
+# plus a control mutant, and UNPROVEN (never CAUGHT) as the fallback.
+grep -q "mutation-verify.sh with BOTH --expect-fail-output" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not require --expect-fail-output for mutation checks"
+grep -q "AND a control mutant (--control-sed or --control-cmd" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not require a control mutant"
+grep -q "report that mutant as UNPROVEN, never CAUGHT" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not state the UNPROVEN fallback"
 # Intent: the hermetic preamble must NAME the isolated worktree. It must NOT do so with the
 # blanket "(do not change)" / "DO NOT write any files" phrasing, which contradicts the
 # may-mutate permission granted just above it — a reviewer resolving that conflict toward the

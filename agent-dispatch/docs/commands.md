@@ -380,6 +380,8 @@ mutation-verify.sh --file <path> --test-cmd <cmd>
                    [--expect-anchor <str>]... [--expect-marker <str>]...
                    [--syntax-cmd <cmd>] [--cover-check <line-or-symbol>]
                    [--expect-fail-output <str>]...
+                   [(--control-sed <expr> | --control-cmd <cmd>)
+                    [--control-anchor <str>]... [--control-marker <str>]...]
 ```
 
 Proves a test is load-bearing: break the code, confirm the test goes red, restore. It snapshots
@@ -437,9 +439,29 @@ log can quote it. With the flag, each run's stdout and stderr are captured to a 
 together on stdout once the run finishes. Without the flag, a caught verdict says its cause was
 not checked.
 
+**Control mutant.** `--control-sed` / `--control-cmd` (only with `--expect-fail-output`) applies
+a second mutation on a fresh copy of the original, after a RED main run, with the same no-op and
+`--syntax-cmd` checks; `--control-anchor` / `--control-marker` verify it the way
+`--expect-anchor` / `--expect-marker` verify the main mutation. Its output is captured the same
+way. If the control leaves the test green, it is inert and proves nothing (exit `2`). If its red
+output contains any expected text, the text is not specific to the hazard (exit `2`, naming the
+text). Only a control that goes red without the text lets the main verdict stand, and the verdict
+says so. A GREEN main run skips the control (it is already a survivor). Without a control,
+behavior is unchanged. The review gate requires a control for every mutation check it relies
+on; a mutant with no hazard-specific text or no valid control is UNPROVEN, never CAUGHT.
+
+Picking a control: a mutation in the same file or function as the main one that breaks a
+**different** behavior a test checks, so the suite goes red for a reason other than the hazard.
+Good controls flip a neighbouring condition, change another return value, or drop a different
+guard that some other test asserts. A control that changes nothing tested is inert; a control
+that breaks the hazard's own path (or a shared helper the hazard test also uses) makes the
+hazard text appear and is refused. If no other tested behavior lives near the hazard, the
+expected text cannot be shown specific: record the mutant as UNPROVEN.
+
 Exit codes: `0` the test caught the mutation, `1` false green, `2` harness error (bad args,
-failing baseline, no-op mutation, failed verification, failed restore, or an
-`--expect-fail-output` text that is empty, multi-line or printed by the passing baseline), `3` a
+failing baseline, no-op mutation, failed verification, failed restore, an
+`--expect-fail-output` text that is empty, multi-line or printed by the passing baseline, or an
+inert or non-specific control), `3` a
 red run without the `--expect-fail-output` text (the hazard assertion is not shown to have caught
 the mutant).
 

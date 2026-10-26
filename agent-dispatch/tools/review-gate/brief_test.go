@@ -588,3 +588,37 @@ func gitRepoWithCommits(t *testing.T) string {
 	}
 	return root
 }
+
+// TestBriefBuildCarriesMutationCheckRule pins foundry#259: every build-mode
+// brief, on both routes, requires --expect-fail-output plus a control mutant
+// and names the UNPROVEN fallback; design and requirements briefs do not.
+func TestBriefBuildCarriesMutationCheckRule(t *testing.T) {
+	_, tmpl := briefFixture(t)
+	root := gitRepoWithCommits(t)
+	for _, route := range []string{"claude", "cross-model"} {
+		rc, out := runCapt(t, "brief", "--persona", "peer-code-reviewer", "--mode", "build",
+			"--for", route, "--range", "HEAD~1..HEAD", "--repo-root", root,
+			"--closing-template", tmpl)
+		if rc != 0 {
+			t.Fatalf("%s: rc=%d", route, rc)
+		}
+		for _, want := range []string{"mutation-verify.sh", "--expect-fail-output", "--control-sed", "--control-cmd", "UNPROVEN, never CAUGHT"} {
+			if !strings.Contains(out, want) {
+				t.Fatalf("%s build brief missing %q", route, want)
+			}
+		}
+	}
+}
+
+func TestBriefDesignOmitsMutationCheckRule(t *testing.T) {
+	_, tmpl := briefFixture(t)
+	root := targetRoot(t, "spec.md")
+	rc, out := runCapt(t, "brief", "--persona", "peer-code-reviewer", "--mode", "design",
+		"--for", "claude", "--spec", "spec.md", "--repo-root", root, "--closing-template", tmpl)
+	if rc != 0 {
+		t.Fatalf("rc=%d", rc)
+	}
+	if strings.Contains(out, "--control-sed") {
+		t.Fatalf("design brief must not carry the build-mode mutation rule")
+	}
+}

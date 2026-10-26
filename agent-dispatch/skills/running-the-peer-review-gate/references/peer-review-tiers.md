@@ -24,7 +24,8 @@ commit/merge:
 - **`peer-code-reviewer`** — correctness against the real contracts the change integrates with;
   seam bugs.
 - **`peer-test-reviewer`** — does the green suite actually **prove** the behavior (false-greens,
-  mutation check, coverage)? "Has tests" is not "is tested". Test review is baseline *because* a
+  mutation check — via `mutation-verify.sh` with `--expect-fail-output` and a control mutant, or
+  the mutant is UNPROVEN — coverage)? "Has tests" is not "is tested". Test review is baseline *because* a
   redaction layer has shipped non-functional twice behind a passing suite.
 
 Both are written in diff-and-green-suite terms and do not fit a `design`-mode spec review, which has
@@ -288,7 +289,8 @@ The prose-only version of this rule ("commit first, or copy aside") failed three
 before a structural replacement shipped: **`mutation-verify.sh`**, in this plugin's `bin/`.
 
 ```
-mutation-verify.sh --file <path> --test-cmd <cmd> (--mutate-sed <expr> | --mutate-cmd <cmd>)
+mutation-verify.sh --file <path> --test-cmd <cmd> (--mutate-sed <expr> | --mutate-cmd <cmd>) \
+  --expect-fail-output <hazard failure line> (--control-sed <expr> | --control-cmd <cmd>)
 ```
 
 It snapshots the target file by **copy** into a temp dir outside the repo, mutates, runs the test,
@@ -297,9 +299,12 @@ git**. Exit codes: `0` mutation caught, `1` mutation not caught (false-green tes
 error (bad args, a no-op mutation, a failed restore, an invalid baseline, or an unusable
 `--expect-fail-output` text), `3` with `--expect-fail-output`, a RED run that failed for an
 unrelated reason (treat it as a surviving mutant). Use it for every mutation-verify pass,
-orchestrator or reviewer alike, and pass `--expect-fail-output` with the hazard assertion's
-rendered failure line (see the skill's mutation rules for how to choose it), so a caught result
-shows that text was present and names it.
+orchestrator or reviewer alike, and pass BOTH `--expect-fail-output` with the hazard assertion's
+rendered failure line (see the skill's mutation rules for how to choose it) AND a control mutant
+(`--control-sed` / `--control-cmd`): a caught result then shows the text was present, names it,
+and shows a different failure does not print it (an inert or non-specific control exits `2`).
+When no hazard-specific text exists or no valid control can be built, the mutant is UNPROVEN,
+never CAUGHT.
 
 **Concurrent mutation-DOING reviewers — isolate them, or make them read-only.** When you dispatch
 two or more reviewers that themselves RUN mutations (mutate a file → run the test → restore), do

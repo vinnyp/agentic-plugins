@@ -152,8 +152,9 @@ authored both, say so **in the brief** — it is a slot, not an orchestrator's i
 
 > Author-wrote-both overlap: the same pass authored the fix in `<file>` AND the tests in
 > `<test-file>`. Treat those tests as UNPROVEN. Re-run the specific mutant that should catch a
-> regression in `<file>` (via `mutation-verify.sh --expect-fail-output '<hazard failure text>'`)
-> before accepting any of them as evidence.
+> regression in `<file>` (via `mutation-verify.sh --expect-fail-output '<hazard failure text>'
+> --control-sed '<a mutation that breaks a different, tested behavior>'`) before accepting any of
+> them as evidence. A mutant run without both, or whose control is refused, stays UNPROVEN.
 
 A fix that ships with **no** new tests does not satisfy this rule by default — "nobody tested it" is
 not "an independent party tested it". Call it out in the brief the same way.
@@ -282,9 +283,20 @@ mutation-verify.sh --file <path> --test-cmd "<the gate>" --mutate-sed '<expr>' \
   --expect-anchor '<text that must be present BEFORE mutation>' \
   --expect-marker '<text that must be present AFTER mutation>' \
   --syntax-cmd "bash -n <path>" \
-  --expect-fail-output '<text only the hazard assertion prints when it fails>'
+  --expect-fail-output '<text only the hazard assertion prints when it fails>' \
+  --control-sed '<a mutation in the same file or function that breaks a different, tested behavior>'
 # --syntax-cmd alternatives: python -m py_compile <path>, go build ./...
+# --control-cmd '<cmd>' in place of --control-sed; --control-anchor / --control-marker verify it.
 ```
+
+**Every mutation check the gate relies on carries BOTH `--expect-fail-output` and a control
+mutant** — orchestrator and reviewer alike, and every build-mode brief `review-gate` emits says so.
+The control runs on a fresh copy after a RED main run: an inert control (the test stays green)
+or a control whose failure also prints the expected text makes `mutation-verify.sh` exit 2,
+because the text has not been shown to be specific to the hazard. **Fallback: when no
+hazard-specific text exists, or no valid control can be built, record the mutant as UNPROVEN,
+never CAUGHT** — in the disposition row, with the reason. `docs/commands.md` explains how to pick
+a control.
 
 `--syntax-cmd` is the leg that matters most and the one hand-rolling always omits: a malformed
 mutant produces a syntax error, the test "fails" (or "passes") for the wrong reason, and the result
