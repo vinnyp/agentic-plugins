@@ -681,12 +681,13 @@ grep -qF 'the real repository is untouched' "$AGY_STDIN_FILE" && fail "hermetic 
 grep -qF 'DISPOSABLE, DETACHED git worktree' "$AGY_STDIN_FILE" && fail "hermetic review preamble still describes a linked worktree"
 grep -q "MUTATING code to prove something" "$AGY_STDIN_FILE" || fail "hermetic review preamble did not permit mutation checks"
 # foundry#259: the permission comes with the contract — expected failure text
-# plus a control mutant, and UNPROVEN (never CAUGHT) as the fallback.
+# plus a knock-out (control recommended), and UNPROVEN (never CAUGHT) as the fallback.
 grep -q "mutation-verify.sh with BOTH --expect-fail-output" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not require --expect-fail-output for mutation checks"
-grep -q "AND a control mutant (--control-sed or --control-cmd" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not require a control mutant"
+grep -q "AND --knockout-cmd (the same test command with only the hazard test deselected" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not require a knock-out"
+grep -q "A control mutant (--control-sed or --control-cmd with --control-expect-fail-output) is recommended, not required" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not mark the control as recommended"
+grep -q "a CAUGHT whose knock-out clause says it did not run is UNPROVEN" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not bind the knock-out clause to CAUGHT"
+grep -q "the runner cannot deselect the single hazard test" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not state the no-deselect fallback"
 grep -q "report that mutant as UNPROVEN, never CAUGHT" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not state the UNPROVEN fallback"
-grep -q "with --control-expect-fail-output naming the control's own failure line" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not require the control's own failure text"
-grep -q "A control refusal stands; report every control you tried" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not say a control refusal stands"
 # Intent: the hermetic preamble must NAME the isolated worktree. It must NOT do so with the
 # blanket "(do not change)" / "DO NOT write any files" phrasing, which contradicts the
 # may-mutate permission granted just above it — a reviewer resolving that conflict toward the

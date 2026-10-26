@@ -153,9 +153,9 @@ authored both, say so **in the brief** — it is a slot, not an orchestrator's i
 > Author-wrote-both overlap: the same pass authored the fix in `<file>` AND the tests in
 > `<test-file>`. Treat those tests as UNPROVEN. Re-run the specific mutant that should catch a
 > regression in `<file>` (via `mutation-verify.sh --syntax-cmd '<parse check>' --expect-fail-output
-> '<hazard failure text>' --control-sed '<a mutation that breaks a different, tested behavior>'
-> --control-expect-fail-output '<the control test's failure line>'`) before accepting any of them
-> as evidence. A mutant run without both, or whose control is refused, stays UNPROVEN.
+> '<hazard failure text>' --knockout-cmd '<the test command with only the hazard test deselected>'`,
+> plus a recommended control mutant) before accepting any of them as evidence. A mutant run
+> without both, or whose knock-out or control is refused, stays UNPROVEN.
 
 A fix that ships with **no** new tests does not satisfy this rule by default — "nobody tested it" is
 not "an independent party tested it". Call it out in the brief the same way.
@@ -285,25 +285,26 @@ mutation-verify.sh --file <path> --test-cmd "<the gate>" --mutate-sed '<expr>' \
   --expect-marker '<text that must be present AFTER mutation>' \
   --syntax-cmd "bash -n <path>" \
   --expect-fail-output '<text only the hazard assertion prints when it fails>' \
-  --control-sed '<a mutation that breaks a different, tested behavior>' \
-  --control-expect-fail-output '<the line the control's own test prints when it fails>' \
-  --control-marker '<text that must be present after the control mutation>'
+  --knockout-cmd '<the same test command with only the hazard test deselected>'
 # --syntax-cmd alternatives: python -m py_compile <path>, go build ./...
-# --control-cmd '<cmd>' in place of --control-sed; --control-anchor checks it before mutating.
+# Recommended in addition: --control-sed '<expr>' (or --control-cmd) with
+#   --control-expect-fail-output '<the control test's failure line>'.
 ```
 
-**Every mutation check the gate relies on carries BOTH `--expect-fail-output` and a control
-mutant** — orchestrator and reviewer alike, in an isolated copy or worktree, and every
-build-mode brief `review-gate` emits says so. The control runs on a fresh copy only when the main
-run would be CAUGHT. It must go red for its own seeded reason (its `--control-expect-fail-output`)
-and must not print the expected text; otherwise `mutation-verify.sh` exits 2. Aim it at a behavior
-whose test shares the hazard test's helper, loop or parametrization. One passing control shows
-only that that one other failure does not print the text. **A control refusal stands** (unless
-its output shows the hazard test itself failing); record every control you tried. **Fallback:
-when mutation-verify.sh is unavailable, no hazard-specific text exists, or no valid control can
-be built, record the mutant as UNPROVEN, never CAUGHT** — in the disposition row, with the
-reason, quoting the verdict's control clause along with `matched:`. `docs/commands.md` explains
-how to pick a control.
+**Every mutation check the gate relies on carries BOTH `--expect-fail-output` and
+`--knockout-cmd`** — orchestrator and reviewer alike, in an isolated copy or worktree, and every
+build-mode brief `review-gate` emits says so. The knock-out is the same test command with only
+the hazard test deselected (pytest `--deselect <nodeid>`, `cargo test -- --skip <name>`,
+`go test -skip`, `node --test-skip-pattern`). It must pass green on the unmutated copy, and on the
+same mutant the expected text must disappear; if it persists, another test prints it and the
+mutant is refused (exit 2). That is what attributes the text to the hazard test. A control mutant
+(`--control-sed` / `--control-cmd` with `--control-expect-fail-output`, verified only with
+`--syntax-cmd`) is recommended, not required: it shows only that one other failure does not print
+the text, and a control refusal stands. **Every CAUGHT row quotes the verdict's `matched:` text and
+its knock-out and control clauses; a CAUGHT whose knock-out clause says it did not run is
+UNPROVEN.** **Fallback: when mutation-verify.sh is unavailable, the runner cannot deselect the
+single hazard test, or no hazard-specific text exists, record the mutant as UNPROVEN, never
+CAUGHT** — in the disposition row, with the reason. `docs/commands.md` covers both checks.
 
 `--syntax-cmd` is the leg that matters most and the one hand-rolling always omits: a malformed
 mutant produces a syntax error, the test "fails" (or "passes") for the wrong reason, and the result

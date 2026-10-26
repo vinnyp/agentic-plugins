@@ -590,7 +590,7 @@ func gitRepoWithCommits(t *testing.T) string {
 }
 
 // TestBriefBuildCarriesMutationCheckRule pins foundry#259: every build-mode
-// brief, on both routes, requires --expect-fail-output plus a control mutant
+// brief, on both routes, requires --expect-fail-output plus a knock-out
 // and names the UNPROVEN fallback; design and requirements briefs do not.
 func TestBriefBuildCarriesMutationCheckRule(t *testing.T) {
 	_, tmpl := briefFixture(t)
@@ -602,9 +602,13 @@ func TestBriefBuildCarriesMutationCheckRule(t *testing.T) {
 		if rc != 0 {
 			t.Fatalf("%s: rc=%d", route, rc)
 		}
-		for _, want := range []string{"mutation-verify.sh", "with BOTH", "--expect-fail-output", "AND a control mutant",
-			"--control-sed", "--control-cmd", "--control-expect-fail-output", "isolated copy or worktree",
-			"A control refusal stands", "If mutation-verify.sh is unavailable", "UNPROVEN, never CAUGHT"} {
+		for _, want := range []string{"Mutation checks (required for any mutant you report)", "mutation-verify.sh",
+			"with BOTH", "--expect-fail-output", "AND `--knockout-cmd", "only the hazard test deselected",
+			"A control mutant", "is recommended, not required", "a control refusal stands", "isolated copy or worktree",
+			"quotes the verdict's matched: text and its knock-out and control clauses",
+			"a CAUGHT whose knock-out clause says it did not run is UNPROVEN",
+			"the runner cannot deselect the single hazard test", "If mutation-verify.sh is unavailable",
+			"UNPROVEN, never CAUGHT"} {
 			if !strings.Contains(out, want) {
 				t.Fatalf("%s build brief missing %q", route, want)
 			}
@@ -621,8 +625,10 @@ func TestBriefNonBuildModesOmitMutationCheckRule(t *testing.T) {
 		if rc != 0 {
 			t.Fatalf("%s: rc=%d", mode, rc)
 		}
-		if strings.Contains(out, "Mutation checks (required for any mutant you report)") {
-			t.Fatalf("%s brief must not carry the build-mode mutation rule", mode)
+		for _, unwanted := range []string{"Mutation checks (required for any mutant you report)", "--knockout-cmd", "UNPROVEN, never CAUGHT"} {
+			if strings.Contains(out, unwanted) {
+				t.Fatalf("%s brief must not carry the build-mode mutation rule (found %q)", mode, unwanted)
+			}
 		}
 	}
 }

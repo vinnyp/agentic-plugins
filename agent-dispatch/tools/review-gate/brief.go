@@ -243,12 +243,15 @@ func contains(xs []string, x string) bool {
 // mutationCheckRule is appended to every build-mode brief (both routes), so
 // every reviewer the gate dispatches gets the same mutation-check contract
 // (foundry#259): a mutant counts as CAUGHT only when the hazard's own failure
-// text appears AND a control mutant shows that text is specific to it.
+// text appears AND it disappears when only the hazard test is deselected (the
+// knock-out). A control mutant is recommended: it shows only that one other
+// failure does not print the text.
 const mutationCheckRule = "\nMutation checks (required for any mutant you report): run each one through " +
 	"`mutation-verify.sh`, in an isolated copy or worktree (never a checkout another reviewer is using), with BOTH " +
-	"`--expect-fail-output '<the line only the hazard test prints when it fails>'` AND a control mutant " +
-	"(`--control-sed` or `--control-cmd`, with `--control-expect-fail-output '<the line the control's own test prints>'`): " +
-	"a mutation that breaks a different, tested behavior, preferably one whose test shares the hazard test's helper, " +
-	"loop or parametrization. A control refusal stands; record every control you tried. If mutation-verify.sh is " +
-	"unavailable, no hazard-specific text exists, or no valid control can be built, record that mutant as UNPROVEN, " +
-	"never CAUGHT.\n"
+	"`--expect-fail-output '<the line only the hazard test prints when it fails>'` AND " +
+	"`--knockout-cmd '<the same test command with only the hazard test deselected>'` (pytest --deselect, " +
+	"cargo test -- --skip, go test -skip, node --test-skip-pattern). A control mutant (`--control-sed` or " +
+	"`--control-cmd` with `--control-expect-fail-output`) is recommended, not required; a control refusal stands. " +
+	"Every CAUGHT you report quotes the verdict's matched: text and its knock-out and control clauses; a CAUGHT " +
+	"whose knock-out clause says it did not run is UNPROVEN. If mutation-verify.sh is unavailable, the runner cannot " +
+	"deselect the single hazard test, or no hazard-specific text exists, record that mutant as UNPROVEN, never CAUGHT.\n"

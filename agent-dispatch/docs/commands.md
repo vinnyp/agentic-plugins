@@ -380,6 +380,7 @@ mutation-verify.sh --file <path> --test-cmd <cmd>
                    [--expect-anchor <str>]... [--expect-marker <str>]...
                    [--syntax-cmd <cmd>] [--cover-check <line-or-symbol>]
                    [--expect-fail-output <str>]...
+                   [--knockout-cmd <cmd>]
                    [(--control-sed <expr> | --control-cmd <cmd>)
                     --control-expect-fail-output <str>...
                     [--control-anchor <str>]... [--control-marker <str>]...]
@@ -440,7 +441,22 @@ log can quote it. With the flag, each run's stdout and stderr are captured to a 
 together on stdout once the run finishes. Without the flag, a caught verdict says its cause was
 not checked.
 
-**Control mutant.** `--control-sed` / `--control-cmd` (only with `--expect-fail-output`, and
+**Knock-out.** `--knockout-cmd` (only with `--expect-fail-output`) is the same test command with
+only the hazard test deselected; the caller supplies the runner's form (pytest `--deselect
+<nodeid>`, `cargo test -- --skip <name>`, `go test -skip <regex>`, `node --test-skip-pattern`).
+It is refused (exit `2`) when it is identical to `--test-cmd`, when it is red on the unmutated
+copy (a bad flag or runner error would otherwise "confirm" by printing nothing), or when its
+passing baseline already prints an expected text. It runs on the same mutated copy only when the
+main run would be CAUGHT (a RED run without the expected text stays exit `3`; a GREEN one stays
+exit `1`). If its output still contains any expected text, another test prints it: the text cannot
+be attributed to the hazard test, and the run is refused (exit `2`, naming the text). Only when the
+text disappears does CAUGHT stand, and the verdict says "knock-out removed the expected text";
+without a knock-out it says "knock-out NOT run". What it shows: with the hazard test removed and
+everything else the same, the mutant no longer produces the text, so the text came from the hazard
+test. What it does not show: that the hazard test failed for the reason its message names, or
+anything about a run that deselects more than the hazard test. The review gate requires it.
+
+**Control mutant (recommended, not required).** `--control-sed` / `--control-cmd` (only with `--expect-fail-output`, and
 always with `--control-expect-fail-output`, the line the control's own test prints when it fails)
 applies a second mutation on a fresh copy of the original, with the same no-op and
 `--syntax-cmd` checks; `--control-anchor` / `--control-marker` verify it the way
@@ -454,14 +470,16 @@ and a GREEN one stays exit `1`, whatever the control is. Refusals, all exit `2`:
 - the control's red run prints ANY expected text (with several texts, drop the generic one).
 
 Otherwise the verdict says the control "went RED for its own reason without the expected text",
-flagged `[UNVERIFIED CONTROL]` when the control had neither a `--control-marker` nor a
-`--syntax-cmd`. Without a control, a caught verdict says the control did not run. Without any
+flagged `[UNVERIFIED CONTROL]` unless `--syntax-cmd` checked the control's copy (a marker proves
+the edit landed, not that the file is valid). Without a control, a caught verdict says the control did not run. Without any
 control flag, behavior is otherwise unchanged.
 
 What one passing control shows, and what it does not: it shows that this one other failure does
 not print the expected text. It does not show that the text in the main run came from the hazard
-test rather than another test that shares its helper, loop or parametrization, unless the control
-breaks exactly such a sibling. A control red for a value-bearing message (`6 != 5` vs `4 != 5`)
+test rather than another test that shares its helper, loop or parametrization. A control that
+breaks such a sibling, with a `--control-expect-fail-output` that names that sibling's test, rules
+out that one sibling only (its text in the main run is refused); other siblings stay unexcluded.
+The knock-out is the direct check. A control red for a value-bearing message (`6 != 5` vs `4 != 5`)
 passes by construction, so expected texts must not embed mutant-specific values. A refusal is
 evidence that the text is not specific, not a bad pick: it stands, unless the refused run's output
 shows the hazard test itself failing at its own call site. Record every control you tried, with
@@ -472,14 +490,15 @@ whose test shares the hazard test's helper, loop or parametrization, since that 
 whose failure could otherwise print the same text. Flip a neighbouring condition, change another
 return value, or drop a different guard that the sibling test asserts. A scoped single-test
 `--test-cmd` makes every different-behavior control inert; use the whole suite or file the hazard
-test lives in. The review gate requires a control for every mutation check it relies on; with no
-hazard-specific text, no valid control, or a refusal that stands, the mutant is UNPROVEN, never
-CAUGHT.
+test lives in. The review gate requires `--expect-fail-output` and `--knockout-cmd` for every
+mutation check it relies on and recommends a control; when the runner cannot deselect the single
+hazard test, or no hazard-specific text exists, or a refusal stands, the mutant is UNPROVEN, never
+CAUGHT. Every CAUGHT row in a review log quotes `matched:` and the knock-out and control clauses.
 
 Exit codes: `0` the test caught the mutation, `1` false green, `2` harness error (bad args,
 failing baseline, no-op mutation, failed verification, failed restore, an
 `--expect-fail-output` or `--control-expect-fail-output` text that is empty, multi-line or printed
-by the passing baseline, or a refused control), `3` a
+by the passing baseline, a refused knock-out, or a refused control), `3` a
 red run without the `--expect-fail-output` text (the hazard assertion is not shown to have caught
 the mutant).
 
