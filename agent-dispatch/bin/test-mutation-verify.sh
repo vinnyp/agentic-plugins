@@ -113,6 +113,7 @@ bash "$MV" --file "$F4B" --test-cmd "$TMP/this-command-does-not-exist-anywhere" 
 rc=$?
 [ "$rc" -eq 2 ] || { cat "$TMP/out4b"; fail "baseline-fails: expected exit 2, got $rc"; }
 grep -qi "baseline\|before mutation" "$TMP/out4b" || { cat "$TMP/out4b"; fail "baseline-fails: expected a message naming the baseline failure"; }
+grep -q "SIGPIPE" "$TMP/out4b" && { cat "$TMP/out4b"; fail "baseline-fails: non-141 baseline failure must not emit SIGPIPE hint"; }
 [ "$(cat "$F4B")" = "$before4b" ] || fail "baseline-fails: file was NOT left untouched"
 echo "test baseline-fails (broken test-cmd) -> exit 2, file untouched PASS"
 
@@ -748,7 +749,7 @@ F29="$TMP/sigpipe_baseline.txt"
 printf 'hello world\n' > "$F29"
 before29="$(cat "$F29")"
 bash "$MV" --file "$F29" \
-  --test-cmd "(exit 141)" \
+  --test-cmd "(trap - PIPE; yes | grep -q y)" \
   --mutate-sed 's/hello/goodbye/' >"$TMP/out29" 2>&1
 rc=$?
 [ "$rc" -eq 2 ] || { cat "$TMP/out29"; fail "sigpipe baseline: expected exit 2, got $rc"; }
