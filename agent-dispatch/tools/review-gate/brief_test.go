@@ -602,7 +602,9 @@ func TestBriefBuildCarriesMutationCheckRule(t *testing.T) {
 		if rc != 0 {
 			t.Fatalf("%s: rc=%d", route, rc)
 		}
-		for _, want := range []string{"mutation-verify.sh", "--expect-fail-output", "--control-sed", "--control-cmd", "UNPROVEN, never CAUGHT"} {
+		for _, want := range []string{"mutation-verify.sh", "with BOTH", "--expect-fail-output", "AND a control mutant",
+			"--control-sed", "--control-cmd", "--control-expect-fail-output", "isolated copy or worktree",
+			"A control refusal stands", "If mutation-verify.sh is unavailable", "UNPROVEN, never CAUGHT"} {
 			if !strings.Contains(out, want) {
 				t.Fatalf("%s build brief missing %q", route, want)
 			}
@@ -610,15 +612,17 @@ func TestBriefBuildCarriesMutationCheckRule(t *testing.T) {
 	}
 }
 
-func TestBriefDesignOmitsMutationCheckRule(t *testing.T) {
+func TestBriefNonBuildModesOmitMutationCheckRule(t *testing.T) {
 	_, tmpl := briefFixture(t)
 	root := targetRoot(t, "spec.md")
-	rc, out := runCapt(t, "brief", "--persona", "peer-code-reviewer", "--mode", "design",
-		"--for", "claude", "--spec", "spec.md", "--repo-root", root, "--closing-template", tmpl)
-	if rc != 0 {
-		t.Fatalf("rc=%d", rc)
-	}
-	if strings.Contains(out, "--control-sed") {
-		t.Fatalf("design brief must not carry the build-mode mutation rule")
+	for _, mode := range []string{"design", "requirements"} {
+		rc, out := runCapt(t, "brief", "--persona", "peer-code-reviewer", "--mode", mode,
+			"--for", "claude", "--spec", "spec.md", "--repo-root", root, "--closing-template", tmpl)
+		if rc != 0 {
+			t.Fatalf("%s: rc=%d", mode, rc)
+		}
+		if strings.Contains(out, "Mutation checks (required for any mutant you report)") {
+			t.Fatalf("%s brief must not carry the build-mode mutation rule", mode)
+		}
 	}
 }

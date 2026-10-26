@@ -764,6 +764,7 @@ bash "$MV" --file "$F29" --test-cmd "$TMP/cause_test.sh" --mutate-sed 's/^guard=
 rc=$?
 [ "$rc" -eq 0 ] || { cat "$TMP/out29"; fail "--expect-fail-output present: expected exit 0, got $rc"; }
 grep -q "expected failure text present in output" "$TMP/out29" || { cat "$TMP/out29"; fail "--expect-fail-output present: verdict must say the expected text was present"; }
+grep -q "control NOT run, so the text's specificity is unchecked" "$TMP/out29" || { cat "$TMP/out29"; fail "--expect-fail-output without a control: verdict must say the control did not run"; }
 grep -F -q "matched: '--- FAIL: guard[on].x disabled'" "$TMP/out29" || { cat "$TMP/out29"; fail "--expect-fail-output present: verdict must name the matched text"; }
 [ "$(grep -c "running cause checks" "$TMP/out29")" -eq 2 ] || { cat "$TMP/out29"; fail "--expect-fail-output present: both captured runs (baseline and mutated) must be printed back"; }
 [ "$(cat "$F29")" = "$before29" ] || fail "--expect-fail-output present: file not byte-identical after restore"
@@ -994,7 +995,7 @@ control_run() {
 
 # 43: inert control (the test stays green under it) -> exit 2.
 control_run "$TMP/out43" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "$HZ" \
-  --control-cmd "printf 'extra=1\\n' >> '$F29'"
+  --control-cmd "printf 'extra=1\\n' >> '$F29'" --control-expect-fail-output "INCIDENTAL: banner text changed"
 rc=$?
 [ "$rc" -eq 2 ] || { cat "$TMP/out43"; fail "inert control: expected exit 2, got $rc"; }
 grep -q "CONTROL INERT" "$TMP/out43" || { cat "$TMP/out43"; fail "inert control: expected the inert-control message"; }
@@ -1005,36 +1006,39 @@ echo "test inert control -> exit 2 PASS"
 # 44: the control's RED output also carries the expected text -> exit 2, naming it.
 cat > "$TMP/cause_generic_test.sh" <<EOF
 #!/usr/bin/env bash
-grep -q '^banner=hello\$' "$F29" || { echo "check failed: banner"; exit 1; }
-grep -q '^guard=on\$' "$F29" || { echo "check failed: guard"; exit 1; }
+grep -q '^banner=hello\$' "$F29" || { echo "--- FAIL: check[x]. banner"; exit 1; }
+grep -q '^guard=on\$' "$F29" || { echo "--- FAIL: check[x]. guard"; exit 1; }
 exit 0
 EOF
 chmod +x "$TMP/cause_generic_test.sh"
 bash "$MV" --file "$F29" --test-cmd "$TMP/cause_generic_test.sh" --mutate-sed 's/^guard=on$/guard=off/' \
-  --expect-fail-output "check failed" --control-sed 's/^banner=hello$/banner=bye/' >"$TMP/out44" 2>&1
+  --expect-fail-output "--- FAIL: check[x]." --control-sed 's/^banner=hello$/banner=bye/' \
+  --control-expect-fail-output "--- FAIL: check[x]. banner" >"$TMP/out44" 2>&1
 rc=$?
 [ "$rc" -eq 2 ] || { cat "$TMP/out44"; fail "non-specific text: expected exit 2, got $rc"; }
-grep -q "EXPECTED TEXT NOT SPECIFIC TO THE HAZARD — the control mutant's RED run also printed: check failed" "$TMP/out44" || { cat "$TMP/out44"; fail "non-specific text: expected the not-specific message naming the text"; }
+grep -F -q "EXPECTED TEXT NOT SPECIFIC TO THE HAZARD — the control mutant's RED run also printed: --- FAIL: check[x]." "$TMP/out44" || { cat "$TMP/out44"; fail "non-specific text: expected the not-specific message naming the text"; }
 grep -q "mutation CAUGHT" "$TMP/out44" && { cat "$TMP/out44"; fail "non-specific text: must not report CAUGHT"; }
 [ "$(cat "$F29")" = "$before29" ] || fail "non-specific text: file not byte-identical after restore"
 echo "test non-specific expected text (control prints it) -> exit 2 PASS"
 
 # 45: valid control (RED without the text), main mutant carries the text -> CAUGHT.
 control_run "$TMP/out45" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "$HZ" \
-  --control-sed 's/^banner=hello$/banner=bye/' --control-anchor 'banner=hello' --control-marker 'banner=bye'
+  --control-sed 's/^banner=hello$/banner=bye/' --control-anchor 'banner=hello' --control-marker 'banner=bye' \
+  --control-expect-fail-output "INCIDENTAL: banner text changed"
 rc=$?
 [ "$rc" -eq 0 ] || { cat "$TMP/out45"; fail "valid control, main caught: expected exit 0, got $rc"; }
-grep -q "mutation CAUGHT (.*control went RED without the expected text)" "$TMP/out45" || { cat "$TMP/out45"; fail "valid control, main caught: CAUGHT line must record the control"; }
+grep -q "mutation CAUGHT (.*; control went RED for its own reason without the expected text)" "$TMP/out45" || { cat "$TMP/out45"; fail "valid control, main caught: CAUGHT line must record the control"; }
+grep -q "UNVERIFIED CONTROL" "$TMP/out45" && { cat "$TMP/out45"; fail "valid control, main caught: a control with a marker is verified"; }
 [ "$(grep -c "INCIDENTAL: banner text changed" "$TMP/out45")" -eq 1 ] || { cat "$TMP/out45"; fail "valid control, main caught: the control run's output must be printed back"; }
 [ "$(cat "$F29")" = "$before29" ] || fail "valid control, main caught: file not byte-identical after restore"
 echo "test valid control with a caught main mutant -> exit 0 PASS"
 
 # 46: valid control, main mutant RED without the text -> exit 3 stands.
 control_run "$TMP/out46" --mutate-sed 's/^banner=hello$/banner=bye/' --expect-fail-output "$HZ" \
-  --control-sed 's/^banner=hello$/banner=other/'
+  --control-sed 's/^banner=hello$/banner=other/' --control-expect-fail-output "INCIDENTAL: banner text changed"
 rc=$?
 [ "$rc" -eq 3 ] || { cat "$TMP/out46"; fail "valid control, main unrelated: expected exit 3, got $rc"; }
-grep -q "RED FOR AN UNRELATED REASON (.*control went RED without the expected text)" "$TMP/out46" || { cat "$TMP/out46"; fail "valid control, main unrelated: exit-3 line must record the control"; }
+grep -q "RED FOR AN UNRELATED REASON (.*; control not run)" "$TMP/out46" || { cat "$TMP/out46"; fail "valid control, main unrelated: exit-3 line must say the control did not run"; }
 [ "$(cat "$F29")" = "$before29" ] || fail "valid control, main unrelated: file not byte-identical after restore"
 echo "test valid control with an unrelated-RED main mutant -> exit 3 PASS"
 
@@ -1060,17 +1064,17 @@ echo "test control argument errors -> exit 2 PASS"
 
 # 49: control applied-verification: missing anchor, absent marker, no-op.
 control_run "$TMP/out49a" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "$HZ" \
-  --control-sed 's/^banner=hello$/banner=bye/' --control-anchor 'not in the file'
+  --control-sed 's/^banner=hello$/banner=bye/' --control-anchor 'not in the file' --control-expect-fail-output "INCIDENTAL: banner text changed"
 rc=$?
 [ "$rc" -eq 2 ] || { cat "$TMP/out49a"; fail "control anchor missing: expected exit 2, got $rc"; }
 grep -q "CONTROL ANCHOR NOT FOUND" "$TMP/out49a" || { cat "$TMP/out49a"; fail "control anchor missing: expected the message"; }
 control_run "$TMP/out49b" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "$HZ" \
-  --control-sed 's/^banner=hello$/banner=bye/' --control-marker 'banner=never'
+  --control-sed 's/^banner=hello$/banner=bye/' --control-marker 'banner=never' --control-expect-fail-output "INCIDENTAL: banner text changed"
 rc=$?
 [ "$rc" -eq 2 ] || { cat "$TMP/out49b"; fail "control marker absent: expected exit 2, got $rc"; }
 grep -q "CONTROL MARKER ABSENT" "$TMP/out49b" || { cat "$TMP/out49b"; fail "control marker absent: expected the message"; }
 control_run "$TMP/out49c" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "$HZ" \
-  --control-sed 's/no such text/x/'
+  --control-sed 's/no such text/x/' --control-expect-fail-output "INCIDENTAL: banner text changed"
 rc=$?
 [ "$rc" -eq 2 ] || { cat "$TMP/out49c"; fail "no-op control: expected exit 2, got $rc"; }
 grep -q "no-op control" "$TMP/out49c" || { cat "$TMP/out49c"; fail "no-op control: expected the message"; }
@@ -1080,7 +1084,7 @@ echo "test control anchor/marker/no-op verification -> exit 2 PASS"
 
 # 50: --syntax-cmd also checks the control's copy.
 control_run "$TMP/out50" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "$HZ" \
-  --syntax-cmd "! grep -q '^banner=bye\$' '$F29'" --control-sed 's/^banner=hello$/banner=bye/'
+  --syntax-cmd "! grep -q '^banner=bye\$' '$F29'" --control-sed 's/^banner=hello$/banner=bye/' --control-expect-fail-output "INCIDENTAL: banner text changed"
 rc=$?
 [ "$rc" -eq 2 ] || { cat "$TMP/out50"; fail "control syntax check: expected exit 2, got $rc"; }
 grep -q "CONTROL FILE INVALID" "$TMP/out50" || { cat "$TMP/out50"; fail "control syntax check: expected the message"; }
@@ -1090,18 +1094,134 @@ echo "test --syntax-cmd checks the control copy -> exit 2 PASS"
 # 51: the control runs on a fresh copy of the ORIGINAL, not on the main mutant:
 # a control that needs guard=on to apply must still find it.
 control_run "$TMP/out51" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "$HZ" \
-  --control-sed 's/^banner=hello$/banner=bye/' --control-marker 'guard=on'
+  --control-sed 's/^banner=hello$/banner=bye/' --control-marker 'guard=on' --control-expect-fail-output "INCIDENTAL: banner text changed"
 rc=$?
 [ "$rc" -eq 0 ] || { cat "$TMP/out51"; fail "control on a fresh copy: expected exit 0, got $rc"; }
 echo "test control runs on a fresh copy of the original PASS"
 
 # 52: a GREEN main mutant stays exit 1; the control does not run.
 control_run "$TMP/out52" --mutate-cmd "printf 'extra=1\\n' >> '$F29'" --expect-fail-output "$HZ" \
-  --control-sed 's/^banner=hello$/banner=bye/'
+  --control-sed 's/^banner=hello$/banner=bye/' --control-expect-fail-output "INCIDENTAL: banner text changed"
 rc=$?
 [ "$rc" -eq 1 ] || { cat "$TMP/out52"; fail "green main with control: expected exit 1, got $rc"; }
 grep -q "INCIDENTAL: banner text changed" "$TMP/out52" && { cat "$TMP/out52"; fail "green main with control: the control must not run"; }
 [ "$(cat "$F29")" = "$before29" ] || fail "green main with control: file not byte-identical after restore"
 echo "test green main mutant skips the control -> exit 1 PASS"
+
+# 53/54: an unrelated-RED main mutant stays exit 3 whatever the control is:
+# the control never runs, so an inert or text-printing control cannot turn a
+# survivor into a harness error.
+control_run "$TMP/out53" --mutate-sed 's/^banner=hello$/banner=bye/' --expect-fail-output "$HZ" \
+  --control-cmd "printf 'extra=1\\n' >> '$F29'" --control-expect-fail-output "INCIDENTAL: banner text changed"
+rc=$?
+[ "$rc" -eq 3 ] || { cat "$TMP/out53"; fail "unrelated main + inert control: expected exit 3, got $rc"; }
+grep -q "CONTROL INERT" "$TMP/out53" && { cat "$TMP/out53"; fail "unrelated main + inert control: the control must not run"; }
+control_run "$TMP/out54" --mutate-sed 's/^banner=hello$/banner=bye/' --expect-fail-output "$HZ" \
+  --control-sed 's/^guard=on$/guard=off/' --control-expect-fail-output "INCIDENTAL: banner text changed"
+rc=$?
+[ "$rc" -eq 3 ] || { cat "$TMP/out54"; fail "unrelated main + text-printing control: expected exit 3, got $rc"; }
+grep -q "NOT SPECIFIC" "$TMP/out54" && { cat "$TMP/out54"; fail "unrelated main + text-printing control: the control must not run"; }
+[ "$(cat "$F29")" = "$before29" ] || fail "unrelated main + control: file not byte-identical after restore"
+echo "test an unrelated-RED main mutant stays exit 3 with any control PASS"
+
+# 55: a control without --control-expect-fail-output is refused before anything runs.
+control_run "$TMP/out55" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "$HZ" \
+  --control-sed 's/^banner=hello$/banner=bye/'
+rc=$?
+[ "$rc" -eq 2 ] || { cat "$TMP/out55"; fail "control without --control-expect-fail-output: expected exit 2, got $rc"; }
+grep -q "requires --control-expect-fail-output" "$TMP/out55" || { cat "$TMP/out55"; fail "control without --control-expect-fail-output: expected the message"; }
+grep -q "running cause checks" "$TMP/out55" && { cat "$TMP/out55"; fail "control without --control-expect-fail-output: must refuse before running the test"; }
+echo "test control without --control-expect-fail-output -> exit 2 PASS"
+
+# 56: a control RED without its own text (a crash, a build break) is not a control.
+control_run "$TMP/out56" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "$HZ" \
+  --control-sed 's/^banner=hello$/banner=bye/' --control-expect-fail-output "the control's own failure line"
+rc=$?
+[ "$rc" -eq 2 ] || { cat "$TMP/out56"; fail "control red for an unrelated reason: expected exit 2, got $rc"; }
+grep -q "CONTROL RED FOR AN UNRELATED REASON" "$TMP/out56" || { cat "$TMP/out56"; fail "control red for an unrelated reason: expected the message"; }
+grep -q "mutation CAUGHT" "$TMP/out56" && { cat "$TMP/out56"; fail "control red for an unrelated reason: must not report CAUGHT"; }
+[ "$(cat "$F29")" = "$before29" ] || fail "control red for an unrelated reason: file not byte-identical after restore"
+echo "test control RED without its own text -> exit 2 PASS"
+
+# 57: the control's text already in the main run cannot separate the failures.
+control_run "$TMP/out57" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "$HZ" \
+  --control-sed 's/^banner=hello$/banner=bye/' --control-expect-fail-output "--- FAIL: guard"
+rc=$?
+[ "$rc" -eq 2 ] || { cat "$TMP/out57"; fail "control text in the main run: expected exit 2, got $rc"; }
+grep -q "CONTROL TEXT IN THE MAIN RUN" "$TMP/out57" || { cat "$TMP/out57"; fail "control text in the main run: expected the message"; }
+grep -q "INCIDENTAL: banner text changed" "$TMP/out57" && { cat "$TMP/out57"; fail "control text in the main run: must refuse before the control runs"; }
+echo "test control text already in the main run -> exit 2 PASS"
+
+# 58: a control with neither --control-marker nor --syntax-cmd is flagged unverified.
+control_run "$TMP/out58" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "$HZ" \
+  --control-sed 's/^banner=hello$/banner=bye/' --control-expect-fail-output "INCIDENTAL: banner text changed"
+rc=$?
+[ "$rc" -eq 0 ] || { cat "$TMP/out58"; fail "unverified control: expected exit 0, got $rc"; }
+grep -q "\[UNVERIFIED CONTROL\] control went RED for its own reason" "$TMP/out58" || { cat "$TMP/out58"; fail "unverified control: verdict must flag it"; }
+echo "test a control without marker or syntax check is flagged unverified PASS"
+
+# 59: duplicate control flags and a baseline-printed control text are refused.
+control_run "$TMP/out59a" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "$HZ" \
+  --control-sed 's/^banner=hello$/banner=bye/' --control-sed 's/^banner=hello$/banner=x/' --control-expect-fail-output "INCIDENTAL: banner text changed"
+rc=$?
+[ "$rc" -eq 2 ] || { cat "$TMP/out59a"; fail "duplicate --control-sed: expected exit 2, got $rc"; }
+grep -q "given twice" "$TMP/out59a" || { cat "$TMP/out59a"; fail "duplicate --control-sed: expected the message"; }
+control_run "$TMP/out59b" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "$HZ" \
+  --control-sed 's/^banner=hello$/banner=bye/' --control-expect-fail-output "running cause checks"
+rc=$?
+[ "$rc" -eq 2 ] || { cat "$TMP/out59b"; fail "baseline-printed control text: expected exit 2, got $rc"; }
+grep -q "already appears in the passing baseline output" "$TMP/out59b" || { cat "$TMP/out59b"; fail "baseline-printed control text: expected the baseline message"; }
+echo "test duplicate control flags and baseline-printed control text -> exit 2 PASS"
+
+# 60: with two expected texts, a control that prints only the SECOND is still
+# refused: any expected text in the control's output is a refusal.
+cat > "$TMP/cause_two_ctl_test.sh" <<EOF
+#!/usr/bin/env bash
+grep -q '^banner=hello\$' "$F29" || { echo "INCIDENTAL: banner text changed"; echo "--- FAIL: guard (shared helper line)"; exit 1; }
+grep -q '^guard=on\$' "$F29" || { echo "$HZ"; exit 1; }
+exit 0
+EOF
+chmod +x "$TMP/cause_two_ctl_test.sh"
+bash "$MV" --file "$F29" --test-cmd "$TMP/cause_two_ctl_test.sh" --mutate-sed 's/^guard=on$/guard=off/' \
+  --expect-fail-output "$HZ" --expect-fail-output "--- FAIL: guard" \
+  --control-sed 's/^banner=hello$/banner=bye/' --control-expect-fail-output "INCIDENTAL: banner text changed" >"$TMP/out60" 2>&1
+rc=$?
+[ "$rc" -eq 2 ] || { cat "$TMP/out60"; fail "control prints the second expected text: expected exit 2, got $rc"; }
+grep -F -q "the control mutant's RED run also printed: --- FAIL: guard" "$TMP/out60" || { cat "$TMP/out60"; fail "control prints the second expected text: expected the not-specific message naming it"; }
+[ "$(cat "$F29")" = "$before29" ] || fail "control prints the second expected text: file not byte-identical after restore"
+echo "test any expected text in the control output is a refusal PASS"
+
+# 61: a --control-cmd that fails is not a control.
+control_run "$TMP/out61" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "$HZ" \
+  --control-cmd "printf 'x=1\n' >> '$F29'; false" --control-expect-fail-output "INCIDENTAL: banner text changed"
+rc=$?
+[ "$rc" -eq 2 ] || { cat "$TMP/out61"; fail "failing --control-cmd: expected exit 2, got $rc"; }
+grep -q "control mutation command failed" "$TMP/out61" || { cat "$TMP/out61"; fail "failing --control-cmd: expected the message"; }
+[ "$(cat "$F29")" = "$before29" ] || fail "failing --control-cmd: file not byte-identical after restore"
+echo "test failing --control-cmd -> exit 2 PASS"
+
+# 62: a --control-cmd edits a fresh copy of the ORIGINAL (the main mutant was
+# restored first): its marker needs guard=on, which only the original has.
+control_run "$TMP/out62" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "$HZ" \
+  --control-cmd "sed 's/^banner=hello\$/banner=bye/' '$F29' > '$TMP/ctl62' && cat '$TMP/ctl62' > '$F29'" \
+  --control-marker 'guard=on' --control-expect-fail-output "INCIDENTAL: banner text changed"
+rc=$?
+[ "$rc" -eq 0 ] || { cat "$TMP/out62"; fail "--control-cmd on a fresh copy: expected exit 0, got $rc"; }
+[ "$(cat "$F29")" = "$before29" ] || fail "--control-cmd on a fresh copy: file not byte-identical after restore"
+echo "test --control-cmd runs on a fresh copy of the original PASS"
+
+# 63: a failed restore after the control run exits 2, never CAUGHT.
+control_run "$TMP/out63" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "$HZ" \
+  --control-cmd "printf 'guard=on\nbanner=bye\n' > '$F29' && chmod 444 '$F29'" \
+  --control-expect-fail-output "INCIDENTAL: banner text changed"
+rc=$?
+chmod 644 "$F29" 2>/dev/null || true
+snap63="$(grep -oE '/[^ ]*mutation-verify\.[A-Za-z0-9]+' "$TMP/out63" | head -1)"
+if [ -n "$snap63" ] && [ -f "$snap63/snapshot" ]; then cp "$snap63/snapshot" "$F29"; rm -rf "$snap63"; fi
+[ "$rc" -eq 2 ] || { cat "$TMP/out63"; fail "failed control restore: expected exit 2, got $rc"; }
+grep -qi "restore failed" "$TMP/out63" || { cat "$TMP/out63"; fail "failed control restore: expected a RESTORE FAILED message"; }
+grep -q "mutation CAUGHT" "$TMP/out63" && { cat "$TMP/out63"; fail "failed control restore: must not report CAUGHT"; }
+[ "$(cat "$F29")" = "$before29" ] || fail "failed control restore: could not put the original back"
+echo "test failed restore after the control -> exit 2 PASS"
 
 echo "ALL PASS"

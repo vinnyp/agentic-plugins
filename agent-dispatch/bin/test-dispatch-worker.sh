@@ -685,6 +685,8 @@ grep -q "MUTATING code to prove something" "$AGY_STDIN_FILE" || fail "hermetic r
 grep -q "mutation-verify.sh with BOTH --expect-fail-output" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not require --expect-fail-output for mutation checks"
 grep -q "AND a control mutant (--control-sed or --control-cmd" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not require a control mutant"
 grep -q "report that mutant as UNPROVEN, never CAUGHT" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not state the UNPROVEN fallback"
+grep -q "with --control-expect-fail-output naming the control's own failure line" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not require the control's own failure text"
+grep -q "A control refusal stands; report every control you tried" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not say a control refusal stands"
 # Intent: the hermetic preamble must NAME the isolated worktree. It must NOT do so with the
 # blanket "(do not change)" / "DO NOT write any files" phrasing, which contradicts the
 # may-mutate permission granted just above it — a reviewer resolving that conflict toward the

@@ -290,21 +290,23 @@ before a structural replacement shipped: **`mutation-verify.sh`**, in this plugi
 
 ```
 mutation-verify.sh --file <path> --test-cmd <cmd> (--mutate-sed <expr> | --mutate-cmd <cmd>) \
-  --expect-fail-output <hazard failure line> (--control-sed <expr> | --control-cmd <cmd>)
+  --expect-fail-output <hazard failure line> (--control-sed <expr> | --control-cmd <cmd>) \
+  --control-expect-fail-output <the control test's failure line>
 ```
 
 It snapshots the target file by **copy** into a temp dir outside the repo, mutates, runs the test,
 restores from the copy, and verifies byte-identity — immune to commit state, and it **never invokes
 git**. Exit codes: `0` mutation caught, `1` mutation not caught (false-green test), `2` harness
-error (bad args, a no-op mutation, a failed restore, an invalid baseline, or an unusable
-`--expect-fail-output` text), `3` with `--expect-fail-output`, a RED run that failed for an
+error (bad args, a no-op mutation, a failed restore, an invalid baseline, an unusable
+`--expect-fail-output` text, or a refused control: inert, red for an unrelated reason, or printing
+the expected text), `3` with `--expect-fail-output`, a RED run that failed for an
 unrelated reason (treat it as a surviving mutant). Use it for every mutation-verify pass,
 orchestrator or reviewer alike, and pass BOTH `--expect-fail-output` with the hazard assertion's
 rendered failure line (see the skill's mutation rules for how to choose it) AND a control mutant
-(`--control-sed` / `--control-cmd`): a caught result then shows the text was present, names it,
-and shows a different failure does not print it (an inert or non-specific control exits `2`).
-When no hazard-specific text exists or no valid control can be built, the mutant is UNPROVEN,
-never CAUGHT.
+(`--control-sed` / `--control-cmd` with `--control-expect-fail-output`): a caught result then
+shows the text was present, names it, and shows that one other failure does not print it. A
+control refusal stands. When mutation-verify.sh is unavailable, no hazard-specific text exists or
+no valid control can be built, the mutant is UNPROVEN, never CAUGHT.
 
 **Concurrent mutation-DOING reviewers — isolate them, or make them read-only.** When you dispatch
 two or more reviewers that themselves RUN mutations (mutate a file → run the test → restore), do

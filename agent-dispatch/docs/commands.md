@@ -381,6 +381,7 @@ mutation-verify.sh --file <path> --test-cmd <cmd>
                    [--syntax-cmd <cmd>] [--cover-check <line-or-symbol>]
                    [--expect-fail-output <str>]...
                    [(--control-sed <expr> | --control-cmd <cmd>)
+                    --control-expect-fail-output <str>...
                     [--control-anchor <str>]... [--control-marker <str>]...]
 ```
 
@@ -439,29 +440,46 @@ log can quote it. With the flag, each run's stdout and stderr are captured to a 
 together on stdout once the run finishes. Without the flag, a caught verdict says its cause was
 not checked.
 
-**Control mutant.** `--control-sed` / `--control-cmd` (only with `--expect-fail-output`) applies
-a second mutation on a fresh copy of the original, after a RED main run, with the same no-op and
+**Control mutant.** `--control-sed` / `--control-cmd` (only with `--expect-fail-output`, and
+always with `--control-expect-fail-output`, the line the control's own test prints when it fails)
+applies a second mutation on a fresh copy of the original, with the same no-op and
 `--syntax-cmd` checks; `--control-anchor` / `--control-marker` verify it the way
-`--expect-anchor` / `--expect-marker` verify the main mutation. Its output is captured the same
-way. If the control leaves the test green, it is inert and proves nothing (exit `2`). If its red
-output contains any expected text, the text is not specific to the hazard (exit `2`, naming the
-text). Only a control that goes red without the text lets the main verdict stand, and the verdict
-says so. A GREEN main run skips the control (it is already a survivor). Without a control,
-behavior is unchanged. The review gate requires a control for every mutation check it relies
-on; a mutant with no hazard-specific text or no valid control is UNPROVEN, never CAUGHT.
+`--expect-anchor` / `--expect-marker` verify the main mutation. It must edit only `--file`
+(changes to other files are not restored). Its output is captured the same way. The control runs
+only when the main run would be CAUGHT: a RED main run without the expected text stays exit `3`
+and a GREEN one stays exit `1`, whatever the control is. Refusals, all exit `2`:
+- the control's text already appears in the main run (the two failures cannot be told apart);
+- the control leaves the test green (inert);
+- the control's red run lacks its own text (a build break, crash or import error is not a control);
+- the control's red run prints ANY expected text (with several texts, drop the generic one).
 
-Picking a control: a mutation in the same file or function as the main one that breaks a
-**different** behavior a test checks, so the suite goes red for a reason other than the hazard.
-Good controls flip a neighbouring condition, change another return value, or drop a different
-guard that some other test asserts. A control that changes nothing tested is inert; a control
-that breaks the hazard's own path (or a shared helper the hazard test also uses) makes the
-hazard text appear and is refused. If no other tested behavior lives near the hazard, the
-expected text cannot be shown specific: record the mutant as UNPROVEN.
+Otherwise the verdict says the control "went RED for its own reason without the expected text",
+flagged `[UNVERIFIED CONTROL]` when the control had neither a `--control-marker` nor a
+`--syntax-cmd`. Without a control, a caught verdict says the control did not run. Without any
+control flag, behavior is otherwise unchanged.
+
+What one passing control shows, and what it does not: it shows that this one other failure does
+not print the expected text. It does not show that the text in the main run came from the hazard
+test rather than another test that shares its helper, loop or parametrization, unless the control
+breaks exactly such a sibling. A control red for a value-bearing message (`6 != 5` vs `4 != 5`)
+passes by construction, so expected texts must not embed mutant-specific values. A refusal is
+evidence that the text is not specific, not a bad pick: it stands, unless the refused run's output
+shows the hazard test itself failing at its own call site. Record every control you tried, with
+its verdict, in the disposition row.
+
+Picking a control: a mutation that breaks a **different** behavior a test checks, preferably one
+whose test shares the hazard test's helper, loop or parametrization, since that is the sibling
+whose failure could otherwise print the same text. Flip a neighbouring condition, change another
+return value, or drop a different guard that the sibling test asserts. A scoped single-test
+`--test-cmd` makes every different-behavior control inert; use the whole suite or file the hazard
+test lives in. The review gate requires a control for every mutation check it relies on; with no
+hazard-specific text, no valid control, or a refusal that stands, the mutant is UNPROVEN, never
+CAUGHT.
 
 Exit codes: `0` the test caught the mutation, `1` false green, `2` harness error (bad args,
 failing baseline, no-op mutation, failed verification, failed restore, an
-`--expect-fail-output` text that is empty, multi-line or printed by the passing baseline, or an
-inert or non-specific control), `3` a
+`--expect-fail-output` or `--control-expect-fail-output` text that is empty, multi-line or printed
+by the passing baseline, or a refused control), `3` a
 red run without the `--expect-fail-output` text (the hazard assertion is not shown to have caught
 the mutant).
 

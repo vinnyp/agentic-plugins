@@ -53,14 +53,16 @@
 #     flag, a CAUGHT verdict says its cause was not checked.
 #
 # Control mutant (issue foundry#259; requires --expect-fail-output):
-#   --control-sed <expr> | --control-cmd <cmd> applies a second mutation that
+#   --control-sed <expr> | --control-cmd <cmd> (with --control-expect-fail-output,
+#     the control test's own failure line) applies a second mutation that
 #     breaks a DIFFERENT behavior, on a fresh copy of the original, with the
 #     same no-op, --control-anchor / --control-marker and --syntax-cmd checks.
-#     It runs only when the main mutated run went RED. A control that leaves
-#     the test green is inert (exit 2); a control whose RED output contains
-#     any expected text shows the text is not specific to the hazard (exit 2).
-#     Only a control that goes RED without the text lets the main verdict
-#     stand. Without a control, behavior is unchanged.
+#     It must edit only --file. It runs only when the main run would be CAUGHT
+#     (a RED run without the expected text stays exit 3). Exit 2 when the
+#     control's text is already in the main run, the control is inert, its RED
+#     run lacks its own text, or it prints any expected text. One passing
+#     control shows only that that one other failure does not print the text.
+#     Without a control, a CAUGHT verdict says the control did not run.
 #
 # --file is resolved to an ABSOLUTE path before snapshotting, and both
 # --test-cmd and --mutate-cmd run inside a subshell, so a --test-cmd that
@@ -76,6 +78,7 @@ usage: mutation-verify.sh --file <path> --test-cmd <shell-command> \
          [--syntax-cmd <shell-command>] [--cover-check <line-or-symbol>] \
          [--expect-fail-output <str>] \
          [(--control-sed <sed-expr> | --control-cmd <shell-command>) \
+          --control-expect-fail-output <str> \
           [--control-anchor <str>] [--control-marker <str>]] \
          (--mutate-sed <sed-expr> | --mutate-cmd <shell-command>)
 
@@ -94,11 +97,13 @@ asserts the target line/function in --file had non-zero coverage. With
 --expect-fail-output may be repeated; a RED mutated run whose output lacks
 any of them failed for an unrelated reason and exits 3, not CAUGHT. Empty or
 multi-line text, or text the passing baseline prints, exits 2.
---control-sed / --control-cmd (requires --expect-fail-output) applies a control
-mutation that breaks a different behavior, on a fresh copy, after a RED main
-run. An inert control (test stays green) or a control whose RED output holds
-an expected text exits 2; --control-anchor / --control-marker verify it the
-way --expect-anchor / --expect-marker verify the main mutation.
+--control-sed / --control-cmd (requires --expect-fail-output and
+--control-expect-fail-output) applies a control mutation that breaks a
+different behavior, on a fresh copy, when the main run would be CAUGHT. It must
+edit only --file. An inert control, a control RED without its own text, a
+control text already in the main run, or a control output holding an expected
+text exits 2; --control-anchor / --control-marker verify it the way
+--expect-anchor / --expect-marker verify the main mutation.
 Missing anchors, missing markers, and failing syntax commands exit 2.
 EOF
 }
@@ -122,6 +127,7 @@ have_control_sed=0
 have_control_cmd=0
 control_anchors=()
 control_markers=()
+control_expect_outputs=()
 
 require_value() {
   # $1 = flag name, $2 = remaining arg count after the flag
@@ -154,8 +160,24 @@ while [ $# -gt 0 ]; do
         *$'\n'*|*$'\r'*) echo "mutation-verify.sh: --expect-fail-output must be a single line" >&2; exit 2 ;;
       esac
       expect_fail_outputs+=("$2"); shift 2 ;;
-    --control-sed) require_value "--control-sed" "$#"; control_sed="$2"; have_control_sed=1; shift 2 ;;
-    --control-cmd) require_value "--control-cmd" "$#"; control_cmd="$2"; have_control_cmd=1; shift 2 ;;
+    --control-sed)
+      require_value "--control-sed" "$#"
+      [ "$have_control_sed" -eq 1 ] && { echo "mutation-verify.sh: --control-sed given twice" >&2; exit 2; }
+      control_sed="$2"; have_control_sed=1; shift 2 ;;
+    --control-cmd)
+      require_value "--control-cmd" "$#"
+      [ "$have_control_cmd" -eq 1 ] && { echo "mutation-verify.sh: --control-cmd given twice" >&2; exit 2; }
+      control_cmd="$2"; have_control_cmd=1; shift 2 ;;
+    --control-expect-fail-output)
+      require_value "--control-expect-fail-output" "$#"
+      case "$2" in
+        *[![:space:]]*) : ;;
+        *) echo "mutation-verify.sh: --control-expect-fail-output must not be empty or whitespace-only" >&2; exit 2 ;;
+      esac
+      case "$2" in
+        *$'\n'*|*$'\r'*) echo "mutation-verify.sh: --control-expect-fail-output must be a single line" >&2; exit 2 ;;
+      esac
+      control_expect_outputs+=("$2"); shift 2 ;;
     --control-anchor) require_value "--control-anchor" "$#"; control_anchors+=("$2"); shift 2 ;;
     --control-marker) require_value "--control-marker" "$#"; control_markers+=("$2"); shift 2 ;;
     -h|--help) usage; exit 2 ;;
@@ -182,7 +204,7 @@ have_control=0
 [ "$have_control_sed" -eq 1 ] && have_control=1
 [ "$have_control_cmd" -eq 1 ] && have_control=1
 have_control_checks=0
-for _c in ${control_anchors[@]+"${control_anchors[@]}"} ${control_markers[@]+"${control_markers[@]}"}; do
+for _c in ${control_anchors[@]+"${control_anchors[@]}"} ${control_markers[@]+"${control_markers[@]}"} ${control_expect_outputs[@]+"${control_expect_outputs[@]}"}; do
   have_control_checks=1
   break
 done
@@ -192,7 +214,7 @@ if [ "$have_control_sed" -eq 1 ] && [ "$have_control_cmd" -eq 1 ]; then
   exit 2
 fi
 if [ "$have_control" -eq 0 ] && [ "$have_control_checks" -eq 1 ]; then
-  echo "mutation-verify.sh: --control-anchor / --control-marker require --control-sed or --control-cmd" >&2
+  echo "mutation-verify.sh: --control-anchor / --control-marker / --control-expect-fail-output require --control-sed or --control-cmd" >&2
   usage
   exit 2
 fi
@@ -203,7 +225,17 @@ if [ "$have_control" -eq 1 ]; then
     break
   done
   if [ "$_have_expect" -eq 0 ]; then
-    echo "mutation-verify.sh: a control mutant (--control-sed / --control-cmd) requires --expect-fail-output: the control checks that the expected text is specific to the hazard" >&2
+    echo "mutation-verify.sh: a control mutant (--control-sed / --control-cmd) requires --expect-fail-output: the control checks that another failure does not print the expected text" >&2
+    usage
+    exit 2
+  fi
+  _have_control_expect=0
+  for _c in ${control_expect_outputs[@]+"${control_expect_outputs[@]}"}; do
+    _have_control_expect=1
+    break
+  done
+  if [ "$_have_control_expect" -eq 0 ]; then
+    echo "mutation-verify.sh: a control mutant requires --control-expect-fail-output: the text its own seeded failure prints, so a build break or crash cannot pass as a control" >&2
     usage
     exit 2
   fi
@@ -412,9 +444,10 @@ if [ "$baseline_rc" -ne 0 ]; then
   echo "mutation-verify.sh: test-cmd does not pass before mutation (baseline exited $baseline_rc$baseline_note) — the instrument is invalid" >&2
   exit 2
 fi
-# An --expect-fail-output string that a PASSING run already prints (a test
-# name echoed on success, say) cannot tell the hazard failure from any other.
-for _o in ${expect_fail_outputs[@]+"${expect_fail_outputs[@]}"}; do
+# An --expect-fail-output (or --control-expect-fail-output) string that a
+# PASSING run already prints (a test name echoed on success, say) cannot tell
+# one failure from any other.
+for _o in ${expect_fail_outputs[@]+"${expect_fail_outputs[@]}"} ${control_expect_outputs[@]+"${control_expect_outputs[@]}"}; do
   if grep -F -q -- "$_o" "$baseline_out"; then
     echo "mutation-verify.sh: --expect-fail-output text already appears in the passing baseline output, so it cannot identify the failure: $_o" >&2
     echo "mutation-verify.sh: use text only the failing hazard assertion prints" >&2
@@ -541,11 +574,35 @@ else
   exit 1
 fi
 
-# Control mutant: only after a RED main run (a GREEN main run is already a
-# survivor, and the control cannot change that). Same fresh-copy mutation and
-# applied-verification as the main mutant; same file capture.
+# Main expected-text check first: a RED run without the text is a survivor
+# (exit 3) whatever a control would show, so the control never runs then.
+if [ "$test_rc" -ne 0 ] && [ "$have_expect_fail" -eq 1 ]; then
+  for _o in "${expect_fail_outputs[@]}"; do
+    if ! grep -F -q -- "$_o" "$mutated_out"; then
+      skipped_control=""
+      [ "$have_control" -eq 1 ] && skipped_control="; control not run"
+      echo "mutation-verify.sh: ${verdict_prefix}RED FOR AN UNRELATED REASON (test-cmd exited $test_rc under mutation$reachability_suffix$skipped_control) — expected failure text absent: $_o" >&2
+      echo "mutation-verify.sh: the hazard assertion is not shown to have caught this mutant; treat it as a surviving mutant (a test gap). Change the expected text only if this output shows the hazard assertion itself failing at its own location (see docs/commands.md)" >&2
+      exit 3
+    fi
+  done
+fi
+
+# Control mutant: only when the main run would be CAUGHT. Same fresh-copy
+# mutation and applied-verification as the main mutant; same file capture.
+# It must go RED for its own seeded reason (--control-expect-fail-output
+# present) and must not print any main expected text.
 control_suffix=""
+if [ "$have_expect_fail" -eq 1 ] && [ "$have_control" -eq 0 ]; then
+  control_suffix="; control NOT run, so the text's specificity is unchecked"
+fi
 if [ "$have_control" -eq 1 ] && [ "$test_rc" -ne 0 ]; then
+  for _c in "${control_expect_outputs[@]}"; do
+    if grep -F -q -- "$_c" "$mutated_out"; then
+      echo "mutation-verify.sh: CONTROL TEXT IN THE MAIN RUN — the main mutated run already printed the control's failure text, so the two failures cannot be told apart: $_c" >&2
+      exit 2
+    fi
+  done
   restored=0
   control_mut_rc=0
   if [ "$have_control_sed" -eq 1 ]; then
@@ -586,28 +643,35 @@ if [ "$have_control" -eq 1 ] && [ "$test_rc" -ne 0 ]; then
     exit 2
   fi
   if [ "$control_rc" -eq 0 ]; then
-    echo "mutation-verify.sh: CONTROL INERT — the control mutant left test-cmd green, so it proves nothing about the expected text; choose a control that breaks a different, tested behavior" >&2
+    echo "mutation-verify.sh: CONTROL INERT — the control mutant left test-cmd green, so it proves nothing about the expected text" >&2
     exit 2
   fi
-  for _o in "${expect_fail_outputs[@]}"; do
-    if grep -F -q -- "$_o" "$control_out"; then
-      echo "mutation-verify.sh: EXPECTED TEXT NOT SPECIFIC TO THE HAZARD — the control mutant's RED run also printed: $_o" >&2
-      echo "mutation-verify.sh: the text cannot tell the hazard failure from another failure; record the main mutant as UNPROVEN" >&2
+  for _c in "${control_expect_outputs[@]}"; do
+    if ! grep -F -q -- "$_c" "$control_out"; then
+      echo "mutation-verify.sh: CONTROL RED FOR AN UNRELATED REASON — the control run lacks its own --control-expect-fail-output text (a build break or crash is not a control): $_c" >&2
       exit 2
     fi
   done
-  control_suffix="; control went RED without the expected text"
+  for _o in "${expect_fail_outputs[@]}"; do
+    if grep -F -q -- "$_o" "$control_out"; then
+      echo "mutation-verify.sh: EXPECTED TEXT NOT SPECIFIC TO THE HAZARD — the control mutant's RED run also printed: $_o" >&2
+      echo "mutation-verify.sh: this refusal stands; record the main mutant as UNPROVEN unless this output shows the hazard test itself failing" >&2
+      exit 2
+    fi
+  done
+  control_verified=0
+  [ "$have_syntax" -eq 1 ] && control_verified=1
+  for _m in ${control_markers[@]+"${control_markers[@]}"}; do
+    control_verified=1
+    break
+  done
+  control_flag=""
+  [ "$control_verified" -eq 0 ] && control_flag="[UNVERIFIED CONTROL] "
+  control_suffix="; ${control_flag}control went RED for its own reason without the expected text"
 fi
 
 if [ "$test_rc" -ne 0 ]; then
   if [ "$have_expect_fail" -eq 1 ]; then
-    for _o in "${expect_fail_outputs[@]}"; do
-      if ! grep -F -q -- "$_o" "$mutated_out"; then
-        echo "mutation-verify.sh: ${verdict_prefix}RED FOR AN UNRELATED REASON (test-cmd exited $test_rc under mutation$reachability_suffix$control_suffix) — expected failure text absent: $_o" >&2
-        echo "mutation-verify.sh: the hazard assertion is not shown to have caught this mutant; treat it as a surviving mutant (a test gap). Change the expected text only if this output shows the hazard assertion itself failing at its own location (see docs/commands.md)" >&2
-        exit 3
-      fi
-    done
     matched_list=""
     for _o in "${expect_fail_outputs[@]}"; do
       matched_list="$matched_list${matched_list:+, }'$_o'"

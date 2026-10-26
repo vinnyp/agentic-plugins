@@ -245,7 +245,10 @@ func contains(xs []string, x string) bool {
 // (foundry#259): a mutant counts as CAUGHT only when the hazard's own failure
 // text appears AND a control mutant shows that text is specific to it.
 const mutationCheckRule = "\nMutation checks (required for any mutant you report): run each one through " +
-	"`mutation-verify.sh` with BOTH `--expect-fail-output '<the line only the hazard test prints when it fails>'` " +
-	"AND a control mutant (`--control-sed` or `--control-cmd`: a mutation in the same file or function that " +
-	"breaks a different, tested behavior). If no hazard-specific text exists, or no valid control can be " +
-	"built (the control is inert, or its failure also prints the text), record that mutant as UNPROVEN, never CAUGHT.\n"
+	"`mutation-verify.sh`, in an isolated copy or worktree (never a checkout another reviewer is using), with BOTH " +
+	"`--expect-fail-output '<the line only the hazard test prints when it fails>'` AND a control mutant " +
+	"(`--control-sed` or `--control-cmd`, with `--control-expect-fail-output '<the line the control's own test prints>'`): " +
+	"a mutation that breaks a different, tested behavior, preferably one whose test shares the hazard test's helper, " +
+	"loop or parametrization. A control refusal stands; record every control you tried. If mutation-verify.sh is " +
+	"unavailable, no hazard-specific text exists, or no valid control can be built, record that mutant as UNPROVEN, " +
+	"never CAUGHT.\n"
