@@ -299,16 +299,16 @@ restores from the copy, and verifies byte-identity — immune to commit state, a
 git**. Exit codes: `0` mutation caught, `1` mutation not caught (false-green test), `2` harness
 error (bad args, a no-op mutation, a failed restore, an invalid baseline, an unusable
 `--expect-fail-output` text, a refused knock-out: empty, not the test command plus a deselect,
-without a count line, red on the unmutated copy, changing nothing, its count line missing as a
-whole number from its baseline or already printed by the full run, or still printing the expected
-text on the mutant, or a refused control: its text already
+without a scope proof, red on the unmutated copy, changing nothing, a scope proof that fails on
+the unmutated copy or on the mutant (summed count, full-run count, one-fewer delta line), or still
+printing the expected text on the mutant, or a refused control: its text already
 in the main run, inert, red for an unrelated reason, or printing the expected text), `3` with `--expect-fail-output`, a RED run that failed for an
 unrelated reason (treat it as a surviving mutant). Use it for every mutation-verify pass,
 orchestrator or reviewer alike, and pass BOTH `--expect-fail-output` with the hazard assertion's
 rendered failure line (see the skill's mutation rules for how to choose it) AND
 `--knockout-cmd` (the test command with only the hazard test deselected, by the exact form for
-cargo, go or pytest in `docs/commands.md`, plus its required `--knockout-expect-output` count line;
-any other runner, node included, makes the mutant UNPROVEN):
+cargo, go or pytest in `docs/commands.md`, plus its required scope proof, `--knockout-expect-output`
+or `--knockout-delta-line`; any other runner, node included, makes the mutant UNPROVEN):
 a caught result then shows the text was present, names it, and shows it disappears when that
 command runs. A control mutant is recommended, not required; a control refusal stands; record
 every control you tried, including refused ones. When mutation-verify.sh is

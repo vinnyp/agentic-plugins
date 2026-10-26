@@ -55,13 +55,15 @@
 # Knock-out (issue foundry#259; requires --expect-fail-output):
 #   --knockout-cmd <cmd> is the same test command with only the hazard test
 #     deselected, by an exact form (supported: cargo -- --exact --skip, go -v
-#     -skip '^Name$' with an awk count, pytest --deselect <full node id>; see
-#     docs/commands.md). --knockout-expect-output (the runner's count line) is
-#     required, matched as a whole number (no digit right before or after it),
-#     and must not appear in the full run. The knock-out must start with
-#     --test-cmd and differ from it, pass green on the unmutated copy, print
-#     something different from the full baseline, not print any expected text
-#     there, and contain every count line (exit 2 otherwise). On the same mutated copy, and only when the main run would
+#     -skip '^Name$', pytest -q --deselect <full node id>; docs/commands.md),
+#     with a required scope proof: --knockout-expect-output '<n><rest>' (every
+#     "<n><rest>" in the output is summed; the full run must sum to 0 and the
+#     knock-out to <n>) and/or --knockout-delta-line <prefix> (exactly one
+#     fewer line starting with <prefix> than the full run). The knock-out must
+#     start with --test-cmd and differ from it, pass green on the unmutated
+#     copy, print something different from the full baseline, not print any
+#     expected text there, and pass its scope proof, also on the mutant
+#     (exit 2 otherwise). On the same mutated copy, and only when the main run would
 #     be CAUGHT, the expected text must disappear; if it persists, another test
 #     prints it (or the deselect missed) and the run exits 2. The verdict names
 #     the command, its exit code on the mutant and the count line. Without it,
@@ -93,7 +95,7 @@ usage: mutation-verify.sh --file <path> --test-cmd <shell-command> \
          [--expect-anchor <str>] [--expect-marker <str>] \
          [--syntax-cmd <shell-command>] [--cover-check <line-or-symbol>] \
          [--expect-fail-output <str>] \
-         [--knockout-cmd <shell-command> --knockout-expect-output <str>] \
+         [--knockout-cmd <shell-command> (--knockout-expect-output <str> | --knockout-delta-line <prefix>)] \
          [(--control-sed <sed-expr> | --control-cmd <shell-command>) \
           --control-expect-fail-output <str> \
           [--control-anchor <str>] [--control-marker <str>]] \
@@ -114,12 +116,13 @@ asserts the target line/function in --file had non-zero coverage. With
 --expect-fail-output may be repeated; a RED mutated run whose output lacks
 any of them failed for an unrelated reason and exits 3, not CAUGHT. Empty or
 multi-line text, or text the passing baseline prints, exits 2.
---knockout-cmd (requires --expect-fail-output and --knockout-expect-output) is
---test-cmd plus an exact deselect of only the hazard test; it must pass on the
-unmutated copy, print something different from the full baseline, and contain
-every --knockout-expect-output line as a whole number (a line the full run
-already prints is refused); on the mutant the expected text must disappear, or
-the run exits 2.
+--knockout-cmd (requires --expect-fail-output and a scope proof:
+--knockout-expect-output '<n><rest>', summed over the output, and/or
+--knockout-delta-line <prefix>, one fewer line than the full run) is --test-cmd
+plus an exact deselect of only the hazard test; it must pass on the unmutated
+copy and print something different from the full baseline; on the mutant the
+expected text must disappear and the scope proof must still hold, or the run
+exits 2.
 --control-sed / --control-cmd (requires --expect-fail-output and
 --control-expect-fail-output) applies a control mutation that breaks a
 different behavior, on a fresh copy, when the main run would be CAUGHT. It must
@@ -154,6 +157,8 @@ control_expect_outputs=()
 knockout_cmd=""
 have_knockout=0
 knockout_expect_outputs=()
+knockout_delta_line=""
+have_knockout_delta=0
 
 require_value() {
   # $1 = flag name, $2 = remaining arg count after the flag
@@ -221,7 +226,27 @@ while [ $# -gt 0 ]; do
       case "$2" in
         *$'\n'*|*$'\r'*) echo "mutation-verify.sh: --knockout-expect-output must be a single line" >&2; exit 2 ;;
       esac
+      # The count line must START with its number ("1 filtered out", "1 deselected"):
+      # the tool sums every "<n><rest>" occurrence in the knock-out output.
+      case "$2" in
+        [0-9]*) : ;;
+        *) echo "mutation-verify.sh: --knockout-expect-output must start with its number (e.g. '1 deselected'): $2" >&2; exit 2 ;;
+      esac
+      case "${2#"${2%%[!0-9]*}"}" in
+        ''|[0-9]*) echo "mutation-verify.sh: --knockout-expect-output needs text after its number (e.g. '1 deselected'): $2" >&2; exit 2 ;;
+      esac
       knockout_expect_outputs+=("$2"); shift 2 ;;
+    --knockout-delta-line)
+      require_value "--knockout-delta-line" "$#"
+      [ "$have_knockout_delta" -eq 1 ] && { echo "mutation-verify.sh: --knockout-delta-line given twice" >&2; exit 2; }
+      case "$2" in
+        *[![:space:]]*) : ;;
+        *) echo "mutation-verify.sh: --knockout-delta-line must not be empty or whitespace-only" >&2; exit 2 ;;
+      esac
+      case "$2" in
+        *$'\n'*|*$'\r'*) echo "mutation-verify.sh: --knockout-delta-line must be a single line" >&2; exit 2 ;;
+      esac
+      knockout_delta_line="$2"; have_knockout_delta=1; shift 2 ;;
     --control-anchor) require_value "--control-anchor" "$#"; control_anchors+=("$2"); shift 2 ;;
     --control-marker) require_value "--control-marker" "$#"; control_markers+=("$2"); shift 2 ;;
     -h|--help) usage; exit 2 ;;
@@ -310,8 +335,9 @@ if [ "$have_knockout" -eq 1 ]; then
     _have_count=1
     break
   done
+  [ "$have_knockout_delta" -eq 1 ] && _have_count=1
   if [ "$_have_count" -eq 0 ]; then
-    echo "mutation-verify.sh: --knockout-cmd requires --knockout-expect-output: the runner's line showing exactly one test was deselected (it is the only proof of the knock-out's scope)" >&2
+    echo "mutation-verify.sh: --knockout-cmd requires --knockout-expect-output (the runner's deselection count, e.g. '1 deselected') or --knockout-delta-line (a per-test line prefix, e.g. '=== RUN '): the only proof of the knock-out's scope" >&2
     exit 2
   fi
 else
@@ -319,6 +345,10 @@ else
     echo "mutation-verify.sh: --knockout-expect-output requires --knockout-cmd" >&2
     exit 2
   done
+  if [ "$have_knockout_delta" -eq 1 ]; then
+    echo "mutation-verify.sh: --knockout-delta-line requires --knockout-cmd" >&2
+    exit 2
+  fi
 fi
 if [ ! -e "$file" ]; then
   echo "mutation-verify.sh: --file does not exist: $file" >&2
@@ -413,22 +443,33 @@ trap cleanup EXIT
 trap 'cleanup; trap - INT; kill -s INT $$' INT
 trap 'cleanup; trap - TERM; kill -s TERM $$' TERM
 
-# has_whole_line_text <text> <file>: does <file> contain <text> with no digit
-# immediately before or after it? ("1 filtered out" must not match
-# "11 filtered out"; "tests 1" must not match "tests 12".)
-has_whole_line_text() {
-  MV_WHOLE_TEXT="$1" awk '
-    BEGIN { t = ENVIRON["MV_WHOLE_TEXT"]; n = length(t); found = 0 }
+# sum_count_lines <rest> <file>: the sum of every <n> in "<n><rest>" in <file>,
+# where <n> is the maximal digit run right before <rest> and no digit follows
+# <rest>. "1 filtered out" printed by two cargo test binaries sums to 2; "11
+# deselected" counts as 11, never as 1. C locale so odd bytes cannot abort awk.
+sum_count_lines() {
+  LC_ALL=C MV_COUNT_REST="$1" awk '
+    BEGIN { t = ENVIRON["MV_COUNT_REST"]; n = length(t); sum = 0 }
     {
       line = $0; off = 0
       while ((i = index(line, t)) > 0) {
-        pre = (off + i > 1) ? substr($0, off + i - 1, 1) : ""
-        post = substr($0, off + i + n, 1)
-        if (pre !~ /[0-9]/ && post !~ /[0-9]/) { found = 1; exit }
-        off += i; line = substr($0, off + 1)
+        pos = off + i
+        post = substr($0, pos + n, 1)
+        k = pos - 1; digits = ""
+        while (k >= 1 && substr($0, k, 1) ~ /[0-9]/) { digits = substr($0, k, 1) digits; k-- }
+        if (digits != "" && post !~ /[0-9]/) sum += digits + 0
+        off = pos; line = substr($0, off + 1)
       }
     }
-    END { exit found ? 0 : 1 }' "$2"
+    END { print sum }' "$2"
+}
+
+# count_prefix_lines <prefix> <file>: lines of <file> that start with <prefix>.
+count_prefix_lines() {
+  LC_ALL=C MV_PREFIX="$1" awk '
+    BEGIN { p = ENVIRON["MV_PREFIX"]; n = length(p); c = 0 }
+    substr($0, 1, n) == p { c++ }
+    END { print c }' "$2"
 }
 
 shell_quote() {
@@ -604,16 +645,32 @@ if [ "$have_knockout" -eq 1 ]; then
   # Scope proof: a runner line showing exactly one test was deselected
   # (pytest "1 deselected", cargo "1 filtered out"), matched as a whole number,
   # and not already printed by the full run (a filter in --test-cmd).
+  # The tool sums every "<n><rest>" occurrence: the full run must show 0 and
+  # the knock-out exactly the declared number (several cargo test binaries
+  # each printing "1 filtered out" sum past 1).
   for _k in ${knockout_expect_outputs[@]+"${knockout_expect_outputs[@]}"}; do
-    if has_whole_line_text "$_k" "$baseline_out"; then
-      echo "mutation-verify.sh: KNOCK-OUT SCOPE UNPROVEN — the full, unmutated run already prints the --knockout-expect-output line, so it cannot show the knock-out's deselection: $_k" >&2
+    _want="${_k%%[!0-9]*}"; _rest="${_k#"$_want"}"; _want=$((10#$_want))
+    _full_sum="$(sum_count_lines "$_rest" "$baseline_out")"
+    if [ "$_full_sum" -ne 0 ]; then
+      echo "mutation-verify.sh: KNOCK-OUT SCOPE UNPROVEN — the full, unmutated run already prints the --knockout-expect-output line (its counts sum to $_full_sum), so it cannot show the knock-out's deselection: $_k" >&2
       exit 2
     fi
-    if ! has_whole_line_text "$_k" "$knockout_base_out"; then
-      echo "mutation-verify.sh: KNOCK-OUT SCOPE UNPROVEN — the knock-out baseline output lacks --knockout-expect-output as a whole number (a digit right before or after it does not count): $_k" >&2
+    _ko_sum="$(sum_count_lines "$_rest" "$knockout_base_out")"
+    if [ "$_ko_sum" -ne "$_want" ]; then
+      echo "mutation-verify.sh: KNOCK-OUT SCOPE UNPROVEN — the knock-out baseline's '<n>$_rest' counts sum to $_ko_sum, not the declared --knockout-expect-output as a whole number: $_k" >&2
       exit 2
     fi
   done
+  # Delta line: exactly one fewer per-test line (e.g. go -v '=== RUN ') in the
+  # knock-out than in the full run, so exactly one test (or subtest) went.
+  if [ "$have_knockout_delta" -eq 1 ]; then
+    _full_lines="$(count_prefix_lines "$knockout_delta_line" "$baseline_out")"
+    _ko_lines="$(count_prefix_lines "$knockout_delta_line" "$knockout_base_out")"
+    if [ "$((_full_lines - _ko_lines))" -ne 1 ]; then
+      echo "mutation-verify.sh: KNOCK-OUT SCOPE UNPROVEN — lines starting with --knockout-delta-line '$knockout_delta_line': full run $_full_lines, knock-out $_ko_lines; exactly one fewer is required" >&2
+      exit 2
+    fi
+  fi
 fi
 
 # Mutate.
@@ -763,15 +820,32 @@ if [ "$knockout_ran" -eq 1 ]; then
       exit 2
     fi
   done
+  # The mutated knock-out run must still show the same scope (a crash or
+  # truncation would otherwise make the text "disappear").
+  for _k in ${knockout_expect_outputs[@]+"${knockout_expect_outputs[@]}"}; do
+    _want="${_k%%[!0-9]*}"; _rest="${_k#"$_want"}"; _want=$((10#$_want))
+    _mut_sum="$(sum_count_lines "$_rest" "$knockout_out")"
+    if [ "$_mut_sum" -ne "$_want" ]; then
+      echo "mutation-verify.sh: KNOCK-OUT SCOPE UNPROVEN ON THE MUTANT — the knock-out run on the mutant shows '<n>$_rest' summing to $_mut_sum, not $_k (truncated or crashed?)" >&2
+      exit 2
+    fi
+  done
+  if [ "$have_knockout_delta" -eq 1 ]; then
+    _main_lines="$(count_prefix_lines "$knockout_delta_line" "$mutated_out")"
+    _komut_lines="$(count_prefix_lines "$knockout_delta_line" "$knockout_out")"
+    if [ "$((_main_lines - _komut_lines))" -ne 1 ]; then
+      echo "mutation-verify.sh: KNOCK-OUT SCOPE UNPROVEN ON THE MUTANT — lines starting with '$knockout_delta_line': main run $_main_lines, knock-out run $_komut_lines on the mutant; exactly one fewer is required (truncated or crashed?)" >&2
+      exit 2
+    fi
+  fi
   knockout_scope=""
   for _k in ${knockout_expect_outputs[@]+"${knockout_expect_outputs[@]}"}; do
     knockout_scope="$knockout_scope${knockout_scope:+, }'$_k'"
   done
-  if [ -n "$knockout_scope" ]; then
-    knockout_scope=", deselection shown by $knockout_scope"
-  else
-    knockout_scope=", deselection count NOT shown"
+  if [ "$have_knockout_delta" -eq 1 ]; then
+    knockout_scope="$knockout_scope${knockout_scope:+, }one fewer '$knockout_delta_line' line"
   fi
+  knockout_scope=", deselection shown by $knockout_scope"
   knockout_suffix="; knock-out \`$knockout_cmd\` (exited $knockout_rc on the mutant$knockout_scope) removed the expected text, so it is attributed to the test(s) that command deselects"
 fi
 

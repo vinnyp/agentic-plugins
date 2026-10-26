@@ -683,10 +683,11 @@ grep -q "MUTATING code to prove something" "$AGY_STDIN_FILE" || fail "hermetic r
 # foundry#259: the permission comes with the contract — expected failure text
 # plus a knock-out (control recommended), and UNPROVEN (never CAUGHT) as the fallback.
 grep -q "mutation-verify.sh with BOTH --expect-fail-output" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not require --expect-fail-output for mutation checks"
-grep -q "AND --knockout-cmd (the same test command with only the hazard test deselected) plus its required --knockout-expect-output count line" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not require a knock-out with its count line"
+grep -q "AND --knockout-cmd (the same test command with only the hazard test deselected) plus its required scope proof" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not require a knock-out with its scope proof"
+grep -q "with --knockout-delta-line '=== RUN '" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not give the go delta line"
 grep -q "The knock-out is supported only for cargo, go and pytest" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not limit the knock-out to supported runners"
 grep -q "For any other runner (node included), report the mutant as UNPROVEN" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not make other runners UNPROVEN"
-grep -q "cargo test -- --exact --skip <path::name> with '1 filtered out'" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not give the exact cargo form"
+grep -q "+ -- --exact --skip <path::name> with --knockout-expect-output '1 filtered out'" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not give the exact cargo form"
 grep -q "a control refusal stands; report every control you tried, including refused ones" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not say a control refusal stands and must be reported"
 grep -q "A control mutant (--control-sed or --control-cmd with --control-expect-fail-output) is recommended, not required" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not mark the control as recommended"
 grep -q "a CAUGHT whose knock-out clause says it did not run, or whose deselect is not one of these exact forms, is UNPROVEN" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not bind the knock-out clause to CAUGHT"

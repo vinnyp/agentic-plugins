@@ -1459,13 +1459,13 @@ func TestParse(t *testing.T)      { check(t, Parse("abc"), 3) }
 func TestParseEmpty(t *testing.T) { check(t, Parse(""), 0) }
 EOF
 before79="$(cat "$GO79/target.go")"
-# The documented go form: -v (deterministic output), one package, an anchored
-# -skip, and an awk count line (go prints no deselection count of its own).
+# The documented go form: -v (one "=== RUN" line per test), one package, an
+# anchored -skip, and --knockout-delta-line '=== RUN ' (go prints no
+# deselection count; the tool counts one fewer RUN line).
 GO79_TEST="cd '$GO79' && go test -v -count=1 ."
-GO79_COUNT="2>&1 | awk '{ print } /^=== RUN/ { n++ } END { print \"knock-out ran \" n \" tests\" }'"
 bash "$MV" --file "$GO79/target.go" --test-cmd "$GO79_TEST" \
   --mutate-sed 's/return 0/return 1/' --expect-fail-output "value mismatch" \
-  --knockout-cmd "$GO79_TEST -skip '^TestParse\$' $GO79_COUNT" --knockout-expect-output "knock-out ran 1 tests" >"$TMP/out79" 2>&1
+  --knockout-cmd "$GO79_TEST -skip '^TestParse\$'" --knockout-delta-line '=== RUN ' >"$TMP/out79" 2>&1
 rc=$?
 [ "$rc" -eq 2 ] || { cat "$TMP/out79"; fail "go exact knock-out, sibling catches: expected exit 2, got $rc"; }
 grep -q "TEXT PERSISTS WITHOUT THE HAZARD TEST" "$TMP/out79" || { cat "$TMP/out79"; fail "go exact knock-out, sibling catches: expected the persists message"; }
@@ -1518,10 +1518,10 @@ echo "test knock-out plus control ordering and verdict PASS"
 # catches loses its text under the knock-out -> CAUGHT with the count line.
 bash "$MV" --file "$GO79/target.go" --test-cmd "$GO79_TEST" \
   --mutate-sed 's/return len(s)/return len(s)+1/' --expect-fail-output "value mismatch" \
-  --knockout-cmd "$GO79_TEST -skip '^TestParse\$' $GO79_COUNT" --knockout-expect-output "knock-out ran 1 tests" >"$TMP/out79b" 2>&1
+  --knockout-cmd "$GO79_TEST -skip '^TestParse\$'" --knockout-delta-line '=== RUN ' >"$TMP/out79b" 2>&1
 rc=$?
 [ "$rc" -eq 0 ] || { cat "$TMP/out79b"; fail "go exact knock-out, hazard catches: expected exit 0, got $rc"; }
-grep -F -q "deselection shown by 'knock-out ran 1 tests') removed the expected text" "$TMP/out79b" || { cat "$TMP/out79b"; fail "go exact knock-out, hazard catches: verdict must quote the count line"; }
+grep -F -q "deselection shown by one fewer '=== RUN ' line) removed the expected text" "$TMP/out79b" || { cat "$TMP/out79b"; fail "go exact knock-out, hazard catches: verdict must quote the delta line"; }
 [ "$(cat "$GO79/target.go")" = "$before79" ] || fail "go exact knock-out positive control: file not byte-identical after restore"
 echo "test a go exact knock-out attributes a hazard-only catch PASS"
 
@@ -1623,5 +1623,136 @@ if command -v cargo >/dev/null 2>&1; then
 else
   echo "SKIP: cargo knock-out (cargo absent)"
 fi
+
+# 88: cargo with two test binaries sharing a test path (lib and tests/it.rs):
+# --exact --skip deselects one test in EACH and each prints "1 filtered out";
+# the tool sums them to 2 and refuses (skipped without cargo).
+if command -v cargo >/dev/null 2>&1; then
+  RS88="$TMP/rs_twobin"; mkdir -p "$RS88/src" "$RS88/tests"
+  printf '[package]\nname = "ko88"\nversion = "0.1.0"\nedition = "2021"\n\n[lib]\npath = "src/lib.rs"\n' > "$RS88/Cargo.toml"
+  printf 'pub fn parse(s: &str) -> usize { if s.is_empty() { 0 } else { s.len() } }\n\n#[cfg(test)]\nmod tests {\n    #[test] fn roundtrip() { assert!(super::parse("abc") == 3, "value mismatch"); }\n}\n' > "$RS88/src/lib.rs"
+  printf 'mod tests {\n    #[test] fn roundtrip() { assert!(ko88::parse("") == 0, "value mismatch"); }\n}\n' > "$RS88/tests/it.rs"
+  before88="$(cat "$RS88/src/lib.rs")"
+  RS88_TEST="cd '$RS88' && CARGO_TARGET_DIR='$TMP/rs88-target' cargo test -q --offline"
+  bash "$MV" --file "$RS88/src/lib.rs" --test-cmd "$RS88_TEST" --mutate-sed 's/{ 0 } else/{ 1 } else/' \
+    --expect-fail-output "value mismatch" --knockout-cmd "$RS88_TEST -- --exact --skip tests::roundtrip" \
+    --knockout-expect-output "1 filtered out" >"$TMP/out88" 2>&1
+  rc=$?
+  [ "$rc" -eq 2 ] || { cat "$TMP/out88"; fail "cargo two binaries sharing a path: expected exit 2, got $rc"; }
+  grep -q "counts sum to 2, not the declared --knockout-expect-output" "$TMP/out88" || { cat "$TMP/out88"; fail "cargo two binaries sharing a path: expected the summed-count refusal"; }
+  grep -q "mutation CAUGHT" "$TMP/out88" && { cat "$TMP/out88"; fail "cargo two binaries sharing a path: must not report CAUGHT"; }
+  [ "$(cat "$RS88/src/lib.rs")" = "$before88" ] || fail "cargo two binaries: file not byte-identical after restore"
+  echo "test cargo knock-out across two test binaries is refused (summed count) PASS"
+else
+  echo "SKIP: cargo two-binary knock-out (cargo absent)"
+fi
+
+# 89: go delta line: a name defined in both the internal and the external
+# test package is skipped twice (two fewer RUN lines) -> refused; a whole
+# table skipped as '^Name$' removes every row -> refused; one row skipped as
+# '^Name$/^row$' removes one RUN line -> accepted, and the sibling row that
+# really catches the mutant keeps the text -> TEXT PERSISTS.
+GO89="$TMP/go_delta"; mkdir -p "$GO89"
+printf 'module example.com/mutationverify/delta\n\ngo 1.21\n' > "$GO89/go.mod"
+printf 'package delta\n\nfunc Parse(s string) int {\n\tif s == "" {\n\t\treturn 0\n\t}\n\treturn len(s)\n}\n' > "$GO89/target.go"
+cat > "$GO89/internal_test.go" <<'EOF'
+package delta
+
+import "testing"
+
+func TestDup(t *testing.T) { _ = Parse("abc") }
+
+func TestTable(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		in   string
+		want int
+	}{{"weak", "abc", 3}, {"empty", "", 0}} {
+		t.Run(c.name, func(t *testing.T) {
+			if c.name == "weak" {
+				return
+			}
+			if Parse(c.in) != c.want {
+				t.Fatal("value mismatch")
+			}
+		})
+	}
+}
+EOF
+cat > "$GO89/external_test.go" <<'EOF'
+package delta_test
+
+import (
+	"testing"
+
+	"example.com/mutationverify/delta"
+)
+
+func TestDup(t *testing.T) {
+	if delta.Parse("") != 0 {
+		t.Fatal("value mismatch")
+	}
+}
+EOF
+before89="$(cat "$GO89/target.go")"
+GO89_TEST="cd '$GO89' && go test -v -count=1 ."
+bash "$MV" --file "$GO89/target.go" --test-cmd "$GO89_TEST" --mutate-sed 's/return 0/return 1/' \
+  --expect-fail-output "value mismatch" --knockout-cmd "$GO89_TEST -skip '^TestDup\$'" --knockout-delta-line '=== RUN ' >"$TMP/out89a" 2>&1
+rc=$?
+[ "$rc" -eq 2 ] || { cat "$TMP/out89a"; fail "go duplicate name in two test packages: expected exit 2, got $rc"; }
+grep -q "full run 5, knock-out 3; exactly one fewer is required" "$TMP/out89a" || { cat "$TMP/out89a"; fail "go duplicate name: expected the delta refusal"; }
+bash "$MV" --file "$GO89/target.go" --test-cmd "$GO89_TEST" --mutate-sed 's/return 0/return 1/' \
+  --expect-fail-output "value mismatch" --knockout-cmd "$GO89_TEST -skip '^TestTable\$'" --knockout-delta-line '=== RUN ' >"$TMP/out89b" 2>&1
+rc=$?
+[ "$rc" -eq 2 ] || { cat "$TMP/out89b"; fail "go whole table skipped: expected exit 2, got $rc"; }
+grep -q "full run 5, knock-out 2; exactly one fewer is required" "$TMP/out89b" || { cat "$TMP/out89b"; fail "go whole table skipped: expected the delta refusal"; }
+bash "$MV" --file "$GO89/target.go" --test-cmd "$GO89_TEST" --mutate-sed 's/return 0/return 1/' \
+  --expect-fail-output "value mismatch" --knockout-cmd "$GO89_TEST -skip '^TestTable\$/^weak\$'" --knockout-delta-line '=== RUN ' >"$TMP/out89c" 2>&1
+rc=$?
+[ "$rc" -eq 2 ] || { cat "$TMP/out89c"; fail "go one row skipped, sibling row catches: expected exit 2, got $rc"; }
+grep -q "TEXT PERSISTS WITHOUT THE HAZARD TEST" "$TMP/out89c" || { cat "$TMP/out89c"; fail "go one row skipped: expected the persists message (the delta check passed)"; }
+[ "$(cat "$GO89/target.go")" = "$before89" ] || fail "go delta tests: file not byte-identical after restore"
+echo "test go delta line: duplicates and whole tables refused, one row accepted PASS"
+
+# 90: count-line and delta-line validation.
+for bad in "deselected" "1" "  1 deselected"; do
+  ko_run "$TMP/out90" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "AssertionError: value mismatch" --knockout-cmd "$KO" --knockout-expect-output "$bad"
+  rc=$?
+  [ "$rc" -eq 2 ] || { cat "$TMP/out90"; fail "count line '$bad': expected exit 2, got $rc"; }
+  grep -q "must start with its number\|needs text after its number" "$TMP/out90" || { cat "$TMP/out90"; fail "count line '$bad': expected a validation message"; }
+done
+ko_run "$TMP/out90b" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "AssertionError: value mismatch" --knockout-delta-line '=== RUN '
+rc=$?
+[ "$rc" -eq 2 ] || { cat "$TMP/out90b"; fail "--knockout-delta-line without a knock-out: expected exit 2, got $rc"; }
+grep -q "requires --knockout-cmd" "$TMP/out90b" || { cat "$TMP/out90b"; fail "--knockout-delta-line without a knock-out: expected the message"; }
+ko_run "$TMP/out90c" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "AssertionError: value mismatch" --knockout-cmd "$KO" \
+  --knockout-delta-line 'x' --knockout-delta-line 'y'
+rc=$?
+[ "$rc" -eq 2 ] || { cat "$TMP/out90c"; fail "duplicate --knockout-delta-line: expected exit 2, got $rc"; }
+grep -q "given twice" "$TMP/out90c" || { cat "$TMP/out90c"; fail "duplicate --knockout-delta-line: expected the message"; }
+echo "test count-line and delta-line validation PASS"
+
+# 91: the knock-out run on the MUTANT must still show its scope: a run that
+# crashes before printing its count line cannot attribute the text.
+F91="$TMP/crash_target.txt"
+printf 'guard=on\n' > "$F91"
+cat > "$TMP/crash_suite.sh" <<EOF
+#!/usr/bin/env bash
+if [ "\${1:-}" = "--deselect" ]; then
+  grep -q '^guard=off\$' "$F91" && { echo "runner crashed"; exit 3; }
+  echo "1 deselected"; exit 0
+fi
+grep -q '^guard=on\$' "$F91" || { echo "--- FAIL: hazard"; exit 1; }
+exit 0
+EOF
+chmod +x "$TMP/crash_suite.sh"
+bash "$MV" --file "$F91" --test-cmd "$TMP/crash_suite.sh" --mutate-sed 's/^guard=on$/guard=off/' \
+  --expect-fail-output "--- FAIL: hazard" --knockout-cmd "$TMP/crash_suite.sh --deselect hazard" \
+  --knockout-expect-output "1 deselected" >"$TMP/out91" 2>&1
+rc=$?
+[ "$rc" -eq 2 ] || { cat "$TMP/out91"; fail "knock-out crashed on the mutant: expected exit 2, got $rc"; }
+grep -q "KNOCK-OUT SCOPE UNPROVEN ON THE MUTANT" "$TMP/out91" || { cat "$TMP/out91"; fail "knock-out crashed on the mutant: expected the message"; }
+grep -q "mutation CAUGHT" "$TMP/out91" && { cat "$TMP/out91"; fail "knock-out crashed on the mutant: must not report CAUGHT"; }
+echo "test a knock-out that loses its count line on the mutant -> exit 2 PASS"
 
 echo "ALL PASS"

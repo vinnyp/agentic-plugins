@@ -249,15 +249,15 @@ func contains(xs []string, x string) bool {
 const mutationCheckRule = "\nMutation checks (required for any mutant you report): run each one through " +
 	"`mutation-verify.sh`, in an isolated copy or worktree (never a checkout another reviewer is using), with BOTH " +
 	"`--expect-fail-output '<the line only the hazard test prints when it fails>'` AND " +
-	"`--knockout-cmd '<the same test command with only the hazard test deselected>'` plus its required " +
-	"`--knockout-expect-output` count line. The knock-out is supported only for cargo, go and pytest, in these exact " +
-	"forms: cargo test -- --exact --skip <path::name> with '1 filtered out' (no other positional filter in the test " +
-	"command); go test -v -count=1 <one package> -skip '^TestName$' 2>&1 | awk '{ print } /^=== RUN/ { n++ } END " +
-	"{ print \"knock-out ran \" n \" tests\" }' with 'knock-out ran <N> tests' (N = the full -v run's === RUN lines " +
-	"minus the hazard test's own); pytest --deselect <full node id> with '1 deselected'. For any other runner (node " +
-	"included), record the mutant as UNPROVEN until a verified exact form exists. A control mutant (`--control-sed` or " +
-	"`--control-cmd` with `--control-expect-fail-output`) is recommended, not required; a control refusal stands; " +
-	"record every control you tried, including refused ones. Every CAUGHT you report quotes the verdict's matched: " +
-	"text and its knock-out and control clauses; a CAUGHT whose knock-out clause says it did not run, or whose " +
-	"deselect is not one of these exact forms, is UNPROVEN. If mutation-verify.sh is unavailable, the runner cannot " +
-	"deselect the single hazard test, or no hazard-specific text exists, record that mutant as UNPROVEN, never CAUGHT.\n"
+	"`--knockout-cmd '<the same test command with only the hazard test deselected>'` plus its required scope proof. " +
+	"The knock-out is supported only for cargo, go and pytest, in these exact forms: cargo test -q (no positional " +
+	"filter) + -- --exact --skip <path::name> with --knockout-expect-output '1 filtered out'; go test -v -count=1 " +
+	"<one package> + -skip '^TestName$' (or '^TestName$/^row$' for one table row) with --knockout-delta-line " +
+	"'=== RUN '; pytest -q <path> + --deselect <full node id> with --knockout-expect-output '1 deselected'. The tool " +
+	"sums every count line and counts the RUN lines itself. For any other runner (node included), record the mutant " +
+	"as UNPROVEN until a verified exact form exists. A control mutant (`--control-sed` or `--control-cmd` with " +
+	"`--control-expect-fail-output`) is recommended, not required; a control refusal stands; record every control " +
+	"you tried, including refused ones. Every CAUGHT you report quotes the verdict's matched: text and its knock-out " +
+	"and control clauses; a CAUGHT whose knock-out clause says it did not run, or whose deselect is not one of these " +
+	"exact forms, is UNPROVEN. If mutation-verify.sh is unavailable, the runner cannot deselect the single hazard " +
+	"test, or no hazard-specific text exists, record that mutant as UNPROVEN, never CAUGHT.\n"
