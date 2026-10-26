@@ -293,11 +293,16 @@ is indistinguishable from a genuine verdict. **Never add a git-state check to
 
 **A mutant proves a hazard only when the hazard assertion catches it.** A RED run caused by an
 incidental change (an error message, a needle, an unrelated assertion) is not a catch.
-`--expect-fail-output` exits 3 when the failing run lacks the hazard's failure text; record that
-as a surviving mutant, not a harness error to retry. Choose the text before the run, from a message
-only the hazard assertion prints when it fails (not the product's error text, a test name, or
-assertion source), and never change it after seeing a red result. The check is a presence check,
-so it cannot split one snapshot or diff assertion by cause. A mutant written to show that a fix
+`mutation-verify.sh` exit 3 (not the dispatch-worker rc 3 above) means the failing run lacked the
+hazard's failure text; record it as a surviving mutant, not a harness error to retry. Choose the
+text before the run, from the line the runner prints when the hazard assertion fails, including
+the runner's own framing (pytest's `AssertionError: <message>`, Go's `<file>_test.go:<line>:
+<message>`): a bare message literal is also in the test source, and pytest prints source on any
+failure. Never use runner-wide text (`FAILED`, `AssertionError`, `panicked`), the product's error
+text, or a test name. Never change the text after seeing a red result: if it was wrong, record the
+new text in the review log before a fresh run and keep the exit-3 run on record. Quote the
+verdict's `matched:` text in the disposition row. The check is a presence check, so it cannot split
+one snapshot or diff assertion by cause. A mutant written to show that a fix
 closes a hazard must reproduce that hazard's real trigger (the fail-open input itself, not a
 neighbouring input the old code already refused).
 

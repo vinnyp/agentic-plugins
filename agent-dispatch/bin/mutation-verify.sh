@@ -330,10 +330,20 @@ for _o in ${expect_fail_outputs[@]+"${expect_fail_outputs[@]}"}; do
 done
 baseline_rc=0
 baseline_out="$snap_dir/baseline-run.out"
+baseline_cmd="$test_cmd"
+if [ "$have_expect_fail" -eq 1 ] && [ "$have_cover_check" -eq 1 ]; then
+  # The mutated run adds -coverprofile, which prints its own lines (e.g.
+  # "coverage: N% of statements"). Run the baseline the same way so text
+  # every coverprofile run prints is refused below.
+  baseline_cmd="$(test_cmd_with_coverprofile "$test_cmd" "$snap_dir/baseline-cover.out")" || {
+    echo "mutation-verify.sh: --cover-check requires --test-cmd to contain a Go package test command (go test <package>)" >&2
+    exit 2
+  }
+fi
 if [ "$have_expect_fail" -eq 1 ]; then
   # Capture to a file, not through a pipe: a pipe would wait on any
   # background child that inherited the test's output.
-  ( eval "$test_cmd" ) >"$baseline_out" 2>&1 || baseline_rc=$?
+  ( eval "$baseline_cmd" ) >"$baseline_out" 2>&1 || baseline_rc=$?
   cat "$baseline_out"
 else
   ( eval "$test_cmd" ) || baseline_rc=$?
@@ -468,12 +478,16 @@ if [ "$test_rc" -ne 0 ]; then
   if [ "$have_expect_fail" -eq 1 ]; then
     for _o in "${expect_fail_outputs[@]}"; do
       if ! grep -F -q -- "$_o" "$mutated_out"; then
-        echo "mutation-verify.sh: RED FOR AN UNRELATED REASON — test-cmd exited $test_rc under mutation, but its output lacks the expected failure text: $_o" >&2
-        echo "mutation-verify.sh: the hazard assertion did not catch this mutant; treat it as a surviving mutant (a test gap), and do not change the expected text after seeing this output" >&2
+        echo "mutation-verify.sh: ${verdict_prefix}RED FOR AN UNRELATED REASON (test-cmd exited $test_rc under mutation$reachability_suffix) — expected failure text absent: $_o" >&2
+        echo "mutation-verify.sh: the hazard assertion is not shown to have caught this mutant; treat it as a surviving mutant (a test gap), and do not change the expected text after seeing this output" >&2
         exit 3
       fi
     done
-    echo "mutation-verify.sh: ${verdict_prefix}mutation CAUGHT (test-cmd exited $test_rc under mutation$reachability_suffix; expected failure text present in output) — the RED run printed every --expect-fail-output text" >&2
+    matched_list=""
+    for _o in "${expect_fail_outputs[@]}"; do
+      matched_list="$matched_list${matched_list:+, }'$_o'"
+    done
+    echo "mutation-verify.sh: ${verdict_prefix}mutation CAUGHT (test-cmd exited $test_rc under mutation$reachability_suffix; expected failure text present in output, matched: $matched_list) — the RED run printed every --expect-fail-output text" >&2
   else
     echo "mutation-verify.sh: ${verdict_prefix}mutation CAUGHT (test-cmd exited $test_rc under mutation$reachability_suffix; failure cause was NOT checked, pass --expect-fail-output) — test went RED" >&2
   fi

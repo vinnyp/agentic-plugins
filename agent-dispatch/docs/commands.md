@@ -403,18 +403,30 @@ actually landed, `--syntax-cmd` rejects a mutation that merely broke the parse, 
 `--expect-fail-output` checks the cause of a red run: the mutated run's combined output must
 contain each given text, or the run failed for an unrelated reason, such as a changed error
 message, and it exits `3` instead of reporting a catch. Treat exit `3` as a surviving mutant (a
-test gap), and fix the text before the run, never after seeing a red result. Use text that only
-the hazard assertion's own failure message prints: not the product's error text, a test name, or
-assertion source, which a failing run can echo for any cause. It is a presence check over all
-output, so it cannot separate causes inside one snapshot or diff assertion. Empty, whitespace-only
-or multi-line text is refused, and so is text the passing baseline already prints (exit `2`).
-With the flag, each run's stdout and stderr are captured to a file and printed together on
-stdout once the run finishes. Without the flag, a caught verdict says its cause was not checked.
+test gap), and fix the text before the run, never after seeing a red result; if the text itself
+was wrong, record the new text in the review log before a fresh run, and keep the exit-`3` run on
+record next to it.
+
+Choosing the text: it must include framing the test runner adds when the hazard assertion fails,
+because the bare message literal is also in the test source, and some runners print source on
+any failure. pytest's traceback prints the failing test function's source, including the message
+of a passing assertion above the failing one; use the rendered `AssertionError: <message>` line,
+not the bare message. Go prints `<file>_test.go:<line>: <message>` for `t.Fatal`; include the
+file and line. Otherwise build the message from runtime values. Do not use runner-wide failure
+text (`FAILED`, `AssertionError`, `panicked`, `not ok`), the product's error text, or a test name:
+a failing run prints them for any cause. It is a presence check over all output, so it cannot
+separate causes inside one snapshot or diff assertion. Empty, whitespace-only or multi-line text is
+refused, and so is text the passing baseline already prints (exit `2`; with `--cover-check`, the
+baseline runs with `-coverprofile` too). A caught verdict names the matched text, so the review
+log can quote it. With the flag, each run's stdout and stderr are captured to a file and printed
+together on stdout once the run finishes. Without the flag, a caught verdict says its cause was
+not checked.
 
 Exit codes: `0` the test caught the mutation, `1` false green, `2` harness error (bad args,
 failing baseline, no-op mutation, failed verification, failed restore, or an
 `--expect-fail-output` text that is empty, multi-line or printed by the passing baseline), `3` a
-red run without the `--expect-fail-output` text (the hazard assertion did not catch the mutant).
+red run without the `--expect-fail-output` text (the hazard assertion is not shown to have caught
+the mutant).
 
 ## `review-pin.sh`
 

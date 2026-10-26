@@ -297,8 +297,9 @@ git**. Exit codes: `0` mutation caught, `1` mutation not caught (false-green tes
 error (bad args, a no-op mutation, a failed restore, an invalid baseline, or an unusable
 `--expect-fail-output` text), `3` with `--expect-fail-output`, a RED run that failed for an
 unrelated reason (treat it as a surviving mutant). Use it for every mutation-verify pass,
-orchestrator or reviewer alike, and pass `--expect-fail-output` with the hazard assertion's failure
-text so a "caught" names its cause.
+orchestrator or reviewer alike, and pass `--expect-fail-output` with the hazard assertion's
+rendered failure line (see the skill's mutation rules for how to choose it), so a caught result
+shows that text was present and names it.
 
 **Concurrent mutation-DOING reviewers — isolate them, or make them read-only.** When you dispatch
 two or more reviewers that themselves RUN mutations (mutate a file → run the test → restore), do
