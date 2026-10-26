@@ -380,7 +380,7 @@ mutation-verify.sh --file <path> --test-cmd <cmd>
                    [--expect-anchor <str>]... [--expect-marker <str>]...
                    [--syntax-cmd <cmd>] [--cover-check <line-or-symbol>]
                    [--expect-fail-output <str>]...
-                   [--knockout-cmd <cmd> [--knockout-expect-output <str>]...]
+                   [--knockout-cmd <cmd> --knockout-expect-output <str>...]
                    [(--control-sed <expr> | --control-cmd <cmd>)
                     --control-expect-fail-output <str>...
                     [--control-anchor <str>]... [--control-marker <str>]...]
@@ -441,41 +441,59 @@ log can quote it. With the flag, each run's stdout and stderr are captured to a 
 together on stdout once the run finishes. Without the flag, a caught verdict says its cause was
 not checked.
 
-**Knock-out.** `--knockout-cmd` (only with `--expect-fail-output`) is the same test command with
-only the hazard test deselected. The deselect must match exactly one test; the default forms do
-not (pytest `--deselect` matches a node-id prefix, cargo `--skip` a substring, go `-skip` and node
-`--test-skip-pattern` an unanchored regex), and a sibling with a common name prefix is the very
-test the knock-out exists to keep. Use the exact forms:
-- cargo: `cargo test -- --exact --skip <path::name>` (prints `1 filtered out`);
-- go: `go test -skip '^TestName$'`, or `'^TestName$/^sub$'` for a subtest;
-- node: `node --test --test-skip-pattern='/^name$/'`;
-- pytest: `--deselect <full node id, including any [param] id>` (prints `1 deselected`).
+**Knock-out.** `--knockout-cmd` (only with `--expect-fail-output`, and always with
+`--knockout-expect-output`) is the same test command with only the hazard test deselected. The
+deselect must match exactly one test, and the default forms do not (pytest `--deselect` matches a
+node-id prefix, cargo `--skip` a substring, go `-skip` an unanchored regex): a sibling with a common
+name prefix is the very test the knock-out exists to keep. The knock-out is supported for three
+runners only, in these exact forms, each with its required count line:
 
-Where the runner prints a deselection count, pass that line as `--knockout-expect-output`; it must
-appear in the knock-out baseline, and the verdict quotes it (otherwise the verdict says the count
-was not shown). Refusals, all exit `2`: an empty command; one that does not start with
-`--test-cmd` (the same command plus a deselect) or is identical to it; one that is red on the
-unmutated copy (a bad flag or runner error would otherwise "confirm" by printing nothing); one whose
-baseline prints an expected text, prints nothing, or prints exactly what the full baseline printed
-(it changed nothing visible); a missing `--knockout-expect-output` line. It runs on the same mutated
-copy only when the main run would be CAUGHT (a RED run without the expected text stays exit `3`; a
-GREEN one stays exit `1`). If its output still contains any expected text, another test prints it,
-or the deselect missed the hazard test (unknown ids are often silently ignored): the run is refused
-(exit `2`, naming the text). Only when the text disappears does CAUGHT stand; the verdict names the
-command, its exit code on the mutant and the deselection count, and attributes the text to the
-test(s) that command deselects. Without a knock-out it says "knock-out NOT run".
+| Runner | `--test-cmd` | append to make `--knockout-cmd` | `--knockout-expect-output` |
+|---|---|---|---|
+| cargo | `cargo test` with no positional filter | `-- --exact --skip <path::name>` | `1 filtered out` |
+| go | `go test -v -count=1 <one package>` | `-skip '^TestName$' 2>&1 \| awk '{ print } /^=== RUN/ { n++ } END { print "knock-out ran " n " tests" }'` | `knock-out ran <N> tests` |
+| pytest | `pytest <path>` | `--deselect <full node id, including any [param] id>` | `1 deselected` |
+
+- cargo: `--exact` applies to any positional filter as well, and the count adds to tests the
+  command already filters out; so keep `--test-cmd` free of positional filters. A count line the
+  full run already prints is refused.
+- go: go prints no deselection count, so the awk pipe prints one (in the table, `\|` only escapes
+  the cell; type a plain `|`): `<N>` is the number of `=== RUN`
+  lines in the full `-v` run minus the hazard test's own (itself and its subtests). `-v` also makes
+  the output deterministic. `-skip` applies in every package the command runs, so name one package,
+  never `./...`. The script runs with `pipefail`, so the pipe keeps go's exit status.
+- pytest: `--deselect` is still a prefix match (`test_x[1]` also removes `test_x[10]`); the
+  `1 deselected` count line is what proves exactly one test went.
+
+For any other runner (node included) there is no verified exact form: record the mutant as
+UNPROVEN, never CAUGHT, until one exists.
+
+The count line is matched as a whole number: a digit right before or after the declared text fails
+the match (`1 filtered out` does not match `11 filtered out`). It must appear in the knock-out's
+unmutated run and must not appear in the full unmutated run. Refusals, all exit `2`: an empty
+command; one that does not start with `--test-cmd` (the same command plus a deselect) or is
+identical to it; a missing, empty or multi-line count line; one that is red on the unmutated copy (a
+bad flag or runner error would otherwise "confirm" by printing nothing); one whose baseline prints
+an expected text, prints nothing, or prints exactly what the full baseline printed (a weak check:
+runners that print timings never trip it); a count line missing from the knock-out baseline or
+already printed by the full run. It runs on the same mutated copy only when the main run would be
+CAUGHT (a RED run without the expected text stays exit `3`; a GREEN one stays exit `1`). If its
+output still contains any expected text, another test prints it, or the deselect missed the hazard
+test (unknown ids are often silently ignored): the run is refused (exit `2`, naming the text). Only
+when the text disappears does CAUGHT stand; the verdict names the command, its exit code on the
+mutant and the count line, and attributes the text to the test(s) that command deselects. Without a
+knock-out it says "knock-out NOT run".
 
 What it shows: with that command's tests removed and everything else the same, this mutant no
-longer produces the text. What it does not show: that exactly one test was removed (only the
-exact form and the count line show that); that the hazard test failed for the reason its message
-names; or anything beyond one run. A sibling that prints the text only sometimes (flaky), or only
-because of state the hazard test leaves behind (order dependence), can vanish without the hazard
-test having printed it. Use a deterministic order, and prefer a run-all command: a fail-fast run stops at
-the first failure, so the knock-out can stop before a later test that would print the text (the
-verdict shows the knock-out's exit code on the mutant for that reason); never combine fail-fast
-with a randomized order (`pytest -p randomly -x`, `go test -shuffle=on -failfast`). The tool cannot
-see which tests the command deselected; only the exact form and the count line show that. The review gate requires the
-knock-out; a CAUGHT whose deselect is not exact is UNPROVEN.
+longer produces the text, and the runner reported exactly one deselected test. What it does not
+show: that the hazard test failed for the reason its message names, or anything beyond one run. A
+sibling that prints the text only sometimes (flaky), or only because of state the hazard test
+leaves behind (order dependence), can vanish without the hazard test having printed it. Use a
+deterministic order, and prefer a run-all command: a fail-fast run stops at the first failure, so
+the knock-out can stop before a later test that would print the text (the verdict shows the
+knock-out's exit code on the mutant for that reason); never combine fail-fast with a randomized
+order (`pytest -p randomly -x`, `go test -shuffle=on -failfast`). The review gate requires the
+knock-out; a CAUGHT whose deselect is not one of the forms above is UNPROVEN.
 
 **Control mutant (recommended, not required).** `--control-sed` / `--control-cmd` (only with `--expect-fail-output`, and
 always with `--control-expect-fail-output`, the line the control's own test prints when it fails)

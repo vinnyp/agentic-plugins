@@ -605,10 +605,11 @@ func TestBriefBuildCarriesMutationCheckRule(t *testing.T) {
 		for _, want := range []string{"Mutation checks (required for any mutant you report)", "mutation-verify.sh",
 			"with BOTH", "--expect-fail-output", "AND `--knockout-cmd", "only the hazard test deselected",
 			"A control mutant", "is recommended, not required", "a control refusal stands", "isolated copy or worktree",
-			"The deselect must match exactly one test", "--exact --skip", "-skip '^TestName$'", "--knockout-expect-output",
-			"record every control you tried, including refused ones", "or whose deselect is not exact, is UNPROVEN",
+			"plus its required `--knockout-expect-output` count line", "supported only for cargo, go and pytest",
+			"cargo test -- --exact --skip <path::name> with '1 filtered out'", "go test -v -count=1 <one package> -skip '^TestName$'",
+			"pytest --deselect <full node id> with '1 deselected'", "For any other runner (node included), record the mutant as UNPROVEN",
+			"record every control you tried, including refused ones", "or whose deselect is not one of these exact forms, is UNPROVEN",
 			"quotes the verdict's matched: text and its knock-out and control clauses",
-			"a CAUGHT whose knock-out clause says it did not run, or whose deselect is not exact, is UNPROVEN",
 			"the runner cannot deselect the single hazard test", "If mutation-verify.sh is unavailable",
 			"UNPROVEN, never CAUGHT"} {
 			if !strings.Contains(out, want) {

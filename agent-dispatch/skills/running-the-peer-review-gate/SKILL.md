@@ -294,22 +294,25 @@ mutation-verify.sh --file <path> --test-cmd "<the gate>" --mutate-sed '<expr>' \
 **Every mutation check the gate relies on carries BOTH `--expect-fail-output` and
 `--knockout-cmd`** — orchestrator and reviewer alike, in an isolated copy or worktree, and every
 build-mode brief `review-gate` emits says so. The knock-out is the same test command with only
-the hazard test deselected, and the deselect must match exactly one test: `cargo test -- --exact
---skip <path::name>`, `go test -skip '^TestName$'` (`'^TestName$/^sub$'` for a subtest),
-`node --test-skip-pattern='/^name$/'`, pytest `--deselect <full node id>` (a prefix match). The
-default forms match by substring, regex or prefix and also remove a sibling with a common name
-prefix, which is the sibling the knock-out exists to keep. Where the runner prints a deselection
-count (pytest `1 deselected`, cargo `1 filtered out`), pass it as `--knockout-expect-output`. The
-knock-out must start with the test command, pass green on the unmutated copy, and print something
-different from the full run; on the same mutant the expected text must disappear, or another test
-prints it (or the deselect missed) and the mutant is refused (exit 2). The verdict names the
-command, its exit code on the mutant, and the deselection count or that none was shown. A
+the hazard test deselected, plus its required `--knockout-expect-output` count line, and it is
+supported for **cargo, go and pytest only**, in the exact forms of `docs/commands.md`: cargo
+`-- --exact --skip <path::name>` with `1 filtered out` (no other positional filter); go
+`go test -v -count=1 <one package> -skip '^TestName$'` piped through the documented awk count, with
+`knock-out ran <N> tests`; pytest `--deselect <full node id>` with `1 deselected`. **For any other
+runner (node included), record the mutant as UNPROVEN until a verified exact form exists.** The
+default deselect forms match by substring, regex or prefix and also remove a sibling with a common
+name prefix, the sibling the knock-out exists to keep; the count line, matched as a whole number
+and absent from the full run, is what proves exactly one test went. The knock-out must start with
+the test command, pass green on the unmutated copy, and print something different from the full
+run; on the same mutant the expected text must disappear, or another test prints it (or the
+deselect missed) and the mutant is refused (exit 2). The verdict names the command, its exit code
+on the mutant, and the count line. A
 control mutant (`--control-sed` / `--control-cmd` with `--control-expect-fail-output`, verified
 only with `--syntax-cmd`) is recommended, not required: it shows only that one other failure does
 not print the text; a control refusal stands; record every control you tried, including refused
 ones. **Every CAUGHT row quotes the verdict's `matched:` text and
 its knock-out and control clauses; a CAUGHT whose knock-out did not run, or whose deselect is not
-exact, is UNPROVEN.** **Fallback: when mutation-verify.sh is unavailable, the runner cannot deselect the
+one of the documented exact forms, is UNPROVEN.** **Fallback: when mutation-verify.sh is unavailable, the runner cannot deselect the
 single hazard test, or no hazard-specific text exists, record the mutant as UNPROVEN, never
 CAUGHT** — in the disposition row, with the reason. `docs/commands.md` covers both checks.
 
