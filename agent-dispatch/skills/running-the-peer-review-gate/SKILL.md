@@ -152,7 +152,8 @@ authored both, say so **in the brief** — it is a slot, not an orchestrator's i
 
 > Author-wrote-both overlap: the same pass authored the fix in `<file>` AND the tests in
 > `<test-file>`. Treat those tests as UNPROVEN. Re-run the specific mutant that should catch a
-> regression in `<file>` (via `mutation-verify.sh`) before accepting any of them as evidence.
+> regression in `<file>` (via `mutation-verify.sh --expect-fail-output '<hazard failure text>'`)
+> before accepting any of them as evidence.
 
 A fix that ships with **no** new tests does not satisfy this rule by default — "nobody tested it" is
 not "an independent party tested it". Call it out in the brief the same way.
@@ -292,10 +293,13 @@ is indistinguishable from a genuine verdict. **Never add a git-state check to
 
 **A mutant proves a hazard only when the hazard assertion catches it.** A RED run caused by an
 incidental change (an error message, a needle, an unrelated assertion) is not a catch.
-`--expect-fail-output` exits 2 when the failing run lacks the hazard's failure text, and it refuses
-text the passing baseline already prints. A mutant written to show that a fix closes a hazard must
-reproduce that hazard's real trigger (the fail-open input itself, not a neighbouring input the old
-code already refused).
+`--expect-fail-output` exits 3 when the failing run lacks the hazard's failure text; record that
+as a surviving mutant, not a harness error to retry. Choose the text before the run, from a message
+only the hazard assertion prints when it fails (not the product's error text, a test name, or
+assertion source), and never change it after seeing a red result. The check is a presence check,
+so it cannot split one snapshot or diff assertion by cause. A mutant written to show that a fix
+closes a hazard must reproduce that hazard's real trigger (the fail-open input itself, not a
+neighbouring input the old code already refused).
 
 **A surviving mutant is a test gap by default.** Dismissing one needs a written reason it cannot
 matter (no input reaches the code, or the mutant is behaviorally equivalent), recorded in the review

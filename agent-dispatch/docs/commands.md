@@ -401,14 +401,20 @@ actually landed, `--syntax-cmd` rejects a mutation that merely broke the parse, 
 `MUTANT-UNREACHABLE`, not a survivor).
 
 `--expect-fail-output` checks the cause of a red run: the mutated run's combined output must
-contain each given text (the hazard assertion's failure message), or the run failed for an
-unrelated reason, such as a changed error message, and it exits `2` instead of reporting a catch.
-Text that the passing baseline already prints is refused, because it cannot identify a failure.
-Without the flag, a caught verdict says its cause was not verified.
+contain each given text, or the run failed for an unrelated reason, such as a changed error
+message, and it exits `3` instead of reporting a catch. Treat exit `3` as a surviving mutant (a
+test gap), and fix the text before the run, never after seeing a red result. Use text that only
+the hazard assertion's own failure message prints: not the product's error text, a test name, or
+assertion source, which a failing run can echo for any cause. It is a presence check over all
+output, so it cannot separate causes inside one snapshot or diff assertion. Empty, whitespace-only
+or multi-line text is refused, and so is text the passing baseline already prints (exit `2`).
+With the flag, each run's stdout and stderr are captured to a file and printed together on
+stdout once the run finishes. Without the flag, a caught verdict says its cause was not checked.
 
 Exit codes: `0` the test caught the mutation, `1` false green, `2` harness error (bad args,
-failing baseline, no-op mutation, failed verification, failed restore, or a red run without the
-`--expect-fail-output` text).
+failing baseline, no-op mutation, failed verification, failed restore, or an
+`--expect-fail-output` text that is empty, multi-line or printed by the passing baseline), `3` a
+red run without the `--expect-fail-output` text (the hazard assertion did not catch the mutant).
 
 ## `review-pin.sh`
 

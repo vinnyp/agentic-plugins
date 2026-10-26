@@ -753,40 +753,39 @@ cat > "$TMP/cause_test.sh" <<EOF
 #!/usr/bin/env bash
 echo "running cause checks"
 grep -q '^banner=hello\$' "$F29" || { echo "INCIDENTAL: banner text changed"; exit 1; }
-grep -q '^guard=on\$' "$F29" || { echo "HAZARD: guard disabled"; exit 1; }
+grep -q '^guard=on\$' "$F29" || { echo "--- FAIL: guard[on].x disabled"; exit 1; }
 exit 0
 EOF
 chmod +x "$TMP/cause_test.sh"
 
-# 29: RED by the hazard assertion, needle present -> CAUGHT, cause verified.
+# 29: RED by the hazard assertion, needle present -> CAUGHT, text present.
 bash "$MV" --file "$F29" --test-cmd "$TMP/cause_test.sh" --mutate-sed 's/^guard=on$/guard=off/' \
-  --expect-fail-output "HAZARD: guard disabled" >"$TMP/out29" 2>&1
+  --expect-fail-output "--- FAIL: guard[on].x disabled" >"$TMP/out29" 2>&1
 rc=$?
 [ "$rc" -eq 0 ] || { cat "$TMP/out29"; fail "--expect-fail-output present: expected exit 0, got $rc"; }
-grep -q "failure cause verified by --expect-fail-output" "$TMP/out29" || { cat "$TMP/out29"; fail "--expect-fail-output present: verdict must say the cause was verified"; }
+grep -q "expected failure text present in output" "$TMP/out29" || { cat "$TMP/out29"; fail "--expect-fail-output present: verdict must say the expected text was present"; }
 [ "$(cat "$F29")" = "$before29" ] || fail "--expect-fail-output present: file not byte-identical after restore"
 echo "test --expect-fail-output: hazard RED -> exit 0 PASS"
 
-# 30: RED for an unrelated reason (the incidental message) -> exit 2, not CAUGHT.
+# 30: RED for an unrelated reason (the incidental message) -> exit 3, not CAUGHT.
 bash "$MV" --file "$F29" --test-cmd "$TMP/cause_test.sh" --mutate-sed 's/^banner=hello$/banner=bye/' \
-  --expect-fail-output "HAZARD: guard disabled" >"$TMP/out30" 2>&1
+  --expect-fail-output "--- FAIL: guard[on].x disabled" >"$TMP/out30" 2>&1
 rc=$?
-[ "$rc" -eq 2 ] || { cat "$TMP/out30"; fail "--expect-fail-output unrelated RED: expected exit 2, got $rc"; }
+[ "$rc" -eq 3 ] || { cat "$TMP/out30"; fail "--expect-fail-output unrelated RED: expected exit 3, got $rc"; }
 grep -q "RED FOR AN UNRELATED REASON" "$TMP/out30" || { cat "$TMP/out30"; fail "--expect-fail-output unrelated RED: expected the unrelated-reason message"; }
 grep -q "mutation CAUGHT" "$TMP/out30" && { cat "$TMP/out30"; fail "--expect-fail-output unrelated RED: must not report CAUGHT"; }
 [ "$(cat "$F29")" = "$before29" ] || fail "--expect-fail-output unrelated RED: file not byte-identical after restore"
-echo "test --expect-fail-output: unrelated RED -> exit 2 PASS"
+echo "test --expect-fail-output: unrelated RED -> exit 3 PASS"
 
-# 31: a repeated flag requires every needle; the second is absent -> exit 2.
+# 31: a repeated flag requires every needle; the second is absent -> exit 3.
 bash "$MV" --file "$F29" --test-cmd "$TMP/cause_test.sh" --mutate-sed 's/^guard=on$/guard=off/' \
-  --expect-fail-output "HAZARD: guard disabled" --expect-fail-output "never printed" >"$TMP/out31" 2>&1
+  --expect-fail-output "--- FAIL: guard[on].x disabled" --expect-fail-output "never printed" >"$TMP/out31" 2>&1
 rc=$?
-[ "$rc" -eq 2 ] || { cat "$TMP/out31"; fail "repeated --expect-fail-output: expected exit 2, got $rc"; }
+[ "$rc" -eq 3 ] || { cat "$TMP/out31"; fail "repeated --expect-fail-output: expected exit 3, got $rc"; }
 grep -q "never printed" "$TMP/out31" || { cat "$TMP/out31"; fail "repeated --expect-fail-output: message must name the missing text"; }
 echo "test repeated --expect-fail-output requires every text PASS"
 
-# 32: text the passing baseline already prints cannot identify a failure -> exit 2
-# before any mutation is applied.
+# 32: text the passing baseline already prints cannot identify a failure -> exit 2.
 bash "$MV" --file "$F29" --test-cmd "$TMP/cause_test.sh" --mutate-sed 's/^guard=on$/guard=off/' \
   --expect-fail-output "running cause checks" >"$TMP/out32" 2>&1
 rc=$?
@@ -798,13 +797,13 @@ echo "test --expect-fail-output text in baseline -> exit 2 PASS"
 # 33: GREEN under mutation stays exit 1 with the flag; without the flag a
 # CAUGHT verdict says its cause was not verified.
 bash "$MV" --file "$F29" --test-cmd "$TMP/cause_test.sh" --mutate-cmd "printf 'extra=1\\n' >> '$F29'" \
-  --expect-fail-output "HAZARD: guard disabled" >"$TMP/out33a" 2>&1
+  --expect-fail-output "--- FAIL: guard[on].x disabled" >"$TMP/out33a" 2>&1
 rc=$?
 [ "$rc" -eq 1 ] || { cat "$TMP/out33a"; fail "--expect-fail-output GREEN: expected exit 1, got $rc"; }
 bash "$MV" --file "$F29" --test-cmd "$TMP/cause_test.sh" --mutate-sed 's/^banner=hello$/banner=bye/' >"$TMP/out33b" 2>&1
 rc=$?
 [ "$rc" -eq 0 ] || { cat "$TMP/out33b"; fail "no --expect-fail-output: expected exit 0, got $rc"; }
-grep -q "failure cause was NOT verified" "$TMP/out33b" || { cat "$TMP/out33b"; fail "no --expect-fail-output: CAUGHT must say the cause was not verified"; }
+grep -q "failure cause was NOT checked" "$TMP/out33b" || { cat "$TMP/out33b"; fail "no --expect-fail-output: CAUGHT must say the cause was not checked"; }
 [ "$(cat "$F29")" = "$before29" ] || fail "--expect-fail-output GREEN/no-flag: file not byte-identical"
 echo "test --expect-fail-output GREEN -> exit 1, unflagged CAUGHT names unverified cause PASS"
 
@@ -819,5 +818,105 @@ rc=$?
 grep -q "baseline exited 3" "$TMP/out34" || { cat "$TMP/out34"; fail "--expect-fail-output failing baseline: expected the baseline message with its exit code"; }
 [ "$(cat "$F29")" = "$before29" ] || fail "--expect-fail-output failing baseline: file not byte-identical"
 echo "test --expect-fail-output failing baseline -> exit 2 PASS"
+
+# 35/36: an empty, whitespace-only or multi-line --expect-fail-output is refused at
+# parse time (exit 2): grep -F would match every line, or OR the lines together.
+for bad in "" "   " "$(printf 'HAZARD: guard disabled\nINCIDENTAL')"; do
+  bash "$MV" --file "$F29" --test-cmd "$TMP/cause_test.sh" --mutate-sed 's/^banner=hello$/banner=bye/' \
+    --expect-fail-output "$bad" >"$TMP/out35" 2>&1
+  rc=$?
+  [ "$rc" -eq 2 ] || { cat "$TMP/out35"; fail "degenerate --expect-fail-output: expected exit 2, got $rc"; }
+  grep -q "must not be empty\|must be a single line" "$TMP/out35" || { cat "$TMP/out35"; fail "degenerate --expect-fail-output: expected a validation message"; }
+  grep -q "mutation CAUGHT" "$TMP/out35" && { cat "$TMP/out35"; fail "degenerate --expect-fail-output: must not report CAUGHT"; }
+  [ "$(cat "$F29")" = "$before29" ] || fail "degenerate --expect-fail-output: file not byte-identical"
+done
+echo "test empty/whitespace/multi-line --expect-fail-output -> exit 2 PASS"
+
+# 37: the hazard message printed only on STDERR still counts (the mutated run's
+# stderr is captured).
+cat > "$TMP/cause_stderr_test.sh" <<EOF
+#!/usr/bin/env bash
+grep -q '^guard=on\$' "$F29" || { echo "HAZARD-ERR: guard disabled" >&2; exit 1; }
+exit 0
+EOF
+chmod +x "$TMP/cause_stderr_test.sh"
+bash "$MV" --file "$F29" --test-cmd "$TMP/cause_stderr_test.sh" --mutate-sed 's/^guard=on$/guard=off/' \
+  --expect-fail-output "HAZARD-ERR: guard disabled" >"$TMP/out37" 2>&1
+rc=$?
+[ "$rc" -eq 0 ] || { cat "$TMP/out37"; fail "stderr hazard text: expected exit 0, got $rc"; }
+echo "test --expect-fail-output reads the RED run's stderr PASS"
+
+# 38: text the passing baseline prints only on STDERR is refused too (the
+# baseline's stderr is captured).
+cat > "$TMP/cause_stderr_baseline.sh" <<EOF
+#!/usr/bin/env bash
+echo "--- progress: checking guard [1]." >&2
+grep -q '^guard=on\$' "$F29" || exit 1
+exit 0
+EOF
+chmod +x "$TMP/cause_stderr_baseline.sh"
+bash "$MV" --file "$F29" --test-cmd "$TMP/cause_stderr_baseline.sh" --mutate-sed 's/^guard=on$/guard=off/' \
+  --expect-fail-output "--- progress: checking guard [1]." >"$TMP/out38" 2>&1
+rc=$?
+[ "$rc" -eq 2 ] || { cat "$TMP/out38"; fail "stderr baseline text: expected exit 2, got $rc"; }
+grep -q "already appears in the passing baseline output" "$TMP/out38" || { cat "$TMP/out38"; fail "stderr baseline text: expected the baseline message"; }
+echo "test --expect-fail-output refuses text the baseline prints on stderr PASS"
+
+# 39: a test that leaves a background child holding its output must not make
+# the run wait for that child.
+cat > "$TMP/cause_bg_test.sh" <<EOF
+#!/usr/bin/env bash
+sleep 30 &
+echo \$! >> "$TMP/bg39.pids"
+grep -q '^guard=on\$' "$F29" || { echo "HAZARD: guard disabled"; exit 1; }
+exit 0
+EOF
+chmod +x "$TMP/cause_bg_test.sh"
+start39=$(date +%s)
+bash "$MV" --file "$F29" --test-cmd "$TMP/cause_bg_test.sh" --mutate-sed 's/^guard=on$/guard=off/' \
+  --expect-fail-output "HAZARD: guard disabled" >"$TMP/out39" 2>&1
+rc=$?
+elapsed39=$(( $(date +%s) - start39 ))
+while read -r bgpid; do
+  case "$bgpid" in ''|*[!0-9]*) continue ;; esac
+  kill "$bgpid" 2>/dev/null
+done < "$TMP/bg39.pids"
+[ "$rc" -eq 0 ] || { cat "$TMP/out39"; fail "background child: expected exit 0, got $rc"; }
+[ "$elapsed39" -lt 20 ] || fail "background child: run waited ${elapsed39}s for a background child"
+echo "test --expect-fail-output does not wait for a background child PASS"
+
+# 40: --expect-fail-output with --cover-check keeps both checks: the mutated
+# run must still carry -coverprofile (reachability verified), and a reachable
+# survivor stays NOT caught, never MUTANT-UNREACHABLE.
+GO40="$TMP/go_cause_cover"; mkdir -p "$GO40"
+printf 'module example.com/mutationverify/causecover\n\ngo 1.21\n' > "$GO40/go.mod"
+printf 'package causecover\n\nfunc Value() int {\n\treturn 1\n}\n' > "$GO40/target.go"
+cat > "$GO40/caught_test.go" <<'EOF'
+package causecover
+
+import "testing"
+
+func TestValueIsOne(t *testing.T) {
+	if Value() != 1 {
+		t.Fatal("hazard: Value is not one")
+	}
+}
+EOF
+before40="$(cat "$GO40/target.go")"
+bash "$MV" --file "$GO40/target.go" --test-cmd "cd '$GO40' && go test ." --cover-check Value \
+  --mutate-sed 's/return 1/return 2/' --expect-fail-output "hazard: Value is not one" >"$TMP/out40a" 2>&1
+rc=$?
+[ "$rc" -eq 0 ] || { cat "$TMP/out40a"; fail "--cover-check + --expect-fail-output caught: expected exit 0, got $rc"; }
+grep -q "reachability verified by --cover-check Value" "$TMP/out40a" || { cat "$TMP/out40a"; fail "--cover-check + --expect-fail-output caught: expected reachability verified"; }
+grep -q "expected failure text present in output" "$TMP/out40a" || { cat "$TMP/out40a"; fail "--cover-check + --expect-fail-output caught: expected the text-present verdict"; }
+printf 'package causecover\n\nimport "testing"\n\nfunc TestValueExecutes(t *testing.T) {\n\t_ = Value()\n}\n' > "$GO40/caught_test.go"
+bash "$MV" --file "$GO40/target.go" --test-cmd "cd '$GO40' && go test ." --cover-check Value \
+  --mutate-sed 's/return 1/return 2/' --expect-fail-output "hazard: Value is not one" >"$TMP/out40b" 2>&1
+rc=$?
+[ "$rc" -eq 1 ] || { cat "$TMP/out40b"; fail "--cover-check + --expect-fail-output survivor: expected exit 1, got $rc"; }
+grep -q "mutation NOT caught" "$TMP/out40b" || { cat "$TMP/out40b"; fail "--cover-check + --expect-fail-output survivor: expected not-caught verdict"; }
+grep -q "MUTANT-UNREACHABLE" "$TMP/out40b" && { cat "$TMP/out40b"; fail "--cover-check + --expect-fail-output survivor: must not report unreachable"; }
+[ "$(cat "$GO40/target.go")" = "$before40" ] || fail "--cover-check + --expect-fail-output: file not byte-identical after restore"
+echo "test --cover-check with --expect-fail-output keeps both verdicts PASS"
 
 echo "ALL PASS"

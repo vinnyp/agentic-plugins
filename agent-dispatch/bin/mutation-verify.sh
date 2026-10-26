@@ -20,12 +20,16 @@
 # Second, after mutation, to produce the actual verdict below.
 #
 # Verdict:
-#   test-cmd exits NON-ZERO under the mutation (went RED) -> the test
-#     genuinely isolates the fix -> exit 0.
+#   test-cmd exits NON-ZERO under the mutation (went RED) -> exit 0
+#     (CAUGHT). With --expect-fail-output, only when the RED run's output
+#     holds every expected text; otherwise -> exit 3 (RED for an unrelated
+#     reason: the hazard assertion did not catch this mutant).
 #   test-cmd exits ZERO under the mutation (stayed GREEN)  -> false-green
 #     test -> exit 1.
 #   Bad args, missing file, a failing baseline, a no-op mutation, failed
-#     applied-verification, or a failed restore -> exit 2.
+#     applied-verification, a failed restore, or an --expect-fail-output text
+#     that is empty, multi-line, or already printed by the passing baseline
+#     -> exit 2.
 #
 # Applied-verification flags:
 #   --expect-anchor <str> checks the original snapshot contains <str> before
@@ -37,12 +41,16 @@
 #
 # Failure-cause flag (issue foundry#259):
 #   --expect-fail-output <str> (repeatable) requires the mutated run's combined
-#     stdout+stderr to contain <str> (e.g. the hazard assertion's failure
-#     message) when it goes RED. A RED run without it failed for an unrelated
-#     reason (an incidental message or needle change), so the script exits 2
-#     instead of reporting CAUGHT. Text the passing baseline already prints is
-#     refused (exit 2): it cannot identify the failure. Without the flag, a
-#     CAUGHT verdict says its cause was not verified.
+#     stdout+stderr to contain <str> (text only the hazard assertion's own
+#     failure message prints) when it goes RED. A RED run without it failed
+#     for an unrelated reason (an incidental message or needle change), so the
+#     script exits 3 instead of reporting CAUGHT. Empty or multi-line text,
+#     and text the passing baseline already prints, are refused (exit 2): they
+#     cannot identify the failure. This is a presence check over all output:
+#     it cannot separate causes inside one snapshot/diff assertion that echoes
+#     expected content. With the flag, each run's output is captured to a file
+#     and printed on stdout (stderr merged) after the run finishes. Without the
+#     flag, a CAUGHT verdict says its cause was not checked.
 #
 # --file is resolved to an ABSOLUTE path before snapshotting, and both
 # --test-cmd and --mutate-cmd run inside a subshell, so a --test-cmd that
@@ -71,7 +79,8 @@ Exactly one of --mutate-sed or --mutate-cmd is required.
 --cover-check runs the mutated Go test command with -coverprofile and
 asserts the target line/function in --file had non-zero coverage.
 --expect-fail-output may be repeated; a RED mutated run whose output lacks
-any of them failed for an unrelated reason and exits 2, not CAUGHT.
+any of them failed for an unrelated reason and exits 3, not CAUGHT. Empty or
+multi-line text, or text the passing baseline prints, exits 2.
 Missing anchors, missing markers, and failing syntax commands exit 2.
 EOF
 }
@@ -109,7 +118,18 @@ while [ $# -gt 0 ]; do
     --expect-marker) require_value "--expect-marker" "$#"; expect_markers+=("$2"); shift 2 ;;
     --syntax-cmd) require_value "--syntax-cmd" "$#"; syntax_cmd="$2"; have_syntax=1; shift 2 ;;
     --cover-check) require_value "--cover-check" "$#"; cover_check="$2"; have_cover_check=1; shift 2 ;;
-    --expect-fail-output) require_value "--expect-fail-output" "$#"; expect_fail_outputs+=("$2"); shift 2 ;;
+    --expect-fail-output)
+      require_value "--expect-fail-output" "$#"
+      # An empty value matches every line under grep -F, and a newline splits
+      # the value into OR-ed patterns; either would report a false cause.
+      case "$2" in
+        *[![:space:]]*) : ;;
+        *) echo "mutation-verify.sh: --expect-fail-output must not be empty or whitespace-only" >&2; exit 2 ;;
+      esac
+      case "$2" in
+        *$'\n'*|*$'\r'*) echo "mutation-verify.sh: --expect-fail-output must be a single line" >&2; exit 2 ;;
+      esac
+      expect_fail_outputs+=("$2"); shift 2 ;;
     -h|--help) usage; exit 2 ;;
     *) echo "mutation-verify.sh: unknown argument: $1" >&2; usage; exit 2 ;;
   esac
@@ -311,8 +331,10 @@ done
 baseline_rc=0
 baseline_out="$snap_dir/baseline-run.out"
 if [ "$have_expect_fail" -eq 1 ]; then
-  ( eval "$test_cmd" ) 2>&1 | tee "$baseline_out"
-  baseline_rc=${PIPESTATUS[0]}
+  # Capture to a file, not through a pipe: a pipe would wait on any
+  # background child that inherited the test's output.
+  ( eval "$test_cmd" ) >"$baseline_out" 2>&1 || baseline_rc=$?
+  cat "$baseline_out"
 else
   ( eval "$test_cmd" ) || baseline_rc=$?
 fi
@@ -408,10 +430,8 @@ if [ "$have_cover_check" -eq 1 ]; then
 fi
 mutated_out="$snap_dir/mutated-run.out"
 if [ "$have_expect_fail" -eq 1 ]; then
-  # Keep streaming the output while capturing it; PIPESTATUS[0] is the
-  # test's own status (tee's is ignored).
-  ( eval "$mutated_cmd" ) 2>&1 | tee "$mutated_out"
-  test_rc=${PIPESTATUS[0]}
+  ( eval "$mutated_cmd" ) >"$mutated_out" 2>&1 || test_rc=$?
+  cat "$mutated_out"
 else
   ( eval "$mutated_cmd" ) || test_rc=$?
 fi
@@ -449,15 +469,14 @@ if [ "$test_rc" -ne 0 ]; then
     for _o in "${expect_fail_outputs[@]}"; do
       if ! grep -F -q -- "$_o" "$mutated_out"; then
         echo "mutation-verify.sh: RED FOR AN UNRELATED REASON — test-cmd exited $test_rc under mutation, but its output lacks the expected failure text: $_o" >&2
-        echo "mutation-verify.sh: the hazard assertion did not catch this mutant; refusing to report CAUGHT" >&2
-        exit 2
+        echo "mutation-verify.sh: the hazard assertion did not catch this mutant; treat it as a surviving mutant (a test gap), and do not change the expected text after seeing this output" >&2
+        exit 3
       fi
     done
-    cause_suffix="; failure cause verified by --expect-fail-output"
+    echo "mutation-verify.sh: ${verdict_prefix}mutation CAUGHT (test-cmd exited $test_rc under mutation$reachability_suffix; expected failure text present in output) — the RED run printed every --expect-fail-output text" >&2
   else
-    cause_suffix="; failure cause was NOT verified (pass --expect-fail-output)"
+    echo "mutation-verify.sh: ${verdict_prefix}mutation CAUGHT (test-cmd exited $test_rc under mutation$reachability_suffix; failure cause was NOT checked, pass --expect-fail-output) — test went RED" >&2
   fi
-  echo "mutation-verify.sh: ${verdict_prefix}mutation CAUGHT (test-cmd exited $test_rc under mutation$reachability_suffix$cause_suffix) — test genuinely isolates the fix" >&2
   exit 0
 else
   echo "mutation-verify.sh: ${verdict_prefix}mutation NOT caught (test-cmd exited 0 under mutation$reachability_suffix) — false-green test" >&2
