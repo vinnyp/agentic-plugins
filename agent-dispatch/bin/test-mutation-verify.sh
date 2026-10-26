@@ -765,6 +765,7 @@ rc=$?
 [ "$rc" -eq 0 ] || { cat "$TMP/out29"; fail "--expect-fail-output present: expected exit 0, got $rc"; }
 grep -q "expected failure text present in output" "$TMP/out29" || { cat "$TMP/out29"; fail "--expect-fail-output present: verdict must say the expected text was present"; }
 grep -q "control NOT run, so the text's specificity is unchecked" "$TMP/out29" || { cat "$TMP/out29"; fail "--expect-fail-output without a control: verdict must say the control did not run"; }
+grep -q "knock-out NOT run, so the text is not attributed to the hazard test" "$TMP/out29" || { cat "$TMP/out29"; fail "--expect-fail-output without a knock-out: verdict must say the knock-out did not run"; }
 grep -F -q "matched: '--- FAIL: guard[on].x disabled'" "$TMP/out29" || { cat "$TMP/out29"; fail "--expect-fail-output present: verdict must name the matched text"; }
 [ "$(grep -c "running cause checks" "$TMP/out29")" -eq 2 ] || { cat "$TMP/out29"; fail "--expect-fail-output present: both captured runs (baseline and mutated) must be printed back"; }
 [ "$(cat "$F29")" = "$before29" ] || fail "--expect-fail-output present: file not byte-identical after restore"
@@ -1022,13 +1023,13 @@ grep -q "mutation CAUGHT" "$TMP/out44" && { cat "$TMP/out44"; fail "non-specific
 echo "test non-specific expected text (control prints it) -> exit 2 PASS"
 
 # 45: valid control (RED without the text), main mutant carries the text -> CAUGHT.
-control_run "$TMP/out45" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "$HZ" \
+control_run "$TMP/out45" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "$HZ" --syntax-cmd "grep -q . '$F29'" \
   --control-sed 's/^banner=hello$/banner=bye/' --control-anchor 'banner=hello' --control-marker 'banner=bye' \
   --control-expect-fail-output "INCIDENTAL: banner text changed"
 rc=$?
 [ "$rc" -eq 0 ] || { cat "$TMP/out45"; fail "valid control, main caught: expected exit 0, got $rc"; }
 grep -q "mutation CAUGHT (.*; control went RED for its own reason without the expected text)" "$TMP/out45" || { cat "$TMP/out45"; fail "valid control, main caught: CAUGHT line must record the control"; }
-grep -q "UNVERIFIED CONTROL" "$TMP/out45" && { cat "$TMP/out45"; fail "valid control, main caught: a control with a marker is verified"; }
+grep -q "UNVERIFIED CONTROL" "$TMP/out45" && { cat "$TMP/out45"; fail "valid control, main caught: a control with a --syntax-cmd is verified"; }
 [ "$(grep -c "INCIDENTAL: banner text changed" "$TMP/out45")" -eq 1 ] || { cat "$TMP/out45"; fail "valid control, main caught: the control run's output must be printed back"; }
 [ "$(cat "$F29")" = "$before29" ] || fail "valid control, main caught: file not byte-identical after restore"
 echo "test valid control with a caught main mutant -> exit 0 PASS"
@@ -1223,5 +1224,167 @@ grep -qi "restore failed" "$TMP/out63" || { cat "$TMP/out63"; fail "failed contr
 grep -q "mutation CAUGHT" "$TMP/out63" && { cat "$TMP/out63"; fail "failed control restore: must not report CAUGHT"; }
 [ "$(cat "$F29")" = "$before29" ] || fail "failed control restore: could not put the original back"
 echo "test failed restore after the control -> exit 2 PASS"
+
+# 64: deferred round-6 rows. Control-text validation mirrors tests 35/36.
+for bad in "" "   " "$(printf 'INCIDENTAL: banner text changed\nTraceback')" "$(printf 'a\rb')"; do
+  control_run "$TMP/out64" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "$HZ" \
+    --control-sed 's/^banner=hello$/banner=bye/' --control-expect-fail-output "$bad"
+  rc=$?
+  [ "$rc" -eq 2 ] || { cat "$TMP/out64"; fail "degenerate --control-expect-fail-output: expected exit 2, got $rc"; }
+  grep -q "must not be empty\|must be a single line" "$TMP/out64" || { cat "$TMP/out64"; fail "degenerate --control-expect-fail-output: expected a validation message"; }
+  grep -q "mutation CAUGHT" "$TMP/out64" && { cat "$TMP/out64"; fail "degenerate --control-expect-fail-output: must not report CAUGHT"; }
+done
+echo "test empty/whitespace/multi-line --control-expect-fail-output -> exit 2 PASS"
+
+# 65: two control texts: the control's red run must print EVERY one (absent
+# text listed first, then second), and NONE may appear in the main run.
+for order in first second; do
+  if [ "$order" = first ]; then
+    set -- --control-expect-fail-output "never printed by the control" --control-expect-fail-output "INCIDENTAL: banner text changed"
+  else
+    set -- --control-expect-fail-output "INCIDENTAL: banner text changed" --control-expect-fail-output "never printed by the control"
+  fi
+  control_run "$TMP/out65" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "$HZ" \
+    --control-sed 's/^banner=hello$/banner=bye/' "$@"
+  rc=$?
+  [ "$rc" -eq 2 ] || { cat "$TMP/out65"; fail "two control texts, absent $order: expected exit 2, got $rc"; }
+  grep -q "CONTROL RED FOR AN UNRELATED REASON .*never printed by the control" "$TMP/out65" || { cat "$TMP/out65"; fail "two control texts, absent $order: expected the message naming the absent text"; }
+done
+set --
+control_run "$TMP/out65c" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "$HZ" \
+  --control-sed 's/^banner=hello$/banner=bye/' --control-expect-fail-output "INCIDENTAL: banner text changed" \
+  --control-expect-fail-output "--- FAIL: guard"
+rc=$?
+[ "$rc" -eq 2 ] || { cat "$TMP/out65c"; fail "second control text in the main run: expected exit 2, got $rc"; }
+grep -F -q "CONTROL TEXT IN THE MAIN RUN — the main mutated run already printed the control's failure text, so the two failures cannot be told apart: --- FAIL: guard" "$TMP/out65c" || { cat "$TMP/out65c"; fail "second control text in the main run: expected the message naming it"; }
+[ "$(cat "$F29")" = "$before29" ] || fail "two control texts: file not byte-identical after restore"
+echo "test several control texts (all required, none in the main run) PASS"
+
+# 66: a control is verified only by --syntax-cmd: a marker alone stays flagged,
+# a syntax check alone clears the flag; and duplicate --control-cmd is refused.
+control_run "$TMP/out66a" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "$HZ" \
+  --control-sed 's/^banner=hello$/banner=bye/' --control-marker 'banner=bye' --control-expect-fail-output "INCIDENTAL: banner text changed"
+rc=$?
+[ "$rc" -eq 0 ] || { cat "$TMP/out66a"; fail "marker-only control: expected exit 0, got $rc"; }
+grep -q "\[UNVERIFIED CONTROL\]" "$TMP/out66a" || { cat "$TMP/out66a"; fail "marker-only control: a marker proves the edit landed, not that the file is valid; must stay flagged"; }
+control_run "$TMP/out66b" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "$HZ" --syntax-cmd "grep -q . '$F29'" \
+  --control-sed 's/^banner=hello$/banner=bye/' --control-expect-fail-output "INCIDENTAL: banner text changed"
+rc=$?
+[ "$rc" -eq 0 ] || { cat "$TMP/out66b"; fail "syntax-only control: expected exit 0, got $rc"; }
+grep -q "UNVERIFIED CONTROL" "$TMP/out66b" && { cat "$TMP/out66b"; fail "syntax-only control: a --syntax-cmd verifies the control"; }
+control_run "$TMP/out66c" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "$HZ" \
+  --control-cmd "true" --control-cmd "true" --control-expect-fail-output "INCIDENTAL: banner text changed"
+rc=$?
+[ "$rc" -eq 2 ] || { cat "$TMP/out66c"; fail "duplicate --control-cmd: expected exit 2, got $rc"; }
+grep -q "given twice" "$TMP/out66c" || { cat "$TMP/out66c"; fail "duplicate --control-cmd: expected the message"; }
+grep -F -q -- "--control-expect-fail-output text already appears in the passing baseline output" "$TMP/out59b" || { cat "$TMP/out59b"; fail "baseline-printed control text: the refusal must name --control-expect-fail-output"; }
+echo "test control verification by --syntax-cmd and duplicate --control-cmd PASS"
+
+# ---------------------------------------------------------------------------
+# Tests 67-74 (foundry#259): the knock-out. A suite whose two tests share one
+# helper message; --knockout-cmd re-runs the same mutant with only the hazard
+# test deselected, and the expected text must disappear.
+# ---------------------------------------------------------------------------
+F67="$TMP/ko_target.txt"
+printf 'guard=on\nbanner=hello\n' > "$F67"
+before67="$(cat "$F67")"
+cat > "$TMP/ko_suite.sh" <<EOF
+#!/usr/bin/env bash
+deselect=""
+while [ \$# -gt 0 ]; do
+  case "\$1" in
+    --deselect) deselect="\$2"; shift 2 ;;
+    *) echo "unknown flag \$1"; exit 2 ;;
+  esac
+done
+check() { [ "\$1" = "\$2" ] || { echo "AssertionError: value mismatch"; return 1; }; }
+rc=0
+if [ "\$deselect" != hazard ]; then
+  check "\$(sed -n 's/^guard=//p' "$F67")" on || { echo "--- FAIL: hazard"; rc=1; }
+fi
+if [ "\$deselect" != sibling ]; then
+  check "\$(sed -n 's/^banner=//p' "$F67")" hello || { echo "--- FAIL: sibling"; rc=1; }
+fi
+[ -n "\$deselect" ] && echo "knock-out pass: \$deselect deselected"
+exit \$rc
+EOF
+chmod +x "$TMP/ko_suite.sh"
+KO="$TMP/ko_suite.sh --deselect hazard"
+ko_run() {
+  _out="$1"; shift
+  bash "$MV" --file "$F67" --test-cmd "$TMP/ko_suite.sh" "$@" >"$_out" 2>&1
+}
+
+# 67: the text disappears without the hazard test -> CAUGHT, attributed.
+ko_run "$TMP/out67" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "AssertionError: value mismatch" --knockout-cmd "$KO"
+rc=$?
+[ "$rc" -eq 0 ] || { cat "$TMP/out67"; fail "knock-out removes the text: expected exit 0, got $rc"; }
+grep -q "mutation CAUGHT (.*; knock-out removed the expected text (attributed to the deselected hazard test)" "$TMP/out67" || { cat "$TMP/out67"; fail "knock-out removes the text: CAUGHT line must record the knock-out"; }
+[ "$(grep -c "knock-out pass: hazard deselected" "$TMP/out67")" -eq 2 ] || { cat "$TMP/out67"; fail "knock-out removes the text: the baseline and mutated knock-out runs must both run and print"; }
+[ "$(cat "$F67")" = "$before67" ] || fail "knock-out removes the text: file not byte-identical after restore"
+echo "test knock-out removes the text -> CAUGHT PASS"
+
+# 68: the reviewer's shared-helper case: the hazard test PASSES, a sibling
+# fails through the same helper message -> the text persists -> exit 2.
+ko_run "$TMP/out68" --mutate-sed 's/^banner=hello$/banner=bye/' --expect-fail-output "AssertionError: value mismatch" --knockout-cmd "$KO"
+rc=$?
+[ "$rc" -eq 2 ] || { cat "$TMP/out68"; fail "text persists under the knock-out: expected exit 2, got $rc"; }
+grep -F -q "TEXT PERSISTS WITHOUT THE HAZARD TEST — the knock-out run (hazard test deselected) on the same mutant also printed: AssertionError: value mismatch" "$TMP/out68" || { cat "$TMP/out68"; fail "text persists under the knock-out: expected the message naming the text"; }
+grep -q "mutation CAUGHT" "$TMP/out68" && { cat "$TMP/out68"; fail "text persists under the knock-out: must not report CAUGHT"; }
+[ "$(cat "$F67")" = "$before67" ] || fail "text persists under the knock-out: file not byte-identical after restore"
+echo "test text persisting without the hazard test -> exit 2 PASS"
+
+# 69: a broken knock-out (red on the unmutated copy) is refused before mutating.
+ko_run "$TMP/out69" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "AssertionError: value mismatch" --knockout-cmd "$TMP/ko_suite.sh --bogus-flag"
+rc=$?
+[ "$rc" -eq 2 ] || { cat "$TMP/out69"; fail "broken knock-out: expected exit 2, got $rc"; }
+grep -q "KNOCK-OUT BROKEN" "$TMP/out69" || { cat "$TMP/out69"; fail "broken knock-out: expected the message"; }
+grep -q -- "--- FAIL: hazard" "$TMP/out69" && { cat "$TMP/out69"; fail "broken knock-out: must refuse before mutating"; }
+echo "test broken knock-out (red baseline) -> exit 2 PASS"
+
+# 70: a knock-out whose passing baseline already prints the text is refused.
+ko_run "$TMP/out70" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "AssertionError: value mismatch" \
+  --knockout-cmd "echo 'AssertionError: value mismatch'; $KO"
+rc=$?
+[ "$rc" -eq 2 ] || { cat "$TMP/out70"; fail "knock-out baseline prints the text: expected exit 2, got $rc"; }
+grep -q "already appears in the passing knock-out baseline output" "$TMP/out70" || { cat "$TMP/out70"; fail "knock-out baseline prints the text: expected the message"; }
+echo "test knock-out baseline printing the text -> exit 2 PASS"
+
+# 71: a knock-out identical to --test-cmd is refused.
+ko_run "$TMP/out71" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "AssertionError: value mismatch" --knockout-cmd "$TMP/ko_suite.sh"
+rc=$?
+[ "$rc" -eq 2 ] || { cat "$TMP/out71"; fail "knock-out identical to test-cmd: expected exit 2, got $rc"; }
+grep -q "identical to --test-cmd" "$TMP/out71" || { cat "$TMP/out71"; fail "knock-out identical to test-cmd: expected the message"; }
+echo "test knock-out identical to --test-cmd -> exit 2 PASS"
+
+# 72: a knock-out without --expect-fail-output is refused before anything runs;
+# and a repeated --knockout-cmd is refused.
+ko_run "$TMP/out72" --mutate-sed 's/^guard=on$/guard=off/' --knockout-cmd "$KO"
+rc=$?
+[ "$rc" -eq 2 ] || { cat "$TMP/out72"; fail "knock-out without --expect-fail-output: expected exit 2, got $rc"; }
+grep -q "requires --expect-fail-output" "$TMP/out72" || { cat "$TMP/out72"; fail "knock-out without --expect-fail-output: expected the message"; }
+grep -q "knock-out pass" "$TMP/out72" && { cat "$TMP/out72"; fail "knock-out without --expect-fail-output: must refuse before running"; }
+ko_run "$TMP/out72b" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "AssertionError: value mismatch" --knockout-cmd "$KO" --knockout-cmd "$KO"
+rc=$?
+[ "$rc" -eq 2 ] || { cat "$TMP/out72b"; fail "duplicate --knockout-cmd: expected exit 2, got $rc"; }
+grep -q "given twice" "$TMP/out72b" || { cat "$TMP/out72b"; fail "duplicate --knockout-cmd: expected the message"; }
+echo "test knock-out argument errors -> exit 2 PASS"
+
+# 73: ordering: a RED main run without the expected text stays exit 3; the
+# knock-out does not run on the mutant.
+ko_run "$TMP/out73" --mutate-sed 's/^banner=hello$/banner=bye/' --expect-fail-output "--- FAIL: hazard" --knockout-cmd "$KO"
+rc=$?
+[ "$rc" -eq 3 ] || { cat "$TMP/out73"; fail "knock-out ordering: expected exit 3, got $rc"; }
+grep -q "RED FOR AN UNRELATED REASON (.*; knock-out not run)" "$TMP/out73" || { cat "$TMP/out73"; fail "knock-out ordering: exit-3 line must say the knock-out did not run"; }
+[ "$(grep -c "knock-out pass: hazard deselected" "$TMP/out73")" -eq 1 ] || { cat "$TMP/out73"; fail "knock-out ordering: the knock-out must run only on the baseline"; }
+echo "test a RED main run without the text stays exit 3 with a knock-out PASS"
+
+# 74: a GREEN main run stays exit 1 and the knock-out does not run on the mutant.
+ko_run "$TMP/out74" --mutate-cmd "printf 'extra=1\n' >> '$F67'" --expect-fail-output "AssertionError: value mismatch" --knockout-cmd "$KO"
+rc=$?
+[ "$rc" -eq 1 ] || { cat "$TMP/out74"; fail "green main with knock-out: expected exit 1, got $rc"; }
+[ "$(grep -c "knock-out pass: hazard deselected" "$TMP/out74")" -eq 1 ] || { cat "$TMP/out74"; fail "green main with knock-out: the knock-out must run only on the baseline"; }
+[ "$(cat "$F67")" = "$before67" ] || fail "knock-out tests: file not byte-identical after restore"
+echo "test a GREEN main run skips the knock-out -> exit 1 PASS"
 
 echo "ALL PASS"
