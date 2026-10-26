@@ -56,10 +56,11 @@
 #   --knockout-cmd <cmd> is the same test command with only the hazard test
 #     deselected, by an exact form (supported: cargo -- --exact --skip, go -v
 #     -skip '^Name$', pytest -q --deselect <full node id>; docs/commands.md),
-#     with a required scope proof: --knockout-expect-output '<n><rest>' (every
+#     and nothing else after --test-cmd (any other suffix exits 2), with a
+#     required scope proof: --knockout-expect-output '1<rest>' (every
 #     "<n><rest>" in the output is summed; the full run must sum to 0 and the
-#     knock-out to <n>) and/or --knockout-delta-line <prefix> (exactly one
-#     fewer line starting with <prefix> than the full run). The knock-out must
+#     knock-out to 1) and/or --knockout-delta-line '=== RUN ' (exactly one
+#     fewer such line than the full run). The knock-out must
 #     start with --test-cmd and differ from it, pass green on the unmutated
 #     copy, print something different from the full baseline, not print any
 #     expected text there, and pass its scope proof, also on the mutant
@@ -117,9 +118,11 @@ asserts the target line/function in --file had non-zero coverage. With
 any of them failed for an unrelated reason and exits 3, not CAUGHT. Empty or
 multi-line text, or text the passing baseline prints, exits 2.
 --knockout-cmd (requires --expect-fail-output and a scope proof:
---knockout-expect-output '<n><rest>', summed over the output, and/or
---knockout-delta-line <prefix>, one fewer line than the full run) is --test-cmd
-plus an exact deselect of only the hazard test; it must pass on the unmutated
+--knockout-expect-output '1<rest>', summed over the output, and/or
+--knockout-delta-line '=== RUN ', one fewer line than the full run) is
+--test-cmd plus exactly one documented deselect of only the hazard test (cargo
+-- --exact --skip <path::name>, go -skip '^Name$' or '^Name$/^row$', pytest
+--deselect <path::id>; anything else exits 2); it must pass on the unmutated
 copy and print something different from the full baseline; on the mutant the
 expected text must disappear and the scope proof must still hold, or the run
 exits 2.
@@ -235,6 +238,11 @@ while [ $# -gt 0 ]; do
       case "${2#"${2%%[!0-9]*}"}" in
         ''|[0-9]*) echo "mutation-verify.sh: --knockout-expect-output needs text after its number (e.g. '1 deselected'): $2" >&2; exit 2 ;;
       esac
+      # The knock-out removes exactly the hazard test, so the count is 1.
+      if [ "$((10#${2%%[!0-9]*}))" -ne 1 ]; then
+        echo "mutation-verify.sh: --knockout-expect-output must declare a count of exactly 1 (the knock-out removes only the hazard test): $2" >&2
+        exit 2
+      fi
       knockout_expect_outputs+=("$2"); shift 2 ;;
     --knockout-delta-line)
       require_value "--knockout-delta-line" "$#"
@@ -246,6 +254,11 @@ while [ $# -gt 0 ]; do
       case "$2" in
         *$'\n'*|*$'\r'*) echo "mutation-verify.sh: --knockout-delta-line must be a single line" >&2; exit 2 ;;
       esac
+      # Only the documented go -v prefix: one line per test and subtest.
+      if [ "$2" != "=== RUN " ]; then
+        echo "mutation-verify.sh: --knockout-delta-line must be exactly '=== RUN ' (the go -v per-test line): $2" >&2
+        exit 2
+      fi
       knockout_delta_line="$2"; have_knockout_delta=1; shift 2 ;;
     --control-anchor) require_value "--control-anchor" "$#"; control_anchors+=("$2"); shift 2 ;;
     --control-marker) require_value "--control-marker" "$#"; control_markers+=("$2"); shift 2 ;;
@@ -338,6 +351,19 @@ if [ "$have_knockout" -eq 1 ]; then
   [ "$have_knockout_delta" -eq 1 ] && _have_count=1
   if [ "$_have_count" -eq 0 ]; then
     echo "mutation-verify.sh: --knockout-cmd requires --knockout-expect-output (the runner's deselection count, e.g. '1 deselected') or --knockout-delta-line (a per-test line prefix, e.g. '=== RUN '): the only proof of the knock-out's scope" >&2
+    exit 2
+  fi
+  # The part after --test-cmd must be one documented exact deselect (and
+  # nothing else, such as --lib or --ignore before it):
+  #   cargo:  -- --exact --skip <path::name>
+  #   go:     -skip '^Name$'  or  -skip '^Name$/^row$'
+  #   pytest: --deselect <path::id>
+  _ko_suffix="${knockout_cmd#"$test_cmd"}"
+  _re_cargo='^ -- --exact --skip [A-Za-z_][A-Za-z0-9_]*(::[A-Za-z_][A-Za-z0-9_]*)*$'
+  _re_go="^ -skip '\\^[A-Za-z0-9_]+\\\$(/\\^[A-Za-z0-9_]+\\\$)?'\$"
+  _re_pytest="^ --deselect ('[^' ;&|<>\$\`()]+::[^' ;&|<>\$\`()]+'|[^' ;&|<>\$\`()]+::[^' ;&|<>\$\`()]+)\$"
+  if [[ ! "$_ko_suffix" =~ $_re_cargo ]] && [[ ! "$_ko_suffix" =~ $_re_go ]] && [[ ! "$_ko_suffix" =~ $_re_pytest ]]; then
+    echo "mutation-verify.sh: --knockout-cmd must be --test-cmd plus exactly one documented deselect (cargo: -- --exact --skip <path::name>; go: -skip '^Name\$' or '^Name\$/^row\$'; pytest: --deselect <path::id>), with nothing else; got the suffix:$_ko_suffix" >&2
     exit 2
   fi
 else

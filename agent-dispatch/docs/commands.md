@@ -455,13 +455,22 @@ only, in these exact forms:
 | go | `go test -v -count=1 <one package>` | `-skip '^TestName$'`, or `-skip '^TestName$/^row$'` for one table row | `--knockout-delta-line '=== RUN '` |
 | pytest | `pytest -q <path>` | `--deselect <full node id, including any [param] id>` | `--knockout-expect-output '1 deselected'` |
 
+The tool enforces these shapes: the part of `--knockout-cmd` after `--test-cmd` must be exactly
+one of `-- --exact --skip <path::name>`, `-skip '^Name$'` / `-skip '^Name$/^row$'` (names of
+letters, digits and `_`), or `--deselect <path::id>` (optionally single-quoted, no spaces or shell
+metacharacters), with nothing before or after it. An extra runner flag (`--lib`, `--ignore`), an
+unanchored or unquoted go pattern, a cargo `--skip` without `--exact`, or anything chained after the
+deselect is refused (exit `2`) before any test runs.
+
 How the tool checks the scope proof, on the unmutated copy and again on the mutant:
-- `--knockout-expect-output '<n><rest>'` must start with its number. The tool sums the number in
+- `--knockout-expect-output '<n><rest>'` must start with its number, and `<n>` must be `1` (the
+  knock-out removes only the hazard test; `0` would prove nothing). The tool sums the number in
   front of every `<rest>` in the output (the whole digit run, so `11 filtered out` counts as 11, and
   a digit right after `<rest>` disqualifies it). The full run's sum must be 0; the knock-out's sum
   must equal `<n>`. So two cargo test binaries that each print `1 filtered out` (a lib test and an
   integration test sharing a path, or two workspace members) sum to 2 and are refused.
-- `--knockout-delta-line '<prefix>'` counts lines starting with `<prefix>`: the knock-out must
+- `--knockout-delta-line` must be exactly `'=== RUN '` (the go `-v` per-test line); it counts
+  lines starting with that prefix: the knock-out must
   have exactly one fewer than the full run. For go `-v`, every test and subtest prints one
   `=== RUN ` line, so a name defined in both the internal and the external test package, a whole
   table skipped by its parent name, or a skip that reaches several packages all remove more than
@@ -479,8 +488,9 @@ For any other runner (node included) there is no verified exact form: record the
 UNPROVEN, never CAUGHT, until one exists.
 
 Refusals, all exit `2`: an empty command; one that does not start with `--test-cmd` (the same
-command plus a deselect) or is identical to it; no scope proof; a count line that does not start
-with its number, or is empty or multi-line; one that is red on the unmutated copy (a bad flag or
+command plus a deselect) or is identical to it; a suffix that is not one documented deselect; no
+scope proof; a count line that does not start with its number, declares a count other than `1`, or
+is empty or multi-line; a delta line other than `'=== RUN '`; one that is red on the unmutated copy (a bad flag or
 runner error would otherwise "confirm" by printing nothing); one whose baseline prints an expected
 text, prints nothing, or prints exactly what the full baseline printed (a weak check: runners that
 print timings never trip it); a scope proof that fails on the unmutated copy or on the mutant (a
