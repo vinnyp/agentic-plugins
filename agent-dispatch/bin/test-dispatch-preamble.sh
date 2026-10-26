@@ -36,15 +36,18 @@ else bad "the preamble block is empty or its markers moved"; fi
 C_CLEANUP="$(printf '%s\n' "$CLAUSES" | grep -o 'Never touch a file you did not create' | head -1)"
 C_DIRTY="$(printf '%s\n'   "$CLAUSES" | grep -o 'already dirty and are not yours'      | head -1)"
 C_GATE="$(printf '%s\n'    "$CLAUSES" | grep -o 'You do not run the long gate'         | head -1)"
+# The whole load-generator sentence, not a prefix: a copy that keeps the opening
+# words but drops `timeout -k` or "gone before you return" must turn this red.
+C_LOAD="Bound any load generator you start (\`yes\`, \`node -e 'for(;;);'\`, a spin loop) with \`timeout -k\`, and make sure it is gone before you return: a burner left behind holds a shared machine's cores for hours."
 C_SCRATCH="Scratch repos fail closed"
-for c in "$C_CLEANUP" "$C_DIRTY" "$C_GATE" "$(printf '%s\n' "$CLAUSES" | grep -o "$C_SCRATCH" | head -1)"; do
+for c in "$C_CLEANUP" "$C_DIRTY" "$C_GATE" "$(printf '%s\n' "$CLAUSES" | grep -oF -- "$C_LOAD" | head -1)" "$(printf '%s\n' "$CLAUSES" | grep -o "$C_SCRATCH" | head -1)"; do
   if [ -z "$c" ]; then
     bad "a required clause is missing from the shipped block — the rest of this suite cannot discriminate"
     echo "pass=$pass fail=$fail"
     exit 1
   fi
 done
-ok "all four clauses are present in the shipped block"
+ok "all four clauses, and clause 3's full load-generator sentence, are present in the shipped block"
 
 # Nothing private may ship in a public repository. The vendored block came from
 # a private source, so this asserts the copy carries none of that source's
@@ -89,6 +92,7 @@ if [ "$dispatch_rc" -eq 0 ] && [ -s "$CAPTURE" ]; then
   grep -qF -- "$C_CLEANUP" "$CAPTURE" || miss="$miss cleanup"
   grep -qF -- "$C_DIRTY"   "$CAPTURE" || miss="$miss dirty-paths"
   grep -qF -- "$C_GATE"    "$CAPTURE" || miss="$miss long-gate"
+  grep -qF -- "$C_LOAD"    "$CAPTURE" || miss="$miss load-generator"
   grep -qF -- "$C_SCRATCH" "$CAPTURE" || miss="$miss scratch"
   if [ -z "$miss" ]; then ok "the generated brief carries every clause"
   else bad "the generated brief is missing:$miss"; fi
@@ -161,6 +165,7 @@ miss=""
 grep -qF -- "$C_CLEANUP" "$SKILL" || miss="$miss cleanup"
 grep -qF -- "$C_DIRTY"   "$SKILL" || miss="$miss dirty-paths"
 grep -qF -- "$C_GATE"    "$SKILL" || miss="$miss long-gate"
+grep -qF -- "$C_LOAD"    "$SKILL" || miss="$miss load-generator"
 grep -qF -- "$C_SCRATCH" "$SKILL" || miss="$miss scratch"
 if [ -z "$miss" ]; then ok "running-the-peer-review-gate carries every clause"
 else bad "running-the-peer-review-gate is missing:$miss"; fi
