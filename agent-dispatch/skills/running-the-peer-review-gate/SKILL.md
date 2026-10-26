@@ -298,12 +298,14 @@ hazard's failure text; record it as a surviving mutant, not a harness error to r
 text before the run, from the line the runner prints when the hazard assertion fails, including
 the runner's own framing (pytest's `AssertionError: <message>`, Go's `<file>_test.go:<line>:
 <message>`): a bare message literal is also in the test source, and pytest prints source on any
-failure. The text must be unique to the hazard assertion: its message appears once in the test
-sources (`grep -rF`), or the text carries that assertion's location. Never use a message several
-assertions share, runner-wide text (`FAILED`, `AssertionError`, `panicked`), the product's error
-text, or a test name. After an exit 3, replace the text only when that output shows the hazard
-assertion itself failing at its own location (the rendering was wrong); cite that location and
-both runs. Otherwise the exit 3 stands as a survivor. See `docs/commands.md` for per-runner
+failure. The text must be unique at run time: only the hazard test can make it appear. A literal
+found once by `grep -rF` is not enough inside a shared helper, a loop or a parametrized test; then
+name the hazard test or its call site (pytest's `FAILED <file>::<test> - <message>` summary line;
+Go helpers must call `t.Helper()`). Never use a message several assertions share, runner-wide
+text alone (`FAILED`, `AssertionError`, `panicked`), the product's error text, or a test name
+alone. After an exit 3, replace the text only when that output shows the hazard test itself
+failing at its own call site, not a shared helper's line (the rendering was wrong); cite that
+location and both runs. Otherwise the exit 3 stands as a survivor. See `docs/commands.md` for per-runner
 renderings. Quote the verdict's `matched:` text in the disposition row. The check is a presence check, so it cannot split
 one snapshot or diff assertion by cause. A mutant written to show that a fix
 closes a hazard must reproduce that hazard's real trigger (the fail-open input itself, not a
