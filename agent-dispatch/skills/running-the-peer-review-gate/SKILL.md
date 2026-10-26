@@ -280,13 +280,28 @@ commit state and safe on a dirty tree. Do not eyeball a diff; use its applied-ve
 mutation-verify.sh --file <path> --test-cmd "<the gate>" --mutate-sed '<expr>' \
   --expect-anchor '<text that must be present BEFORE mutation>' \
   --expect-marker '<text that must be present AFTER mutation>' \
-  --syntax-cmd "bash -n <path>"     # or: python -m py_compile <path>, go build ./...
+  --syntax-cmd "bash -n <path>" \
+  --expect-fail-output '<text only the hazard assertion prints when it fails>'
+# --syntax-cmd alternatives: python -m py_compile <path>, go build ./...
 ```
 
 `--syntax-cmd` is the leg that matters most and the one hand-rolling always omits: a malformed
 mutant produces a syntax error, the test "fails" (or "passes") for the wrong reason, and the result
 is indistinguishable from a genuine verdict. **Never add a git-state check to
 `mutation-verify.sh`** — being git-free is precisely what makes it safe on uncommitted work.
+
+**A mutant proves a hazard only when the hazard assertion catches it.** A RED run caused by an
+incidental change (an error message, a needle, an unrelated assertion) is not a catch.
+`--expect-fail-output` exits 2 when the failing run lacks the hazard's failure text, and it refuses
+text the passing baseline already prints. A mutant written to show that a fix closes a hazard must
+reproduce that hazard's real trigger (the fail-open input itself, not a neighbouring input the old
+code already refused).
+
+**A surviving mutant is a test gap by default.** Dismissing one needs a written reason it cannot
+matter (no input reaches the code, or the mutant is behaviorally equivalent), recorded in the review
+log's disposition table. "Defense in depth" or "possibly harmless" is not a reason: prove it, or add
+the test. (foundry#259: a survivor waved off as defense in depth was load-bearing at five call
+sites, and a "caught" snapshot mutant had failed only because a message changed.)
 
 ### 7. Keep the review log (a working record — verify where it landed with `review-log-status`)
 

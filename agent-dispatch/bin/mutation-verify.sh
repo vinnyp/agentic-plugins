@@ -35,6 +35,15 @@
 #   --syntax-cmd <cmd> runs after mutation and before the test; non-zero exits
 #     abort with exit 2. Example: --syntax-cmd "python -m py_compile path/to/file.py"
 #
+# Failure-cause flag (issue foundry#259):
+#   --expect-fail-output <str> (repeatable) requires the mutated run's combined
+#     stdout+stderr to contain <str> (e.g. the hazard assertion's failure
+#     message) when it goes RED. A RED run without it failed for an unrelated
+#     reason (an incidental message or needle change), so the script exits 2
+#     instead of reporting CAUGHT. Text the passing baseline already prints is
+#     refused (exit 2): it cannot identify the failure. Without the flag, a
+#     CAUGHT verdict says its cause was not verified.
+#
 # --file is resolved to an ABSOLUTE path before snapshotting, and both
 # --test-cmd and --mutate-cmd run inside a subshell, so a --test-cmd that
 # does `cd` elsewhere cannot cause a restore to write to the wrong path.
@@ -47,6 +56,7 @@ usage() {
 usage: mutation-verify.sh --file <path> --test-cmd <shell-command> \
          [--expect-anchor <str>] [--expect-marker <str>] \
          [--syntax-cmd <shell-command>] [--cover-check <line-or-symbol>] \
+         [--expect-fail-output <str>] \
          (--mutate-sed <sed-expr> | --mutate-cmd <shell-command>)
 
 Exactly one of --mutate-sed or --mutate-cmd is required.
@@ -60,6 +70,8 @@ Exactly one of --mutate-sed or --mutate-cmd is required.
   --syntax-cmd "python -m py_compile path/to/file.py"
 --cover-check runs the mutated Go test command with -coverprofile and
 asserts the target line/function in --file had non-zero coverage.
+--expect-fail-output may be repeated; a RED mutated run whose output lacks
+any of them failed for an unrelated reason and exits 2, not CAUGHT.
 Missing anchors, missing markers, and failing syntax commands exit 2.
 EOF
 }
@@ -76,6 +88,7 @@ syntax_cmd=""
 have_syntax=0
 cover_check=""
 have_cover_check=0
+expect_fail_outputs=()
 
 require_value() {
   # $1 = flag name, $2 = remaining arg count after the flag
@@ -96,6 +109,7 @@ while [ $# -gt 0 ]; do
     --expect-marker) require_value "--expect-marker" "$#"; expect_markers+=("$2"); shift 2 ;;
     --syntax-cmd) require_value "--syntax-cmd" "$#"; syntax_cmd="$2"; have_syntax=1; shift 2 ;;
     --cover-check) require_value "--cover-check" "$#"; cover_check="$2"; have_cover_check=1; shift 2 ;;
+    --expect-fail-output) require_value "--expect-fail-output" "$#"; expect_fail_outputs+=("$2"); shift 2 ;;
     -h|--help) usage; exit 2 ;;
     *) echo "mutation-verify.sh: unknown argument: $1" >&2; usage; exit 2 ;;
   esac
@@ -289,12 +303,32 @@ cover_check_executed() {
 # already-broken suite) and reporting "mutation CAUGHT" later would be a
 # false green inside the false-green detector. Run in a subshell so a `cd`
 # inside test_cmd cannot leak into this script's cwd.
+have_expect_fail=0
+for _o in ${expect_fail_outputs[@]+"${expect_fail_outputs[@]}"}; do
+  have_expect_fail=1
+  break
+done
 baseline_rc=0
-( eval "$test_cmd" ) || baseline_rc=$?
+baseline_out="$snap_dir/baseline-run.out"
+if [ "$have_expect_fail" -eq 1 ]; then
+  ( eval "$test_cmd" ) 2>&1 | tee "$baseline_out"
+  baseline_rc=${PIPESTATUS[0]}
+else
+  ( eval "$test_cmd" ) || baseline_rc=$?
+fi
 if [ "$baseline_rc" -ne 0 ]; then
   echo "mutation-verify.sh: test-cmd does not pass before mutation (baseline exited $baseline_rc) — the instrument is invalid" >&2
   exit 2
 fi
+# An --expect-fail-output string that a PASSING run already prints (a test
+# name echoed on success, say) cannot tell the hazard failure from any other.
+for _o in ${expect_fail_outputs[@]+"${expect_fail_outputs[@]}"}; do
+  if grep -F -q -- "$_o" "$baseline_out"; then
+    echo "mutation-verify.sh: --expect-fail-output text already appears in the passing baseline output, so it cannot identify the failure: $_o" >&2
+    echo "mutation-verify.sh: use text only the failing hazard assertion prints" >&2
+    exit 2
+  fi
+done
 
 # Applied-verification, part 1 (applied-verification): assert every expected anchor is
 # present in the ORIGINAL file before mutating. The post-hoc cmp check below only
@@ -364,15 +398,22 @@ fi
 # as the baseline run above — this is the path BLOCKER 1 exploited.
 test_rc=0
 cover_profile=""
+mutated_cmd="$test_cmd"
 if [ "$have_cover_check" -eq 1 ]; then
   cover_profile="$snap_dir/cover.out"
-  cover_test_cmd="$(test_cmd_with_coverprofile "$test_cmd" "$cover_profile")" || {
+  mutated_cmd="$(test_cmd_with_coverprofile "$test_cmd" "$cover_profile")" || {
     echo "mutation-verify.sh: --cover-check requires --test-cmd to contain a Go package test command (go test <package>)" >&2
     exit 2
   }
-  ( eval "$cover_test_cmd" ) || test_rc=$?
+fi
+mutated_out="$snap_dir/mutated-run.out"
+if [ "$have_expect_fail" -eq 1 ]; then
+  # Keep streaming the output while capturing it; PIPESTATUS[0] is the
+  # test's own status (tee's is ignored).
+  ( eval "$mutated_cmd" ) 2>&1 | tee "$mutated_out"
+  test_rc=${PIPESTATUS[0]}
 else
-  ( eval "$test_cmd" ) || test_rc=$?
+  ( eval "$mutated_cmd" ) || test_rc=$?
 fi
 
 # Restore now (also covered by the EXIT trap, but do it here so we can
@@ -404,7 +445,19 @@ else
 fi
 
 if [ "$test_rc" -ne 0 ]; then
-  echo "mutation-verify.sh: ${verdict_prefix}mutation CAUGHT (test-cmd exited $test_rc under mutation$reachability_suffix) — test genuinely isolates the fix" >&2
+  if [ "$have_expect_fail" -eq 1 ]; then
+    for _o in "${expect_fail_outputs[@]}"; do
+      if ! grep -F -q -- "$_o" "$mutated_out"; then
+        echo "mutation-verify.sh: RED FOR AN UNRELATED REASON — test-cmd exited $test_rc under mutation, but its output lacks the expected failure text: $_o" >&2
+        echo "mutation-verify.sh: the hazard assertion did not catch this mutant; refusing to report CAUGHT" >&2
+        exit 2
+      fi
+    done
+    cause_suffix="; failure cause verified by --expect-fail-output"
+  else
+    cause_suffix="; failure cause was NOT verified (pass --expect-fail-output)"
+  fi
+  echo "mutation-verify.sh: ${verdict_prefix}mutation CAUGHT (test-cmd exited $test_rc under mutation$reachability_suffix$cause_suffix) — test genuinely isolates the fix" >&2
   exit 0
 else
   echo "mutation-verify.sh: ${verdict_prefix}mutation NOT caught (test-cmd exited 0 under mutation$reachability_suffix) — false-green test" >&2

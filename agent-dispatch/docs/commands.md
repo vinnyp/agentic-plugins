@@ -379,6 +379,7 @@ mutation-verify.sh --file <path> --test-cmd <cmd>
                    (--mutate-sed <expr> | --mutate-cmd <cmd>)
                    [--expect-anchor <str>]... [--expect-marker <str>]...
                    [--syntax-cmd <cmd>] [--cover-check <line-or-symbol>]
+                   [--expect-fail-output <str>]...
 ```
 
 Proves a test is load-bearing: break the code, confirm the test goes red, restore. It snapshots
@@ -399,8 +400,15 @@ actually landed, `--syntax-cmd` rejects a mutation that merely broke the parse, 
 `--cover-check` asserts the mutated function was actually executed (a mutation no test reaches is
 `MUTANT-UNREACHABLE`, not a survivor).
 
+`--expect-fail-output` checks the cause of a red run: the mutated run's combined output must
+contain each given text (the hazard assertion's failure message), or the run failed for an
+unrelated reason, such as a changed error message, and it exits `2` instead of reporting a catch.
+Text that the passing baseline already prints is refused, because it cannot identify a failure.
+Without the flag, a caught verdict says its cause was not verified.
+
 Exit codes: `0` the test caught the mutation, `1` false green, `2` harness error (bad args,
-failing baseline, no-op mutation, failed verification, failed restore).
+failing baseline, no-op mutation, failed verification, failed restore, or a red run without the
+`--expect-fail-output` text).
 
 ## `review-pin.sh`
 

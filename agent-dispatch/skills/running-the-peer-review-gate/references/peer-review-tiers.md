@@ -294,8 +294,10 @@ mutation-verify.sh --file <path> --test-cmd <cmd> (--mutate-sed <expr> | --mutat
 It snapshots the target file by **copy** into a temp dir outside the repo, mutates, runs the test,
 restores from the copy, and verifies byte-identity — immune to commit state, and it **never invokes
 git**. Exit codes: `0` mutation caught (the test genuinely isolates), `1` mutation not caught
-(false-green test), `2` harness error (bad args, a no-op mutation, a failed restore, or an invalid
-baseline). Use it for every mutation-verify pass, orchestrator or reviewer alike.
+(false-green test), `2` harness error (bad args, a no-op mutation, a failed restore, an invalid
+baseline, or, with `--expect-fail-output`, a RED run that failed for an unrelated reason). Use it
+for every mutation-verify pass, orchestrator or reviewer alike, and pass `--expect-fail-output`
+with the hazard assertion's failure text so a "caught" names its cause.
 
 **Concurrent mutation-DOING reviewers — isolate them, or make them read-only.** When you dispatch
 two or more reviewers that themselves RUN mutations (mutate a file → run the test → restore), do
