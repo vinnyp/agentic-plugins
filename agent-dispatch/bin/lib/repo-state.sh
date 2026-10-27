@@ -13,12 +13,11 @@ _repo_state_git() (
 
 _repo_state_sha256() (
   local digest input
-  umask 077
-  input=$(mktemp "${TMPDIR:-/tmp}/repo-state-hash.XXXXXX") || return 1
-  trap 'rm -f "$input"' EXIT
-  cat > "$input" || return 1
-  if ! command -v shasum >/dev/null 2>&1 || ! digest=$(shasum -a 256 < "$input"); then
-    digest=$(sha256sum < "$input") || return 1
+  # Retain bytes in memory so a failed primary hash can retry the same input.
+  # Base64 preserves binary hook content and trailing newlines in shell memory.
+  input=$(base64) || return 1
+  if ! command -v shasum >/dev/null 2>&1 || ! digest=$(printf '%s' "$input" | base64 -d | shasum -a 256); then
+    digest=$(printf '%s' "$input" | base64 -d | sha256sum) || return 1
   fi
   digest=${digest%% *}
   [ -n "$digest" ] || return 1
@@ -47,16 +46,24 @@ _repo_state_configs() {
     esac
     case "$lower" in
       *extraheader*|*token*|*pass*|*secret*|*proxy*)
-        value="sha256:$(printf '%s' "$value" | _repo_state_sha256)" ;;
+        digest=$(printf '%s' "$value" | _repo_state_sha256) || return 1
+        value="sha256:$digest" ;;
       *)
         if [[ "$value" =~ ://[^/]*@ ]]; then
-          value="sha256:$(printf '%s' "$value" | _repo_state_sha256)"
+          digest=$(printf '%s' "$value" | _repo_state_sha256) || return 1
+          value="sha256:$digest"
         fi ;;
     esac
     # Hash URL userinfo in keys while preserving distinct credentialed keys.
+    # A slash in a password is malformed URL syntax, but still sensitive.
+    # Conservatively hash through the last @ even in that malformed shape.
+    if [[ "$key" =~ //[^?#]*@ ]] && ! [[ "$key" =~ //[^/?#]*@ ]]; then
+      digest=$(printf '%s' "$key" | _repo_state_sha256) || return 1
+      key="redacted.$digest"
+    fi
     rest=$key
     key=''
-    while [[ "$rest" =~ ([a-zA-Z][a-zA-Z0-9+.-]*://)([^/@]*)@ ]]; do
+    while [[ "$rest" =~ (//)([^/?#]*)@ ]]; do
       prefix=${rest%%"${BASH_REMATCH[0]}"*}
       userinfo=${BASH_REMATCH[2]}
       digest=$(printf '%s' "$userinfo" | _repo_state_sha256) || return 1
@@ -147,6 +154,15 @@ repo_state_snapshot() (
     _repo_state_hooks "$hooks" ''
     custom=$(_repo_state_git -C "$repo" rev-parse --path-format=absolute --git-path hooks)
     [ "$custom" = "$hooks" ] || _repo_state_hooks "$custom" 'core.hooksPath/'
+    local path file digest
+    for path in info/exclude info/attributes objects/info/alternates; do
+      file=$(_repo_state_git -C "$repo" rev-parse --path-format=absolute --git-path "$path") || return 3
+      digest='(absent)'
+      if [ -e "$file" ] || [ -L "$file" ]; then
+        digest=$(_repo_state_sha256 < "$file") || return 3
+      fi
+      printf 'metadata\t%s\t%s\n' "$path" "$digest"
+    done
     wt='' head='' branch=''
     while IFS= read -r record || [ -n "$record" ]; do
       case "$record" in
@@ -160,12 +176,12 @@ repo_state_snapshot() (
           wt='' head='' branch='' ;;
       esac
     done < <(_repo_state_git -C "$repo" -c core.quotePath=false worktree list --porcelain 2>/dev/null)
-    _repo_state_configs < "$config"
+    _repo_state_configs < "$config" || return 3
     while IFS= read -r wt; do
       case "$wt" in 'worktree '*) wt=${wt#worktree } ;; *) continue ;; esac
       [ "$wt" != "$top" ] && [ -d "$wt" ] || continue
       if _repo_state_git -C "$wt" config --list --show-scope --show-origin -z --worktree > "$config" 2>/dev/null; then
-        _repo_state_configs < "$config"
+        _repo_state_configs < "$config" || return 3
       fi
     done < <(_repo_state_git -C "$repo" worktree list --porcelain 2>/dev/null)
   } > "$out"
@@ -182,7 +198,8 @@ _repo_state_display() {
   local key=$1 value=$2
   if [ "$value" = '(absent)' ]; then printf '%s' "$value"; return; fi
   case "$key" in
-    core.*) case "$value" in true|false|/*) ;; *) value='<changed>' ;; esac ;;
+    core.hookspath|core.editor|core.pager|core.fsmonitor) case "$value" in true|false|/*) ;; *) value='<changed>' ;; esac ;;
+    core.*) case "$value" in true|false) ;; *) value='<changed>' ;; esac ;;
     commit.gpgsign|tag.gpgsign) ;;
     *) value='<changed>' ;;
   esac
@@ -239,11 +256,11 @@ repo_state_compare() (
         remote=$(_repo_state_decode "$new")
         # Local repository sentinel and pre-existing remote names are benign.
         if [ "$remote" != . ] && [ "$new" != '(absent)' ] &&
-           ! awk -F '\t' -v prefix="remote.$remote." '$1=="config" && index($4,prefix)==1 { found=1 } END {exit !found}' "$before"; then rc=2; fi ;;
+           ! REPO_STATE_REMOTE="$remote" awk -F '\t' '$1=="config" && $4 ~ /^remote\./ {name=$4; sub(/^remote\./,"",name); sub(/\.[^.]*$/,"",name); if(name==ENVIRON["REPO_STATE_REMOTE"]) found=1} END {exit !found}' "$before"; then rc=2; fi ;;
       branch.*.*|remote.*.fetch|remote.*.gh-resolved|gc.*|maintenance.*|extensions.worktreeconfig|core.sparsecheckout|core.sparsecheckoutcone) ;;
       remote.*.*)
         remote=${key#remote.}; remote=${remote%.*}
-        if awk -F '\t' -v prefix="remote.$remote." '$1=="config" && index($4,prefix)==1 { found=1 } END {exit !found}' "$before"; then
+        if REPO_STATE_REMOTE="$remote" awk -F '\t' '$1=="config" && $4 ~ /^remote\./ {name=$4; sub(/^remote\./,"",name); sub(/\.[^.]*$/,"",name); if(name==ENVIRON["REPO_STATE_REMOTE"]) found=1} END {exit !found}' "$before"; then
           rc=2
         else
           case "$key" in remote.*.url) ;; *) rc=2 ;; esac
@@ -256,7 +273,7 @@ repo_state_compare() (
   done < "$temp/diff"
   # Pair records by kind and name; compare complete payloads (including modes/branches).
   awk -F '\t' '
-    $1!="hooks" && $1!="ref" && $1!="worktree" && $1!="tree" {next}
+    $1!="metadata" && $1!="hooks" && $1!="ref" && $1!="worktree" && $1!="tree" {next}
     {k=$1 FS $2; v=$3; for(i=4;i<=NF;i++) v=v FS $i; keys[k]=1}
     FILENAME==ARGV[1] {old[k]=v; next} {new[k]=v}
     END {for(k in keys) {hasold=(k in old); hasnew=(k in new); if(old[k]!=new[k]) {gsub(FS," ",old[k]); gsub(FS," ",new[k]); print k FS (hasold?old[k]:"(absent)") FS (hasnew?new[k]:"(absent)")}}}
@@ -269,6 +286,9 @@ repo_state_compare() (
   while IFS=$'\t' read -r kind key old new remote line; do
     [ "$rc" -ge 1 ] || rc=1
     case "$kind" in
+      metadata)
+        rc=2
+        printf 'metadata %s: <changed>\n' "$key" >> "$changes" ;;
       hooks)
         rc=2
         if [ "$old" = '(absent)' ]; then line=added
@@ -307,8 +327,8 @@ repo_state_compare() (
         elif [ "$new" = unreadable ]; then
           printf 'tree %s: unreadable\n' "$key" >> "$changes"
         else
-          awk -F '\t' -v wt="$key" '$1=="dirty" && $2==wt {print $3}' "$before" | LC_ALL=C sort -u > "$temp/dirty-old"
-          awk -F '\t' -v wt="$key" '$1=="dirty" && $2==wt {print $3}' "$after" | LC_ALL=C sort -u > "$temp/dirty-new"
+          REPO_STATE_WT="$key" awk -F '\t' '$1=="dirty" && $2==ENVIRON["REPO_STATE_WT"] {print $3}' "$before" | LC_ALL=C sort -u > "$temp/dirty-old"
+          REPO_STATE_WT="$key" awk -F '\t' '$1=="dirty" && $2==ENVIRON["REPO_STATE_WT"] {print $3}' "$after" | LC_ALL=C sort -u > "$temp/dirty-new"
           LC_ALL=C comm -13 "$temp/dirty-old" "$temp/dirty-new" > "$temp/dirty"
           count=$(wc -l < "$temp/dirty" | tr -d ' ')
           paths=$(head -n 20 "$temp/dirty" | paste -sd ' ' -)

@@ -224,3 +224,7 @@ MIT.
 Repository-state snapshots hash sensitive config values and replace URL userinfo
 in config keys with the first 12 hex digits of its SHA-256 digest. Credentialed
 keys remain distinct for change detection; change reports omit the userinfo.
+
+Review drift checks hash Git exclude, attributes, and alternates files. Baseline
+and interim snapshots live apart from reviewer configuration and are hash-pinned;
+missing or modified snapshots cause a critical review failure (exit 10).

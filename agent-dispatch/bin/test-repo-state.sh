@@ -307,11 +307,12 @@ for addition in none uploadpack branch; do
     branch) grep -q '^config branch.main.remote ' "$TMP/changes" ;;
   esac
 done
-for key in credential.helper http.extraheader foo.apitoken secrets.apikey token.x foo.password password.x proxy.x; do
+for key in credential.helper http.extraheader foo.apitoken secrets.apikey token.x foo.password password.x proxy.x http.proxy remote.origin.proxy; do
   fixture
   case "$key" in
     credential.helper) value='store --file /x-PWONE_SECRET' ;;
     http.extraheader) value='AUTHORIZATION: bearer PWONE_SECRET' ;;
+    http.proxy|remote.origin.proxy) value=u:PWONE_SECRET@proxy.example:8080 ;;
     *) value=PWONE_SECRET ;;
   esac
   git -C "$R" config "$key" "$value"
@@ -342,11 +343,13 @@ if grep -E 'PWONE_SECRET|PWTWO_SECRET' "$TMP/before" "$TMP/after" "$TMP/changes"
 fi
 git -C "$R" config "$key_one" https://x
 snap "$TMP/after"
+# These digest assertions are independent: the replacement comparison above
+# catches collapsing distinct credentialed keys into one entry.
 for secret in PWONE_SECRET PWTWO_SECRET; do
   digest=$(printf 'u:%s' "$secret" | _repo_state_sha256)
   grep -Fq "$(printf '\turl.https://%s@h/.insteadof\t' "${digest:0:12}")" "$TMP/after"
 done
-[ "$(grep -c 'url.https://.*@h/.insteadof' "$TMP/after")" = 2 ]
+
 if grep -E 'PWONE_SECRET|PWTWO_SECRET' "$TMP/after"; then
   echo "secret leaked into snapshot for distinct credentialed keys" >&2
   exit 1
@@ -473,4 +476,59 @@ git -C "$R" switch -q -c x v1
 snap "$TMP/after"
 rc_is 1 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
 if grep -q '^commit ' "$TMP/changes"; then exit 1; fi
+# Security regression pins.
+fixture
+snap "$TMP/before"
+git -C "$R" init -q --bare "$R/o\162igin"
+printf '%s\n' 'o\\162igin/' >> "$R/.git/info/exclude"
+git -C "$R" check-ignore -q 'o\162igin/'
+git -C "$R" config branch.main.remote 'o\162igin'
+snap "$TMP/after"
+rc_is 2 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
+# Check the remote classification independently of the hidden repository file.
+grep -v '^metadata' "$TMP/before" > "$TMP/plain-before"
+grep -v '^metadata' "$TMP/after" > "$TMP/plain-after"
+rc_is 2 repo_state_compare "$TMP/plain-before" "$TMP/plain-after" "$TMP/changes"
+for path in info/exclude info/attributes objects/info/alternates; do
+  fixture
+  snap "$TMP/before"
+  printf '# fixture\n' >> "$R/.git/$path"
+  snap "$TMP/after"
+  rc_is 2 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
+done
+for authority in 'https://u:PASS/SECRET@h/' 'https://u:PASS@SECRET@h/' '//u:SECRET@h/' 'https://SECRET@h/'; do
+  fixture
+  snap "$TMP/before"
+  git -C "$R" config "url.$authority.insteadOf" https://x
+  snap "$TMP/after"
+  rc_is 2 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
+  if grep -q SECRET "$TMP/after" "$TMP/changes"; then
+    echo 'userinfo shape leaked' >&2; exit 1
+  fi
+done
+check_key core.sshCommand '/usr/bin/sshpass -p SECRET ssh' 2
+if grep -q SECRET "$TMP/changes"; then echo 'core command leaked' >&2; exit 1; fi
+fixture
+git -C "$R" config credential.helper SECRET
+(
+  # Count calls across pipeline subshells, then fail on the config hash's Nth call.
+  printf '0\n' > "$TMP/hash-count"
+  _repo_state_sha256() {
+    local data n
+    data=$(cat)
+    n=$(cat "$TMP/hash-count"); n=$((n + 1)); printf '%s\n' "$n" > "$TMP/hash-count"
+    if [ "$data" = SECRET ]; then printf '%s\n' "$n" > "$TMP/hash-nth"; fi
+    [ "$n" != "${fail_nth:-0}" ] || return 1
+    printf '%s' "$data" | shasum -a 256 | cut -d ' ' -f 1
+  }
+  snap "$TMP/count-config"
+  fail_nth=$(cat "$TMP/hash-nth")
+  printf '0\n' > "$TMP/hash-count"
+  rc_is 3 repo_state_snapshot "$R" "$TMP/failed-config"
+)
+# Hashing must not spool plaintext to a temporary file.
+(
+  mktemp() { echo 'plaintext hash spool attempted' >&2; return 1; }
+  printf SECRET | _repo_state_sha256 >/dev/null
+)
 echo 'repo-state tests passed'

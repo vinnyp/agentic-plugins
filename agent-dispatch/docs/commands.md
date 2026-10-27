@@ -256,6 +256,11 @@ if you want the review judged, or judge it yourself.
 
 The clone mirrors the source's local branches, remote-tracking refs and tags at dispatch time.
 Origin's fetch and push URLs point at a disabled path; fetch or rebase in the source before dispatching.
+Snapshots live separately from reviewer configuration, with no snapshot path in the
+reviewer environment or brief. SHA-256 pins detect missing or modified baselines
+and interim snapshots; tampering exits 10. The drift check also detects changes
+to `info/exclude`, `info/attributes`, and `objects/info/alternates`.
+
 Other remotes and the operator's credential helper remain reachable, so the drift check,
 not the clone, detects source changes. Git config,
 refs and branches are private, and the reviewer gets a mode-0600 flattened copy of global Git
@@ -1054,6 +1059,14 @@ temp directory and remove them after inspection. Snapshot exits 0 on success or 
 empty, relative or invalid repository path, a missing hasher, or unreadable config.
 A failed snapshot writes an `unreadable` marker to the output file when possible.
 Invalid CLI arguments exit 64.
+Snapshots also hash `info/exclude`, `info/attributes`, and
+`objects/info/alternates`; changes to these files are critical.
+
+In `dispatch-worker` review runs, snapshots live separately from reviewer
+configuration, with no snapshot path exported or included in the brief. Every
+snapshot is SHA-256-pinned in a dispatcher shell variable. A missing or modified
+snapshot is critical (exit 10), even if a same-user reviewer discovers its path.
+
 Compare prints named change lines and exits 0 for clean, 1 for warn-only drift or 2 for
 critical drift. Config changes are critical except these benign keys: `branch.*.*`
 except `branch.*.pushremote`; `branch.*.remote` is benign only when it names a remote

@@ -1790,12 +1790,37 @@ GIT_CONFIG_GLOBAL="$TMP/absent-global.gitconfig" run_cfg_review "$r44" > "$TMP/n
 [ "$?" -eq 0 ] || fail 'review without global gitconfig failed'
 grep -q 'fatal:' "$TMP/cfg.err" && fail 'missing global gitconfig emitted fatal diagnostic'
 
-# Loss of the baseline must fail closed for both review paths.
-# shellcheck disable=SC2016
-printf 'rm "$(dirname "$GIT_CONFIG_GLOBAL")/before"\n' > "$AGY_STUB_ACTIONS"
+# No reviewer environment entry may identify the snapshot directory.
+cat > "$AGY_STUB_ACTIONS" <<'ACTIONS'
+env > "$AGY_ARGS_FILE.snapshot-env"
+if [ -e "$(dirname "$GIT_CONFIG_GLOBAL")/before" ]; then
+  printf shared > "$AGY_ARGS_FILE.shared-snapshot"
+fi
+ACTIONS
+check_state_run 0
+if grep -q 'dispatch-snapshots\.' "$AGY_ARGS_FILE.snapshot-env"; then fail 'snapshot directory exported'; fi
+[ ! -e "$AGY_ARGS_FILE.shared-snapshot" ] || fail 'baseline beside global config'
+
+# A reviewer can enumerate same-user temp files and forge a matching baseline.
+export REPO_STATE_CHECK="$SELF_DIR/repo-state-check" SOURCE_GLOBAL="$GIT_CONFIG_GLOBAL"
+cat > "$AGY_STUB_ACTIONS" <<'ACTIONS'
+git -C "$SRC" config user.name compromised
+for state in "$TMPDIR"/dispatch-snapshots.* "$TMPDIR"/dispatch-review-state.*; do
+  [ ! -f "$state/before" ] || GIT_CONFIG_GLOBAL="$SOURCE_GLOBAL" "$REPO_STATE_CHECK" snapshot "$SRC" "$state/before"
+done
+ACTIONS
 check_state_run 10
-grep -qF 'DISPATCH_REVIEW_STATE=critical(' "$TMP/cfg.err" || fail 'agy baseline loss passed'
-grep -qF 'state: drift check could not complete' "$TMP/cfg.err" || fail 'agy compare diagnostic absent'
+grep -qF 'DISPATCH_REVIEW_STATE=critical(' "$TMP/cfg.err" || fail 'agy baseline forgery passed'
+grep -qF 'state: snapshot integrity' "$TMP/cfg.err" || fail 'agy integrity diagnostic absent'
+cp "$TMP/state-config.before" "$SRC/.git/config"
+# Loss of the baseline must also fail closed.
+cat > "$AGY_STUB_ACTIONS" <<'ACTIONS'
+for state in "$TMPDIR"/dispatch-snapshots.*; do
+  [ ! -f "$state/before" ] || rm "$state/before"
+done
+ACTIONS
+check_state_run 10
+grep -qF 'state: snapshot integrity' "$TMP/cfg.err" || fail 'agy baseline loss passed'
 # Removing the whole state directory must preserve the critical exit and diagnostic.
 # shellcheck disable=SC2016
 printf 'rm -rf "$(dirname "$GIT_CONFIG_GLOBAL")"\n' > "$AGY_STUB_ACTIONS"
@@ -1805,13 +1830,13 @@ grep -qF '  state: review state directory missing or unreadable' "$TMP/cfg.err" 
 cat > "$TMP/bin/claude" <<'STUB'
 #!/usr/bin/env bash
 cat >/dev/null
-for state in "$TMPDIR"/dispatch-review-state.*; do
+for state in "$TMPDIR"/dispatch-snapshots.*; do
   [ ! -d "$state" ] || rm "$state/before"
 done
 STUB
 (cd "$SRC" && run_state_runtime claude 10)
 grep -qF 'DISPATCH_REVIEW_STATE=critical(' "$TMP/cfg.err" || fail 'claude baseline loss passed'
-grep -qF 'state: drift check could not complete' "$TMP/cfg.err" || fail 'claude compare diagnostic absent'
+grep -qE 'state: (drift check could not complete|snapshot integrity)' "$TMP/cfg.err" || fail 'claude compare diagnostic absent'
 
 # The file had 22 agy stubs before the four persona-specific controls above;
 # every definition must answer the roster subcommand instead of falling into cat.
