@@ -136,18 +136,32 @@ patch path is printed. The other flows — a plan-driven build phase, a briefed 
 driving a live tmux/cmux session — are documented per command in the
 [command reference](docs/commands.md).
 
+Mutation sweeps refuse shell operators during argument parsing, allow a five-second
+child-exit grace, and report leftover processes as errors. Missing results take
+precedence over errors. See [command details](docs/commands.md#mutation-sweepsh)
+for timeout, capture-storage, and isolation limits.
+
+Mutation tree fingerprints use portable permission bits with GNU and BSD stat;
+mtime and ownership checks use the same shared stat dialect detection. Special
+permission bits are excluded from fingerprints. `mutation-verify.sh` supports
+symlinked entrypoints and refuses to run when its required stat helper is missing.
+
 ## Documentation
 
 - **[Command reference](docs/commands.md)** — every entrypoint (`coding-dispatch.sh`,
   `coding-build-phase.sh`, `coding-preflight.sh`, `dispatch-worker`, `drive-cold-session.sh`,
   `drive-cmux-session.sh`, `agent-dispatch-doctor`, `run-long-gate.sh`, `gate-run.sh`,
-  `mutation-verify.sh`, `review-pin.sh`, `review-log-status`, `ensure-review-gate.sh`, `review-gate`): synopsis, flags,
+  `mutation-verify.sh`, `mutation-sweep.sh`, `review-pin.sh`, `review-log-status`, `ensure-review-gate.sh`, `review-gate`): synopsis, flags,
   exit codes, environment variables, artifact paths, plus the full requirements table.
+  Copy-mode sweeps bound each mutant with `--timeout` and report errors separately
+  from inconclusive exits 1/3; exit 0 means every mutant was measured without errors.
 - **[Safety and data flow](docs/safety-and-data-flow.md)** — what the revert net covers and what it
   does not, the dirty-tree refusal, and exactly what leaves your machine to which provider.
 - **[The peer-review gate](docs/peer-review-gate.md)** — the tiered-review capability: the
   `running-the-peer-review-gate` skill and the `review-gate` CLI (brief / cross-model / log-new),
-  and the cross-model egress disclosure. Three modes: `build` (a diff, post-build) and `design` (a
+  and the cross-model egress disclosure. Measurement-shaped changes require a design
+  note and resolved design round before building, recorded with `log-new --design-round`.
+  Three modes: `build` (a diff, post-build) and `design` (a
   spec/design doc, pre-build) each run to a single completed gate within this skill; `requirements`
   (a PRD/requirements doc) runs exactly **one round per invocation** — the multi-round loop
   (fences, owner adjudication, delta verification, lock) belongs to the caller:

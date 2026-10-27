@@ -427,7 +427,7 @@ installed; it never claims a lint it did not perform.
 ## `mutation-verify.sh`
 
 ```
-mutation-verify.sh --file <path> --test-cmd <cmd>
+mutation-verify.sh [--copy-root <dir>] --file <path> --test-cmd <cmd>
                    (--mutate-sed <expr> | --mutate-cmd <cmd>)
                    [--expect-anchor <str>]... [--expect-marker <str>]...
                    [--syntax-cmd <cmd>] [--cover-check <line-or-symbol>]
@@ -438,8 +438,10 @@ mutation-verify.sh --file <path> --test-cmd <cmd>
                     [--control-anchor <str>]... [--control-marker <str>]...]
 ```
 
-Proves a test is load-bearing: break the code, confirm the test goes red, restore. It snapshots
-the file by copy (`mktemp`), **never** with git — the pass this exists to protect against is
+Proves a test is load-bearing: break the code, confirm the test goes red, restore. It is
+snapshot-backed: mutates the real file in place and restores it from a `mktemp` snapshot;
+never run two in-place mutants concurrently in one tree — use `--copy-root` /
+`mutation-sweep.sh` for parallel mutants. It **never** invokes git — the pass this exists to protect against is
 `git checkout -- <file>` on an uncommitted diff, which restores the last commit and throws away
 the in-flight fix while reporting a clean "mutation-proof" result.
 
@@ -517,7 +519,7 @@ filter that runs only the hazard test. An extra runner flag (`--lib`, `--ignore`
 unanchored or unquoted go pattern, a cargo `--skip` without `--exact`, or anything chained after the
 deselect is refused (exit `2`) before any test runs.
 
-How the tool checks the scope proof, on the unmutated copy and again on the mutant:
+How the tool checks the scope proof, on the unmutated file and again on the mutant:
 - `--knockout-expect-output '<n><rest>'` must start with its number, and `<n>` must be `1` (the
   knock-out removes only the hazard test; `0` would prove nothing). The tool sums the number in
   front of every `<rest>` in the output (the whole digit run, so `11 filtered out` counts as 11, and
@@ -546,11 +548,11 @@ Refusals, all exit `2`: an empty command; one that does not start with `--test-c
 command plus a deselect) or is identical to it; a suffix that is not one documented deselect; a
 cargo `--test-cmd` with its own `--` section; no
 scope proof; a count line that does not start with its number, declares a count other than `1`, or
-is empty or multi-line; a delta line other than `'=== RUN '`; one that is red on the unmutated copy (a bad flag or
+is empty or multi-line; a delta line other than `'=== RUN '`; one that is red on the unmutated file (a bad flag or
 runner error would otherwise "confirm" by printing nothing); one whose baseline prints an expected
 text, prints nothing, or prints exactly what the full baseline printed (a weak check: runners that
-print timings never trip it); a scope proof that fails on the unmutated copy or on the mutant (a
-knock-out that crashes on the mutant cannot show its scope). It runs on the same mutated copy only
+print timings never trip it); a scope proof that fails on the unmutated file or on the mutant (a
+knock-out that crashes on the mutant cannot show its scope). It runs on the same mutated file only
 when the main run would be CAUGHT (a RED run without the expected text stays exit `3`; a GREEN one
 stays exit `1`). If its output still contains any expected text, another test prints it, or the
 deselect missed the hazard test (unknown ids are often silently ignored): the run is refused (exit
@@ -572,7 +574,7 @@ is not one of the forms above is UNPROVEN.
 
 **Control mutant (recommended, not required).** `--control-sed` / `--control-cmd` (only with `--expect-fail-output`, and
 always with `--control-expect-fail-output`, the line the control's own test prints when it fails)
-applies a second mutation on a fresh copy of the original, with the same no-op and
+uses the real file restored from the snapshot, then the control mutation, with the same no-op and
 `--syntax-cmd` checks; `--control-anchor` / `--control-marker` verify it the way
 `--expect-anchor` / `--expect-marker` verify the main mutation. It must edit only `--file`
 (changes to other files are not restored). Its output is captured the same way. The control runs
@@ -584,7 +586,7 @@ and a GREEN one stays exit `1`, whatever the control is. Refusals, all exit `2`:
 - the control's red run prints ANY expected text (with several texts, drop the generic one).
 
 Otherwise the verdict says the control "went RED for its own reason without the expected text",
-flagged `[UNVERIFIED CONTROL]` unless `--syntax-cmd` checked the control's copy (a marker proves
+flagged `[UNVERIFIED CONTROL]` unless `--syntax-cmd` checked the control-mutated file (a marker proves
 the edit landed, not that the file is valid). The main mutant keeps its older rule: a marker or a
 `--syntax-cmd` clears `[UNVERIFIED APPLICATION]`, because a broken main mutant shows up as a RED
 run the expected text then has to explain, while a broken control would pass its check by
@@ -618,6 +620,146 @@ failing baseline, no-op mutation, failed verification, failed restore, an
 by the passing baseline, a refused knock-out, or a refused control), `3` a
 red run without the `--expect-fail-output` text (the hazard assertion is not shown to have caught
 the mutant).
+
+### Copy mode
+
+In copy mode (`--copy-root`) a control is required, which runs first as a canary; a copy-mode or parallel exit 1 or 3 is INCONCLUSIVE until a serial in-place run confirms it. In place, a control remains recommended, not required.
+
+`--copy-root <dir>` canonicalises the root and subject's parent directory with
+physical paths, accepting `--copy-root .` and roots reached through symlinked
+paths. The subject must be under the root; a symlink subject is refused. A
+`TMPDIR` inside the root is refused to prevent recursive copying. Copy failures
+abort with exit `2` and clean up partial copies. `--cover-check` is refused in
+copy mode. A control and its own expected failure text are required.
+
+One pristine snapshot excludes the root's `.git` entry. Three independent phase
+copies come from that snapshot: baseline (shared with the baseline knock-out),
+then the control as a canary, then the main mutant (shared with the mutant knock-out).
+Commands run with the caller's cwd mirrored into each copy; a caller cwd outside
+`--copy-root` is refused with exit `2`. The real subject is
+never written or restored by the tool.
+
+Write subject paths relative to the cwd or as `'$MUTATION_VERIFY_FILE'`.
+A command that names the root literally aborts (including canonical `/var` and
+`/private/var` spellings); other escapes (aliases, env, PATH) are caught by the canary.
+Single-quote commands at the calling shell so variables expand inside the copy.
+`MUTATION_VERIFY_COPY_ROOT` and `MUTATION_VERIFY_FILE` are output-only variables
+provided to commands, naming the current phase root and absolute copied subject;
+caller values are never read as inputs.
+
+A green canary exits `2` with:
+
+```text
+mutation-verify.sh: CONTROL STAYED GREEN IN THE COPY — the test did not read the copy, or the control is inert; run the control in place to tell which tree=<h>
+```
+
+A red control without its own expected text exits `2` with
+`CONTROL RED FOR AN UNRELATED REASON`. A CAUGHT verdict retains the control clause
+and adds `; control ran first (canary)`. Exit `1` or `3` also records that the
+control ran first, and ends with
+`; INCONCLUSIVE in copy mode — confirm with a serial in-place run tree=<h>`.
+Confirm these outcomes serially in place before treating them as test gaps.
+The scope is narrow: the canary proves only that the control's test path reads the copy; a hazard-only
+escape yields a false survivor, which is why exit 1/3 are INCONCLUSIVE.
+
+The verdict-line marker is `mutation-verify.sh: `: select the LAST line starting
+with it, excluding `mutation-verify.sh: hint: ` lines, which are advice.
+Every terminal verdict or refusal after the pristine snapshot exists ends with
+` tree=<h>`, a checksum of sorted relative paths, file contents, file modes and symlink targets
+(excluding mtimes and the snapshot location). Pre-snapshot refusals have no hash;
+in-place output has no `tree=`. Copy-mode messages retain the caller's `--file`
+spelling.
+
+Baseline and control copies are deleted as soon as their phases finish. On a
+non-APFS `TMPDIR`, allow disk space for the pristine tree plus the live phase
+copy and capture output per worker; a sweep also retains its shared snapshot.
+APFS clonefile may reduce physical use but is not assumed.
+The post-command capture probe detects storage write failures. A residual limit:
+if a test fills the disk and frees it before the probe, truncated capture output
+may go undetected.
+
+**Changed:** in-place advice lines now use the `mutation-verify.sh: hint: ` prefix;
+terminal verdict text keeps its existing meaning.
+
+Copy mode isolates only the source tree, not `$HOME`/ports/caches. Tests must avoid
+shared external state or allocate their own resources. A concurrent in-place run
+in the same tree is unsupported.
+
+## mutation-sweep.sh
+
+```text
+mutation-sweep.sh --copy-root <dir> --mutants <file> [-j N] [--timeout S] [--out <dir>]
+```
+
+Run from inside the root (including a subdirectory). The sweep snapshots the tree
+once, excluding `.git`, then runs every mutant from that snapshot with the cwd
+mirrored. Edits to the live tree during the sweep do not change the tested tree.
+Keep `TMPDIR` outside the root. Each mutant uses copy mode and must supply a
+control; the copy-mode restrictions and canary checks above apply.
+
+The mutants file contains one shell-quoted argument list for `mutation-verify.sh`
+per line, without the command name or `--copy-root` (supplied by the sweep).
+Blank lines and lines whose first non-whitespace character is `#` are ignored.
+Use a relative `--file`; absolute values of `--file` and references to the real
+root are refused. Other arguments may begin with `/`, including sed expressions.
+Executable command substitutions (`$(...)` and backticks outside single quotes)
+and process substitutions (`<(` and `>(`) are refused. Unquoted shell operators
+(`; & | < >`), newlines, and ANSI-C quoting (`$'…'`) are also refused.
+Argument parsing runs in an empty scratch directory. This check is a guard,
+not a sandbox. Single-quote command strings and
+variables such as `'$MUTATION_VERIFY_FILE'` so they expand in the phase copy.
+Treat the file as trusted shell input, not a sandboxed data format.
+
+Concurrency defaults to min(cores, 8). `MUTATION_VERIFY_SWEEP_JOBS` supplies the
+default; `-j N` overrides it. Both require a positive decimal integer. Each worker
+sets `RUN_TESTS_JOBS=1` to avoid nested suite parallelism.
+`--timeout S` overrides `MUTATION_VERIFY_SWEEP_TIMEOUT` (default `600`); both
+require a positive decimal integer. Each mutant uses `timeout -k 20`, then
+`gtimeout` if available, otherwise a poll-loop watchdog. A watchdog timeout or rc `124`
+is reported as `TIMEOUT` and counts as an error. Other rc `137` exits are
+labelled `killed (rc 137)`. A leftover-process mutant is counted as an error
+(rc 4), after a 50-poll (about five-second) leader-exit grace. `-h` / `--help` prints
+usage, line rules, environment variables and exit codes.
+
+`Sweep dir: <path>` identifies retained results, either `--out` or a temporary
+results directory. For each mutant's original line number `<n>`, `<n>.out` holds
+combined output, `<n>.rc` the mutation exit code and `<n>.verdict` the extracted
+verdict line. Existing result files are refused rather than overwritten.
+Per-mutant lines and the final summary appear in input order:
+
+```text
+MUTANT <n> rc=<rc> <verdict line>
+SWEEP: <c> caught, <u1> unconfirmed-survived, <u3> unconfirmed-unrelated, <e> errors, <m> missing of <N> tree=<h>
+```
+
+Counts classify mutation exit `0` as caught, `1` as unconfirmed-survived, `3`
+as unconfirmed-unrelated, and other codes as errors. Every copy-mode exit `1`
+or `3` is INCONCLUSIVE. Missing rc or verdict files and `not-run` results count as missing.
+Exit precedence: missing (1) wins over errors (4). The summary
+hash identifies the single sweep snapshot.
+
+| Exit | Meaning |
+|---|---|
+| `0` | All N results present, no errors; every mutant measured |
+| `1` | Missing results |
+| `4` | Errors: refusals, canary, TIMEOUT, or rc ≥ 2 except 3 |
+| `2` | Usage or setup failure |
+| `130` / `143` / `129` | INT / TERM / HUP |
+
+One progress line per finished mutant is printed to stderr. On a signal, the
+sweep stops workers, prints partial `MUTANT` lines and a summary, and retains
+results. Workers stop launching mutants if the parent dies, terminate their own
+mutant group, and record `not-run`. Startup reaps stale sweep and copy directories
+owned by dead processes. Finished groups are never signalled. Unfinished groups
+receive TERM then KILL after 20 seconds; a mutant leaving processes behind gets
+`left processes running` in its verdict. Inspect individual verdicts as well as
+the sweep exit code.
+
+Never run two in-place mutants in one tree. Confirm serial-equal verdicts once
+for your suite before relying on parallel runs: a parallel exit 0 is only as trustworthy as the suite's parallel-safety; the one-time serial-equal confirmation must include caught mutants. A copy-mode or parallel exit `1`
+or `3` is inconclusive until confirmed by a serial in-place run. Source copies
+do not isolate `$HOME`, ports or caches: avoid shared state and bound concurrency
+to the suite's resource budget; do not overlap an in-place run in the same tree.
 
 ## `review-pin.sh`
 
@@ -663,7 +805,7 @@ review-gate brief       --persona <peer-X-reviewer> --mode <design|build|require
                         [--repo-root <dir>] [--closing-template <path>]
 review-gate cross-model [--runtime <agy|codex>] [--timeout <dur>] [--workdir <dir>] --brief <path>...
 review-gate log-new     --topic <slug> [--mode <design|build|requirements>] [--persona <name>]...
-                        [--project <slug>] [--stdout] [--force]
+                        [--project <slug>] [--design-round <label|none>] [--stdout] [--force]
 ```
 
 The mechanical half of the [peer-review gate](peer-review-gate.md). Built by
@@ -700,6 +842,8 @@ line is absent. Beyond
 last-resort backstop: a body under 400 bytes on an otherwise-clean rc is re-reported as `8`, because
 a short no-findings sign-off must never count as a review. It never retries — rc 8 means fall back
 to a local reviewer for that lens, not run it again.
+
+`log-new --design-round <label|none>` records the design review round in the log header; `none` records a deviation for a measurement-shaped change.
 
 **`log-new`** scaffolds `docs/agent-reviews/YYYY-MM-DD-<topic>-peer-reviews.md` in the repo you are
 in: a header stamped with the resolved persona version, a section per `--persona`, and the empty
@@ -1016,6 +1160,10 @@ as unknown identity; only a definite parent mismatch stops a wrapper.
 
 | Variable | Read by | Default / effect |
 |---|---|---|
+| `MUTATION_VERIFY_COPY_ROOT` | commands in `mutation-verify.sh` copy mode | output-only current phase root; caller values are not inputs |
+| `MUTATION_VERIFY_FILE` | commands in `mutation-verify.sh` copy mode | output-only absolute copied subject path; caller values are not inputs |
+| `MUTATION_VERIFY_SWEEP_TIMEOUT` | `mutation-sweep.sh` | 600 seconds; positive decimal integer; overridden by `--timeout` |
+| `MUTATION_VERIFY_SWEEP_JOBS` | `mutation-sweep.sh` | min(cores, 8); positive decimal integer; overridden by `-j` |
 | `RUN_TESTS_JOBS` | `run-tests.sh` | min(cores, 8); positive decimal integer; overridden by `-j` |
 | `RUN_TESTS_TIMEOUT` | `run-tests.sh` | `420` seconds per suite; positive decimal integer; overridden by `--timeout`; kill grace 15 seconds |
 | `RUN_TESTS__TEST_KILL_GRACE` | `run-tests.sh` | test-only TERM-to-KILL grace override; positive integer seconds (default `15`) |

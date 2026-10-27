@@ -18,6 +18,26 @@ require() {
   grep -Fq -- "$2" "$1" || fail "$1 lacks: $2"
 }
 
+tiers=$plugin_dir/skills/running-the-peer-review-gate/references/peer-review-tiers.md
+for file in "$skill" "$tiers"; do
+  require "$file" 'or what a check proves'
+  require "$file" 'what the check emits when it could not evaluate its subject (never PASS)'
+  require "$file" 'the positive control or known-verdict set that shows it can fire'
+  require "$file" 'no Blocker/Major remains'
+done
+require "$plugin_dir/docs/commands.md" 'a parallel exit 0 is only as trustworthy as the suite'
+require "$plugin_dir/docs/commands.md" 'the one-time serial-equal confirmation must include caught mutants'
+require "$plugin_dir/docs/commands.md" 'the canary proves only that the control'
+require "$plugin_dir/docs/commands.md" '[--design-round <label|none>]'
+require "$plugin_dir/docs/commands.md" 'In copy mode (`--copy-root`) a control is required, which runs first as a canary; a copy-mode or parallel exit 1 or 3 is INCONCLUSIVE until a serial in-place run confirms it. In place, a control remains recommended, not required.'
+require "$skill" 'then run the gate in **design** mode on that note'
+require "$tiers" 'before the build'
+require "$skill" '--design-round none'
+require "$skill" 'must state its reason'
+require "$convention" 'design → build'
+require "$tiers" 'records which round reviewed the design note'
+require "$skill" 'records which round reviewed the design note'
+
 require "$skill" 'rc 2/3/9/10 rules take precedence'
 require "$skill" '0 bytes at rc 0, 1 or 8, or at any rc not otherwise enumerated'
 require "$skill" 'short (non-empty) body at an unlisted rc'
@@ -52,6 +72,25 @@ for file in "$skill" "$convention" \
     grep -Fq 'durable peer-review log' "$file" || grep -Fq 'durable review-log' "$file"; then
     fail "$file carries superseded log wording"
   fi
+done
+
+for file in "$plugin_dir/bin/mutation-verify.sh" "$skill" "$plugin_dir/docs/commands.md"; do
+  if grep -Fqi 'copy-based' "$file"; then
+    fail "$file carries misleading copy-based wording"
+  fi
+done
+for file in "$plugin_dir/bin/mutation-verify.sh" "$skill" "$plugin_dir/docs/commands.md" \
+  "$plugin_dir/skills/running-the-peer-review-gate/references/peer-review-tiers.md"; do
+  for wording in 'fresh copy of the original' 'unmutated copy' 'same mutated copy'; do
+    if grep -Fqi "$wording" "$file"; then
+      fail "$file carries misleading wording: $wording"
+    fi
+  done
+done
+
+for wording in 'CONTROL STAYED GREEN IN THE COPY' 'INCONCLUSIVE in copy mode' \
+  'MUTATION_VERIFY_SWEEP_JOBS' '## mutation-sweep.sh'; do
+  require "$plugin_dir/docs/commands.md" "$wording"
 done
 
 echo 'test-review-log-clauses.sh PASS'

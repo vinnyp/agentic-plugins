@@ -67,13 +67,19 @@ Read [references/peer-review-tiers.md](references/peer-review-tiers.md) and sele
 - **Tier 2 — by trigger:** security / privacy / database (at a release door) / plan (unattended) /
   Apps Script (alongside `peer-code-reviewer`) —
   and the **measurement-lens trigger**: a measurement-shaped change (a new or changed gate,
-  threshold, metric, or verdict) pulls in a measurement-methodology lens. If you are unsure whether
+  threshold, metric, or verdict, or what a check proves) pulls in a measurement-methodology lens. If you are unsure whether
   a trigger fires, **it fires.**
 - **Tier 3 — by change-shape:** architecture / performance / interface / reliability / devops /
   release / standards / retrieval / the product lenses, per the reference.
 
 **State which Tier-2 and Tier-3 lenses ran and why (or why none applied).** The choice is yours, but
 it is **recorded, not silent** — it goes in the log header (Phase 7).
+
+For a measurement-shaped change, before the build: write a short design note (what each verdict means, how a failure is attributed to its cause, what each check proves and does not prove, and the known false-pass and false-fail routes), then run the gate in **design** mode on that note with the measurement lens, and build only after that round resolves (no Blocker/Major remains). The note also states what the check emits when it could not evaluate its subject (never PASS), and the positive control or known-verdict set that shows it can fire.
+
+The note lives as the `## Round 1 (design)` section of the change's single review log; later build rounds append `## Round N` and never re-run `log-new`. Create the log with `log-new --design-round "Round 1 (design)"`; a measurement-shaped change logged with `--design-round none` is a recorded deviation and must state its reason in the log.
+
+The log header's `**Design round:**` field, written by `log-new --design-round`, records which round reviewed the design note.
 
 ### 3. Build briefs
 
@@ -276,7 +282,9 @@ it.
 it.** The rule binds the orchestrator exactly as it binds a reviewer subagent: hand-rolling the
 dance as `sed` plus `git restore` / `git checkout` has silently destroyed uncommitted work four
 times, once with the orchestrator as the actor. This plugin's `bin/mutation-verify.sh` is
-**copy-based** — it snapshots to `mktemp` and never invokes git in any form — so it is immune to
+**snapshot-backed**: mutates the real file in place and restores it from a `mktemp` snapshot;
+never run two in-place mutants concurrently in one tree — use `--copy-root` /
+`mutation-sweep.sh` for parallel mutants. It never invokes git in any form, so it is immune to
 commit state and safe on a dirty tree. Do not eyeball a diff; use its applied-verification flags:
 
 ```bash
@@ -304,18 +312,22 @@ mutant as UNPROVEN until a verified exact form exists.** The default deselect fo
 substring, regex or prefix and also remove a sibling with a common name prefix, the sibling the
 knock-out exists to keep; the tool's own checks (every count line summed, absent from the full run;
 exactly one fewer RUN line) are what show exactly one test went. The knock-out must start with
-the test command, pass green on the unmutated copy, and print something different from the full
+the test command, pass green on the unmutated file, and print something different from the full
 run; on the same mutant the expected text must disappear, or another test prints it (or the
 deselect missed) and the mutant is refused (exit 2). The verdict names the command, its exit code
 on the mutant, and the scope proof. A
 control mutant (`--control-sed` / `--control-cmd` with `--control-expect-fail-output`, verified
-only with `--syntax-cmd`) is recommended, not required: it shows only that one other failure does
+only with `--syntax-cmd`) is recommended, not required in place: it shows only that one other failure does
 not print the text; a control refusal stands; record every control you tried, including refused
 ones. **Every CAUGHT row quotes the verdict's `matched:` text and
 its knock-out and control clauses; a CAUGHT whose knock-out did not run, or whose deselect is not
 one of the documented exact forms, is UNPROVEN.** **Fallback: when mutation-verify.sh is unavailable, the runner cannot deselect the
 single hazard test, or no hazard-specific text exists, record the mutant as UNPROVEN, never
 CAUGHT** — in the disposition row, with the reason. `docs/commands.md` covers both checks.
+
+In copy mode (`--copy-root`) a control is required, which runs first as a canary; a copy-mode or parallel exit 1 or 3 is INCONCLUSIVE until a serial in-place run confirms it. In place, a control remains recommended, not required.
+
+A survivor found against a subset suite is inconclusive until re-run against the full suite. Give mutants a suite directly, never `run-tests.sh --only` (a partial run exits 4).
 
 `--syntax-cmd` is the leg that matters most and the one hand-rolling always omits: a malformed
 mutant produces a syntax error, the test "fails" (or "passes") for the wrong reason, and the result
@@ -328,7 +340,7 @@ uncommitted work.
 **A mutant proves a hazard only when the hazard assertion catches it.** A RED run caused by an
 incidental change (an error message, a needle, an unrelated assertion) is not a catch.
 `mutation-verify.sh` exit 3 (not the dispatch-worker rc 3 above) means the failing run lacked the
-hazard's failure text; record it as a surviving mutant, not a harness error to retry. Choose the
+hazard's failure text; in a serial in-place run, record it as a surviving mutant, not a harness error to retry. Choose the
 text before the run, from the line the runner prints when the hazard assertion fails, including
 the runner's own framing (pytest's `AssertionError: <message>`, Go's `<file>_test.go:<line>:
 <message>`): a bare message literal is also in the test source, and pytest prints source on any

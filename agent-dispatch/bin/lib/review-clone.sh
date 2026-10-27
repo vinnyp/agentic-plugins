@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 # Sourceable private review clone builder; preserves caller shell options.
+[ -r "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/portable-stat.sh" ] || {
+  echo "review-clone.sh: broken install: portable-stat.sh not readable" >&2
+  return 2 2>/dev/null || exit 2
+}
+# shellcheck source=portable-stat.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/portable-stat.sh"
 _REVIEW_CLONE_LOCAL_ENV_VARS=$(git rev-parse --local-env-vars 2>/dev/null)
 
 _review_clone_git() (
@@ -69,7 +75,7 @@ review_clone_build() {
     if [ ! -d "$dest" ] || [ -L "$dest" ] || [ ! -O "$dest" ]; then
       _review_clone_reason 'unsafe existing destination'; return 3
     fi
-    mode=$(stat -f %Lp "$dest" 2>/dev/null) || mode=$(stat -c %a "$dest" 2>/dev/null) || mode=''
+    mode=$(pstat_mode "$dest" 2>/dev/null) || mode=''
     if [ "$mode" != 700 ]; then
       _review_clone_reason 'destination mode is not 700'; return 3
     fi

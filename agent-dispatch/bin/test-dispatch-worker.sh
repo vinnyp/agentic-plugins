@@ -690,6 +690,8 @@ grep -q "The knock-out is supported only for cargo, go and pytest" "$AGY_STDIN_F
 grep -q "For any other runner (node included), report the mutant as UNPROVEN" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not make other runners UNPROVEN"
 grep -q "+ -- --exact --skip <path::name> with --knockout-expect-output '1 filtered out'" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not give the exact cargo form"
 grep -q "a control refusal stands; report every control you tried, including refused ones" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not say a control refusal stands and must be reported"
+grep -qF 'requires a control, which runs first as a canary' "$AGY_STDIN_FILE" || fail "hermetic review preamble lacks copy-mode canary rule"
+grep -qF 'INCONCLUSIVE until a serial in-place run confirms it' "$AGY_STDIN_FILE" || fail "hermetic review preamble lacks copy-mode confirmation rule"
 grep -q "A control mutant (--control-sed or --control-cmd with --control-expect-fail-output) is recommended, not required" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not mark the control as recommended"
 grep -q "a CAUGHT whose knock-out clause says it did not run, or whose deselect is not one of these exact forms, is UNPROVEN" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not bind the knock-out clause to CAUGHT"
 grep -q "the runner cannot deselect the single hazard test" "$AGY_STDIN_FILE" || fail "hermetic review preamble does not state the no-deselect fallback"
@@ -1470,7 +1472,7 @@ chmod +x "$TMP/bin/agy"
 timeout_cmd="$(command -v timeout || command -v gtimeout || true)"
 if [ -n "$timeout_cmd" ]; then
   set +e
-  ( sleep 10 ) | "$timeout_cmd" 2s env TIMEOUT=0 "$DW" --runtime agy --agent peer-security-reviewer --brief "$BRIEF" --workdir /repo/x >"$TMP/t41b.out" 2>"$TMP/t41b.err"
+  ( sleep 10 ) | "$timeout_cmd" 6s env TIMEOUT=0 "$DW" --runtime agy --agent peer-security-reviewer --brief "$BRIEF" --workdir /repo/x >"$TMP/t41b.out" 2>"$TMP/t41b.err"
   rc=$?
   set -e
   [ "$rc" -ne 124 ] || fail "agy persona roster probe hung on inherited stdin"

@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 # Sourceable repository config snapshots. No caller shell options are changed.
+[ -r "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/portable-stat.sh" ] || {
+  echo "repo-state.sh: broken install: portable-stat.sh not readable" >&2
+  return 2 2>/dev/null || exit 2
+}
+# shellcheck source=portable-stat.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/portable-stat.sh"
 _REPO_STATE_LOCAL_ENV_VARS=$(git rev-parse --local-env-vars 2>/dev/null)
 
 _repo_state_git() (
@@ -115,7 +121,7 @@ _repo_state_hooks() {
       digest=$(printf '%s\0%s\0%s' "$target" "$content" "$mode" | _repo_state_sha256)
     else
       [ -f "$file" ] || continue
-      mode=$(stat -f '%Lp' "$file" 2>/dev/null) || mode=$(stat -c '%a' "$file")
+      mode=$(pstat_mode "$file")
       digest=$(_repo_state_sha256 < "$file")
     fi
     printf 'hooks\t%s\t%s\t%s\n' "$(_repo_state_encode "$prefix${file##*/}")" "$mode" "$digest"
