@@ -276,7 +276,8 @@ Unexpected config changes, hook changes, foreign committers on new local commits
 unreadable after-snapshot exit 10, overriding every post-launch result. A compare that
 cannot complete is also critical (rc 10). Exclude and attributes changes warn; alternates and replace-ref changes are critical.
 Other ref, worktree and working-tree movement warns unless new branch commits
-have a foreign identity. Only commits reachable from baseline refs are exempt.
+have a foreign identity. Commits reachable from baseline refs or the after snapshot's `refs/remotes/*`
+are exempt.
 Changing a branch remote to `.` together with its merge target is critical. stderr reports
 `DISPATCH_REVIEW_STATE=clean|warn(<n>)|critical(<n>)|skipped(<reason>) original_rc=<n>`:
 clean means no drift; `<n>` in both `warn(<n>)` and `critical(<n>)` counts all change lines.
@@ -325,14 +326,27 @@ codex and claude review paths write no such file. Capture stdout, not the path.
 
 ### Limits
 
-The drift gate is DETECTIVE, not containment. A same-user reviewer can defeat it
-with a detached process that acts after the final snapshot, writes to ignored
-paths (`.venv`, `node_modules`, `__pycache__`), or commits using the operator's
-own Git identity, which reach the branch only as a warning.
+The drift gate is detective. Under a same-user reviewer, these known limits are
+not detected as critical:
 
-Containment needs an OS-level write boundary on the source repository: a sandbox
-profile, a separate user, or a container that does not mount the live repository
-writable. This boundary is not provided.
+- commits made with the operator's own identity;
+- a commit exempted by a forged `refs/remotes/*` ref (warning, because concurrent pulls must not exit 10);
+- foreign commits only on a detached HEAD or a tag (warning);
+- untracked files hidden by an `info/exclude` change (an opaque warning);
+- a pre-existing `branch.X.remote=.` combined with a `merge` change (warning);
+- writes to ignored paths;
+- a detached process acting after the final snapshot.
+
+The remedy for all of these is OS-level containment: a sandbox profile, a
+separate user, or a container that does not mount the source repository writable.
+This boundary is not provided. Do not rely on the gate to block concurrent
+integration; a concurrent pull or rebase during a review is reported as a warning.
+
+Every review snapshot has a 120-second wall-clock bound, overridden with
+`DISPATCH_SNAPSHOT_TIMEOUT_SECS` (positive integer seconds). The dispatcher uses
+`timeout -k` or `gtimeout -k`, with a watchdog fallback when neither is installed.
+Snapshot timeouts are unreadable state and critical (exit 10), with the diagnostic
+`drift snapshot timed out (possible hostile file such as a FIFO in the git dir)`.
 
 ## `gate-run.sh`
 

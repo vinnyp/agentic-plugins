@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 BIN=$(cd "$(dirname "$0")" && pwd)
-TMP=$(mktemp -d "${TMPDIR:-/tmp}/repo-state-test.XXXXXX")
+TMP=$(set -eu; scratch=$(mktemp -d "${TMPDIR:-/tmp}/repo-state-test.XXXXXX"); [ -n "$scratch" ]; printf '%s\n' "$scratch")
 [ -n "$TMP" ] || exit 1
 TMP=$(cd "$TMP" && pwd -P)
 trap 'rm -rf "$TMP"' EXIT
@@ -32,6 +32,54 @@ check_key() {
   snap "$TMP/after"
   rc_is "$3" repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
 }
+# Exercise the real worker function without launching a reviewer. An external
+# deadline also catches a watchdog retaining a command-substitution output pipe.
+snapshot_performance() {
+  local timer mode rc
+  timer=$(command -v timeout || command -v gtimeout) || return 1
+  fixture
+  sed -n '/^review_state_snapshot_bounded() {$/,/^}$/p' "$BIN/dispatch-worker" > "$TMP/bounded.sh"
+  cat > "$TMP/performance.sh" <<'PERF'
+set -eu
+SCRIPT_DIR=$1
+. "$SCRIPT_DIR/lib/repo-state.sh"
+. "$2"
+KILL_AFTER=1
+unset DISPATCH_SNAPSHOT_TIMEOUT_SECS
+if [ "${6:-}" = hostile ]; then
+  export DISPATCH_SNAPSHOT_TIMEOUT_SECS=1
+fi
+if [ "$5" = no-timeout ]; then
+  # Hide only timeout discovery, leaving the snapshot's normal tools available.
+  command() {
+    case "$*" in '-v timeout'|'-v gtimeout') return 1 ;; esac
+    builtin command "$@"
+  }
+fi
+started=$SECONDS
+captured=$(review_state_snapshot_bounded "$3" "$4")
+[ "$((SECONDS - started))" -lt 10 ]
+[ -s "$4" ]
+if [ "${6:-}" = hostile ]; then
+  grep -qx unreadable "$4"
+fi
+PERF
+  for mode in timeout no-timeout; do
+    rc=0
+    "$timer" -k 1 9 bash "$TMP/performance.sh" "$BIN" "$TMP/bounded.sh" "$R" "$TMP/perf-$mode" "$mode" || rc=$?
+    [ "$rc" = 0 ] || { echo "snapshot performance regression: $mode exceeded normal snapshot budget (rc=$rc)" >&2; return 1; }
+    echo "snapshot performance: $mode under 10 seconds (default limit 120) PASS"
+  done
+}
+snapshot_performance
+[ "${1:-}" != --snapshot-performance-only ] || exit 0
+timer=$(command -v timeout || command -v gtimeout)
+# Keep the fallback's hostile-file path covered as well as coreutils timeout.
+mkfifo "$R/.gitignore"
+for mode in timeout no-timeout; do
+  rc_is 0 "$timer" -k 1 9 bash "$TMP/performance.sh" "$BIN" "$TMP/bounded.sh" "$R" "$TMP/fifo-$mode" "$mode" hostile
+done
+rm "$R/.gitignore"
 # CLI failures distinguish critical after-state loss from invalid input.
 fixture
 snap "$TMP/before"
@@ -363,9 +411,9 @@ git -C "$clone" push -q origin main
 snap "$TMP/before"
 git -C "$R" pull -q --ff-only origin main
 snap "$TMP/after"
-rc_is 2 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
+rc_is 1 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
 grep -q '^ref refs/heads/main:' "$TMP/changes"
-grep -q '^commit ' "$TMP/changes"
+if grep -q '^commit ' "$TMP/changes"; then exit 1; fi
 fixture
 snap "$TMP/before"
 git -C "$R" -c user.email=foreign@example.invalid commit -qm email-only --allow-empty
@@ -535,7 +583,10 @@ git -C "$R" config credential.helper SECRET
   printf SECRET | _repo_state_sha256 >/dev/null
 )
 # Final drift regressions: bound snapshots even for hostile metadata types.
-TIMEOUT=$(command -v timeout || command -v gtimeout)
+TIMEOUT=$(command -v timeout || command -v gtimeout || true)
+if [ -z "$TIMEOUT" ]; then
+  echo "SKIP hostile metadata types: timeout/gtimeout unavailable"
+else
 for shape in fifo zero dangling; do
   fixture
   snap "$TMP/before"
@@ -550,13 +601,13 @@ for shape in fifo zero dangling; do
   [ "$shape" != fifo ] || path=info/exclude
   grep -qx "metadata $path: <changed>" "$TMP/changes" || { echo "metadata $shape missed" >&2; exit 1; }
 done
+fi
 fixture
 snap "$TMP/before"
 git -C "$R" -c user.name=Foreign -c user.email=foreign@example.invalid commit -qm injected --allow-empty
 git -C "$R" update-ref refs/remotes/origin/zz HEAD
 snap "$TMP/after"
-rc_is 2 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
-grep -q '^commit ' "$TMP/changes" || { echo 'remote exemption hole' >&2; exit 1; }
+rc_is 1 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
 fixture
 replacement=$(git -C "$R" -c user.name=Fixture -c user.email=fixture@example.invalid commit-tree -m replacement "HEAD^{tree}")
 for operation in add move remove; do
@@ -592,4 +643,59 @@ grep -Fq -- '-> /usr/bin/editor…' "$TMP/changes" || { echo 'encoded command wh
 check_key 'url.https://host.invalid/?SECRET.insteadOf' https://x 2
 if grep -q SECRET "$TMP/changes"; then echo 'displayed key query leaked' >&2; exit 1; fi
 [ "$(printf fixture | repo_state_digest)" = "$(printf fixture | _repo_state_sha256)" ]
+check_key core.hooksPath $'/tmp/hooks\ninjected\r\177' 2
+grep -Fq '\x0a' "$TMP/changes" || { echo 'value newline was not escaped' >&2; exit 1; }
+[ "$(grep -c '^injected' "$TMP/changes")" = 0 ] || exit 1
+# History metadata must be critical, including when it conceals a foreign commit.
+for history in graft foreign-graft shallow; do
+  fixture
+  git -C "$R" -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm second --allow-empty
+  snap "$TMP/before"
+  if [ "$history" = foreign-graft ]; then
+    git -C "$R" -c user.name=Foreign -c user.email=foreign@example.invalid commit -qm foreign --allow-empty
+    git -C "$R" -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm tip --allow-empty
+  fi
+  sha=$(git -C "$R" rev-parse HEAD)
+  if [ "$history" = shallow ]; then
+    printf '%s\n' "$sha" > "$R/.git/shallow"
+  else
+    printf '%s\n' "$sha" > "$R/.git/info/grafts"
+  fi
+  snap "$TMP/after"
+  rc_is 2 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
+  if [ "$history" = foreign-graft ]; then
+    grep -q '^commit ' "$TMP/changes" || { echo 'graft concealed foreign commit' >&2; exit 1; }
+  fi
+done
+# A real concurrent pull must remain a warning.
+fixture
+snap "$TMP/before"
+upstream=$(mktemp -d "$TMP/upstream.XXXXXX")
+[ -n "$upstream" ] || exit 1
+git -C "$upstream" clone -q -b main "$R.git" .
+git -C "$upstream" -c user.name=Foreign -c user.email=foreign@example.invalid commit -qm upstream --allow-empty
+git -C "$upstream" -c user.name=Fixture -c user.email=fixture@example.invalid push -q origin main
+git -C "$R" -c user.name=Fixture -c user.email=fixture@example.invalid pull -q --ff-only origin main
+snap "$TMP/after"
+rc_is 1 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
+for key in core.pager $'example.sub\033section.value'; do
+  check_key "$key" $'pager\033[2J' 2
+  if LC_ALL=C grep -q $'\033' "$TMP/changes"; then echo 'raw terminal control byte' >&2; exit 1; fi
+  grep -Fq '\x1b' "$TMP/changes" || { echo 'missing escaped control byte' >&2; exit 1; }
+done
+fixture
+rm "$R/.git/info/exclude"
+mkfifo "$R/.git/info/exclude"
+snap "$TMP/before"
+snap "$TMP/after"
+rc_is 1 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
+grep -qx 'tree check skipped: baseline unreadable' "$TMP/changes"
+fixture
+key='url.https://u:pa/SECRET@h//x@y/.insteadOf'
+git -C "$R" -c user.name=Fixture -c user.email=fixture@example.invalid config "$key" old
+snap "$TMP/before"
+git -C "$R" -c user.name=Fixture -c user.email=fixture@example.invalid config "$key" new
+snap "$TMP/after"
+rc_is 2 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
+[ "$(grep -c '^config redacted\.' "$TMP/changes")" = 1 ] || { echo 'redacted key value paired incorrectly' >&2; exit 1; }
 echo 'repo-state tests passed'

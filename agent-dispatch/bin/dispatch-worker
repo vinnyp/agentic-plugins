@@ -70,6 +70,7 @@ REVIEW_WT_RM_PARENT=""
 REVIEW_WT_PARENT_CREATED=0
 REVIEW_SRC_TOP=""
 REVIEW_PIN_DIR=""
+REVIEW_PIN_MARKER=""
 REVIEW_STATE_DIR=""
 REVIEW_SNAPSHOT_DIR=""
 REVIEW_BEFORE_HASH=""
@@ -107,7 +108,13 @@ cleanup_dispatch_worker() {
     rm -f "$REVIEW_OUTFILE_TMP"
   fi
   if [ -n "${REVIEW_PIN_DIR:-}" ]; then
-    "$SCRIPT_DIR/review-pin.sh" release "$REVIEW_PIN_DIR" 2>/dev/null || true
+    # Never re-run git here: the reviewer may have planted a FIFO (e.g. objects/info/alternates)
+    # that blocks `git rev-parse` forever. Remove the marker path resolved at pin time.
+    if [ -n "${REVIEW_PIN_MARKER:-}" ]; then
+      rm -f "$REVIEW_PIN_MARKER" 2>/dev/null || true
+    else
+      "$SCRIPT_DIR/review-pin.sh" release "$REVIEW_PIN_DIR" 2>/dev/null || true
+    fi
   fi
   if [ -n "${REVIEW_WT:-}" ]; then
     review_clone_guarded_rm "$REVIEW_WT_RM_PARENT" "$REVIEW_WT" 2>/dev/null || true
@@ -268,6 +275,8 @@ if [ "$REVIEW" = "1" ]; then
   _review_pin_workdir="${WORKDIR:-$PWD}"
   if "$SCRIPT_DIR/review-pin.sh" pin "$_review_pin_workdir" --label "peer-review"; then
     REVIEW_PIN_DIR="$_review_pin_workdir"
+    _review_pin_gitdir=$(git -C "$_review_pin_workdir" rev-parse --absolute-git-dir 2>/dev/null) || _review_pin_gitdir=''
+    [ -z "$_review_pin_gitdir" ] || REVIEW_PIN_MARKER="$_review_pin_gitdir/review-pinned"
   else
     echo "dispatch-worker: could not pin review tree — continuing unpinned" >&2
   fi
@@ -329,6 +338,61 @@ run_with_timeout() {
   return "$rc"
 }
 
+# Bound the entire snapshot, including git reads that can block on FIFOs.
+review_state_snapshot_bounded() {
+  local limit=${DISPATCH_SNAPSHOT_TIMEOUT_SECS:-120} tcmd='' result=0 pid watchdog marker monitor=0
+  case "$limit" in ''|*[!0-9]*|0) limit=120 ;; esac
+  if command -v timeout >/dev/null 2>&1; then tcmd=timeout
+  elif command -v gtimeout >/dev/null 2>&1; then tcmd=gtimeout; fi
+  if [ -n "$tcmd" ]; then
+    "$tcmd" -k 5 "$limit" bash -c '. "$1"; repo_state_snapshot "$2" "$3"' _ "$SCRIPT_DIR/lib/repo-state.sh" "$1" "$2" || result=$?
+  else
+    marker="$2.timeout"
+    # A separate process group lets the watchdog reap blocked git descendants.
+    case $- in *m*) monitor=1 ;; esac
+    set -m
+    (repo_state_snapshot "$1" "$2") &
+    pid=$!
+    (
+      # Keep the timer in this group and also kill it directly on cancellation.
+      # No inherited descriptor may keep the caller's output pipe open.
+      set +m
+      sleeper=''
+      trap '[ -z "$sleeper" ] || kill -TERM "$sleeper" 2>/dev/null || true; exit 0' TERM
+      sleep "$limit" &
+      sleeper=$!
+      wait "$sleeper" || exit 0
+      : > "$marker"
+      kill -TERM -- "-$pid" 2>/dev/null || true
+      sleep 5 &
+      sleeper=$!
+      wait "$sleeper" || exit 0
+      kill -KILL -- "-$pid" 2>/dev/null || true
+    ) </dev/null >/dev/null 2>&1 &
+    watchdog=$!
+    [ "$monitor" = 1 ] || set +m
+    wait "$pid" || result=$?
+    if [ -e "$marker" ]; then
+      # Reap descendants even when the snapshot shell exited on TERM first.
+      kill -KILL -- "-$pid" 2>/dev/null || true
+      result=124
+      rm -f "$marker"
+    fi
+    kill -TERM -- "-$watchdog" 2>/dev/null || true
+    kill -TERM "$watchdog" 2>/dev/null || true
+    # Do not wait on the watchdog: a timer must never delay a completed snapshot.
+  fi
+  case "$result" in
+    124|137)
+      REVIEW_SNAPSHOT_TIMED_OUT=1
+      echo 'drift snapshot timed out (possible hostile file such as a FIFO in the git dir)' >&2
+      repo_state_mark_unreadable "$2"
+      # Let baseline callers pin the unreadable state so comparison fails closed.
+      return 0 ;;
+  esac
+  return "$result"
+}
+
 # Hash pins are shell-local and never exported to the reviewer. Same-user
 # reviewers can discover files, so directory separation alone is insufficient.
 review_state_compare_pinned() {
@@ -362,7 +426,7 @@ review_state_before_runtime() {
   REVIEW_SNAPSHOT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/dispatch-snapshots.XXXXXX")" || { echo "dispatch-worker: could not create the review snapshot directory" >&2; return 3; }
   if [ -z "$REPO_STATE_SRC" ]; then
     REVIEW_STATE_STATUS="skipped(not-a-git-repo)"
-  elif ! repo_state_snapshot "$REPO_STATE_SRC" "$REVIEW_SNAPSHOT_DIR/before"; then
+  elif ! review_state_snapshot_bounded "$REPO_STATE_SRC" "$REVIEW_SNAPSHOT_DIR/before"; then
     REVIEW_STATE_STATUS="skipped(snapshot-failed)"
   else
     REVIEW_BEFORE_HASH=$(repo_state_digest < "$REVIEW_SNAPSHOT_DIR/before") || return 3
@@ -372,7 +436,7 @@ review_state_before_runtime() {
 
 review_state_after_runtime() {
   [ "$REVIEW" = 1 ] && [ -n "$REVIEW_STATE_CLASS" ] || return 0
-  repo_state_snapshot "$REPO_STATE_SRC" "$REVIEW_SNAPSHOT_DIR/after" || repo_state_mark_unreadable "$REVIEW_SNAPSHOT_DIR/after"
+  review_state_snapshot_bounded "$REPO_STATE_SRC" "$REVIEW_SNAPSHOT_DIR/after" || repo_state_mark_unreadable "$REVIEW_SNAPSHOT_DIR/after"
   REVIEW_AFTER_HASH=$(repo_state_digest < "$REVIEW_SNAPSHOT_DIR/after") || REVIEW_AFTER_HASH=''
   REVIEW_STATE_CLASS=0
   review_state_compare_pinned "$REVIEW_SNAPSHOT_DIR/before" "$REVIEW_SNAPSHOT_DIR/after" "$REVIEW_STATE_DIR/changes" || REVIEW_STATE_CLASS=$?
@@ -844,7 +908,7 @@ dispatch_agy() {
     local agy_rc=0 cmp_rc=0 retry_skipped=0 state_checked=0
     if [ -z "$REPO_STATE_SRC" ]; then
       REVIEW_STATE_STATUS="skipped(not-a-git-repo)"
-    elif repo_state_snapshot "$REPO_STATE_SRC" "$REVIEW_SNAPSHOT_DIR/before"; then
+    elif review_state_snapshot_bounded "$REPO_STATE_SRC" "$REVIEW_SNAPSHOT_DIR/before"; then
       REVIEW_BEFORE_HASH=$(repo_state_digest < "$REVIEW_SNAPSHOT_DIR/before") || return 3
       state_checked=1
     else
@@ -852,7 +916,7 @@ dispatch_agy() {
     fi
     run_agy_review_attempt || agy_rc=$?
     if [ "$state_checked" = 1 ]; then
-      repo_state_snapshot "$REPO_STATE_SRC" "$REVIEW_SNAPSHOT_DIR/interim" || repo_state_mark_unreadable "$REVIEW_SNAPSHOT_DIR/interim"
+      review_state_snapshot_bounded "$REPO_STATE_SRC" "$REVIEW_SNAPSHOT_DIR/interim" || repo_state_mark_unreadable "$REVIEW_SNAPSHOT_DIR/interim"
       REVIEW_INTERIM_HASH=$(repo_state_digest < "$REVIEW_SNAPSHOT_DIR/interim") || REVIEW_INTERIM_HASH=''
       review_state_compare_pinned "$REVIEW_SNAPSHOT_DIR/before" "$REVIEW_SNAPSHOT_DIR/interim" "$REVIEW_STATE_DIR/changes" || cmp_rc=$?
       case "$cmp_rc" in
@@ -889,7 +953,7 @@ dispatch_agy() {
       review_bytes="${review_bytes:-0}"
     fi
     if [ "$state_checked" = 1 ]; then
-      repo_state_snapshot "$REPO_STATE_SRC" "$REVIEW_SNAPSHOT_DIR/after" || repo_state_mark_unreadable "$REVIEW_SNAPSHOT_DIR/after"
+      review_state_snapshot_bounded "$REPO_STATE_SRC" "$REVIEW_SNAPSHOT_DIR/after" || repo_state_mark_unreadable "$REVIEW_SNAPSHOT_DIR/after"
       REVIEW_AFTER_HASH=$(repo_state_digest < "$REVIEW_SNAPSHOT_DIR/after") || REVIEW_AFTER_HASH=''
       local after_rc=0
       review_state_compare_pinned "$REVIEW_SNAPSHOT_DIR/before" "$REVIEW_SNAPSHOT_DIR/after" "$REVIEW_STATE_DIR/after-changes" || after_rc=$?
@@ -1021,6 +1085,12 @@ esac
 
 if [ "$REVIEW" = 1 ]; then
   REVIEW_ORIGINAL_RC=${REVIEW_ORIGINAL_RC:-$rc}
+  if [ "${REVIEW_SNAPSHOT_TIMED_OUT:-0}" = 1 ]; then
+    REVIEW_STATE_CLASS=2
+    REVIEW_STATE_N=1
+    printf '%s\n' 'drift snapshot timed out (possible hostile file such as a FIFO in the git dir)' > "$REVIEW_STATE_DIR/changes"
+    rc=10
+  fi
   case "$REVIEW_STATE_CLASS" in
     0) REVIEW_STATE_STATUS=clean ;;
     1)

@@ -8,7 +8,13 @@ _repo_state_git() (
   # shellcheck disable=SC2086
   unset $_REPO_STATE_LOCAL_ENV_VARS
   export GIT_OPTIONAL_LOCKS=0
-  git "$@"
+  if [ "${1:-}" = --history ]; then
+    shift
+    export GIT_GRAFT_FILE=/dev/null GIT_NO_REPLACE_OBJECTS=1
+    git --no-replace-objects -c core.commitGraph=false "$@"
+  else
+    git "$@"
+  fi
 )
 
 _repo_state_sha256() (
@@ -76,8 +82,8 @@ _repo_state_configs() {
     done
     key="$key$rest"
     # An earlier malformed authority may precede a later well-formed one.
-    if [[ "$key" =~ //.*@ ]] && [[ "$key" =~ //[^@]*/[^@]*@ ]]; then
-      digest=$(printf '%s' "$kv" | _repo_state_sha256) || return 1
+    if [[ "$key" =~ //[^@]*/[^@]*@ ]]; then
+      digest=$(printf '%s' "$key" | _repo_state_sha256) || return 1
       key="redacted.$digest"
     fi
     printf 'config\t%s\t%s\t%s\t%s\n' "$(_repo_state_encode "$scope")" \
@@ -165,7 +171,7 @@ repo_state_snapshot() (
     [ "$custom" = "$hooks" ] || _repo_state_hooks "$custom" 'core.hooksPath/'
     local path file digest target kind metadata_unsafe=0 common
     common=$(_repo_state_git -C "$repo" rev-parse --path-format=absolute --git-common-dir) || return 3
-    for path in info/exclude info/attributes objects/info/alternates; do
+    for path in info/exclude info/attributes objects/info/alternates info/grafts shallow; do
       file="$common/$path"
       digest='(absent)'
       if [ -L "$file" ]; then
@@ -231,7 +237,8 @@ _repo_state_display() {
     commit.gpgsign|tag.gpgsign) ;;
     *) value='<changed>' ;;
   esac
-  printf '%s' "$value" | sed -E 's#(//)[^/]*@#\1#g; s#[?].*#?<redacted>#'
+  value=$(printf '%s' "$value" | sed -E 's#(//)[^/]*@#\1#g; s#[?].*#?<redacted>#')
+  _repo_state_escape_value "$value"
 }
 
 repo_state_compare() (
@@ -316,7 +323,7 @@ repo_state_compare() (
     [ "$rc" -ge 1 ] || rc=1
     case "$kind" in
       metadata)
-        [ "$key" != objects/info/alternates ] || rc=2
+        case "$key" in objects/info/alternates|info/grafts|shallow) rc=2 ;; esac
         printf 'metadata %s: <changed>\n' "$key" >> "$changes" ;;
       hooks)
         rc=2
@@ -330,17 +337,18 @@ repo_state_compare() (
           refs/replace/*) rc=2 ;;
           refs/heads/*)
           if [ ! -f "$temp/exclude" ]; then
-            awk -F '\t' '$1=="ref" {print $3}' "$before" |
+            { awk -F '\t' '$1=="ref" {print $3}' "$before";
+              awk -F '\t' '$1=="ref" && $2 ~ /^refs\/remotes\// {print $3}' "$after"; } |
               _repo_state_git -C "$repo" cat-file --batch-check='%(objectname) %(objecttype)' 2>/dev/null |
               awk '($2=="commit" || $2=="tag") {print "^" $1}' > "$temp/exclude"
           fi
           [ "$new" != '(absent)' ] || continue
-          if ! _repo_state_git -C "$repo" rev-list --stdin "$new" < "$temp/exclude" > "$temp/commits" 2>/dev/null; then
+          if ! _repo_state_git --history -C "$repo" rev-list --stdin "$new" < "$temp/exclude" > "$temp/commits" 2>/dev/null; then
             printf 'commit-check %s: failed\n' "$key" >> "$changes"; rc=2; continue
           fi
           while IFS= read -r sha; do
-            cn=$(_repo_state_git -C "$repo" show -s --format=%cn "$sha")
-            ce=$(_repo_state_git -C "$repo" show -s --format=%ce "$sha")
+            cn=$(_repo_state_git --history -C "$repo" show -s --format=%cn "$sha")
+            ce=$(_repo_state_git --history -C "$repo" show -s --format=%ce "$sha")
             if [ "$(_repo_state_encode "$cn")" != "$identity_name" ] || [ "$(_repo_state_encode "$ce")" != "$identity_email" ]; then
               printf 'commit %s: committer <changed>\n' "$sha" >> "$changes"; rc=2
             fi
@@ -371,5 +379,35 @@ repo_state_compare() (
         fi ;;
     esac
   done < "$temp/records"
+  if awk -F '\t' '$1=="tree" && $3=="unreadable" {found=1} END {exit !found}' "$before"; then
+    printf 'tree check skipped: baseline unreadable\n' >> "$changes"
+    [ "$rc" -ge 1 ] || rc=1
+  fi
+  # Escape controls only at the display boundary, preserving record delimiters.
+  _repo_state_escape_output < "$changes" > "$temp/escaped"
+  cat "$temp/escaped" > "$changes"
   return "$rc"
 )
+
+_repo_state_escape_output() {
+  local line
+  while IFS= read -r line || [ -n "$line" ]; do
+    _repo_state_escape_value "$line"
+    printf '\n'
+  done
+}
+
+_repo_state_escape_value() {
+  local value=$1 char code i
+  local LC_ALL=C
+  for ((i=0; i<${#value}; i++)); do
+    char=${value:i:1}
+    printf -v code '%d' "'$char"
+    code=$((code & 255))
+    if [ "$code" -lt 32 ] || [ "$code" -eq 127 ]; then
+      printf '\\x%02x' "$code"
+    else
+      printf '%s' "$char"
+    fi
+  done
+}

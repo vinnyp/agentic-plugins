@@ -1646,6 +1646,20 @@ export SRC="$TMP/state-source"
 make_git_repo "$SRC"
 git -C "$SRC" remote add origin https://example.invalid/source
 cp "$SRC/.git/config" "$TMP/state-config.before"
+
+# Snapshot bounds apply to git internals and worktree ignore reads.
+for hostile in .git/objects/info/alternates .gitignore; do
+  printf 'mkfifo "$SRC/%s"\n' "$hostile" > "$AGY_STUB_ACTIONS"
+  snapshot_rc=0
+  DISPATCH_SNAPSHOT_TIMEOUT_SECS=1 run_cfg_review "$SRC" || snapshot_rc=$?
+  [ "$snapshot_rc" = 10 ] || fail "snapshot timeout expected critical, got $snapshot_rc"
+  if [ "$hostile" = .gitignore ]; then
+    grep -qF 'drift snapshot timed out (possible hostile file such as a FIFO in the git dir)' "$TMP/cfg.err" || fail 'snapshot timeout diagnostic missing'
+  fi
+  rm "$SRC/$hostile"
+done
+: > "$AGY_STUB_ACTIONS"
+
 check_state_run() {
   local expected="$1" actual=0
   run_cfg_review "${2:-$SRC}" || actual=$?
