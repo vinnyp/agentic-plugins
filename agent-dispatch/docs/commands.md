@@ -347,6 +347,13 @@ Every review snapshot has a 120-second wall-clock bound, overridden with
 `timeout -k` or `gtimeout -k`, with a watchdog fallback when neither is installed.
 Snapshot timeouts are unreadable state and critical (exit 10), with the diagnostic
 `drift snapshot timed out (possible hostile file such as a FIFO in the git dir)`.
+The metadata sweep runs before bounded Git reads using directories resolved before review.
+Nonregular metadata paths remain listed even when the snapshot times out. Nonregular
+metadata present before launch is also critical (exit `10`).
+The compare runs under the same bound; a compare timeout is critical. While an
+interim or after snapshot or the compare is running, the exit status line reads
+`DISPATCH_REVIEW_STATE=critical(incomplete)`, so a run killed in that window never
+reports `skipped`.
 
 ## `gate-run.sh`
 
@@ -1094,6 +1101,8 @@ In `dispatch-worker` review runs, snapshots live separately from reviewer
 configuration, with no snapshot path exported or included in the brief. Every
 snapshot is SHA-256-pinned in a dispatcher shell variable. A missing or modified
 snapshot is critical (exit 10), even if a same-user reviewer discovers its path.
+Nonregular files in Git metadata are reported before config and ref reads, so their
+names remain visible on stderr even if a later Git read times out.
 
 Compare prints named change lines and exits 0 for clean, 1 for warn-only drift or 2 for
 critical drift. Config changes are critical except these benign keys: `branch.*.*`

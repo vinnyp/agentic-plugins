@@ -68,23 +68,23 @@ _repo_state_configs() {
     # A slash in a password is malformed URL syntax, but still sensitive.
     # Conservatively hash through the last @ even in that malformed shape.
     if [[ "$key" =~ //.*@ ]] && ! [[ "$key" =~ //[^/]*@ ]]; then
-      digest=$(printf '%s' "$key" | _repo_state_sha256) || return 1
-      key="redacted.$digest"
+      digest=$(printf '%s%s' "$REPO_STATE_SALT" "$key" | _repo_state_sha256) || return 1
+      key="redacted.${digest:0:12}"
     fi
     rest=$key
     key=''
     while [[ "$rest" =~ (//)([^/]*)@ ]]; do
       prefix=${rest%%"${BASH_REMATCH[0]}"*}
       userinfo=${BASH_REMATCH[2]}
-      digest=$(printf '%s' "$userinfo" | _repo_state_sha256) || return 1
+      digest=$(printf '%s%s' "$REPO_STATE_SALT" "$userinfo" | _repo_state_sha256) || return 1
       key="$key$prefix${BASH_REMATCH[1]}${digest:0:12}@"
       rest=${rest#*"${BASH_REMATCH[0]}"}
     done
     key="$key$rest"
     # An earlier malformed authority may precede a later well-formed one.
     if [[ "$key" =~ //[^@]*/[^@]*@ ]]; then
-      digest=$(printf '%s' "$key" | _repo_state_sha256) || return 1
-      key="redacted.$digest"
+      digest=$(printf '%s%s' "$REPO_STATE_SALT" "$key" | _repo_state_sha256) || return 1
+      key="redacted.${digest:0:12}"
     fi
     printf 'config\t%s\t%s\t%s\t%s\n' "$(_repo_state_encode "$scope")" \
       "$(_repo_state_encode "$origin")" "$(_repo_state_encode "$key")" "$(_repo_state_encode "$value")"
@@ -141,14 +141,60 @@ _repo_state_tree() {
   done < "$status"
 }
 
+# Inspect metadata without asking Git to open any of it.
+repo_state_nonregular_sweep() (
+  umask 077
+  local out=$1 dir existing duplicate file temp
+  shift
+  local dirs=()
+  for dir in "$@"; do
+    duplicate=0
+    for existing in ${dirs[@]+"${dirs[@]}"}; do
+      [ "$existing" != "$dir" ] || duplicate=1
+    done
+    [ "$duplicate" = 0 ] || continue
+    dirs[${#dirs[@]}]=$dir
+  done
+  : > "$out" || return 3
+  chmod 600 "$out" || return 3
+  [ "${#dirs[@]}" -gt 0 ] || return 0
+  temp=$(mktemp "${out}.find.XXXXXX") || return 3
+  trap 'rm -f "$temp"' EXIT
+  find -P "${dirs[@]}" \( -type p -o -type c -o -type b -o -type s \) -print0 > "$temp" || return 3
+  while IFS= read -r -d '' file; do
+    printf 'unsafe\t%s\n' "$(_repo_state_encode "$file")"
+  done < "$temp" > "$out"
+)
+
 repo_state_snapshot() (
   umask 077
   local repo=${1:-} out=${2:-} top ident name email config wt hooks custom head branch record temp
   _repo_state_sha256 </dev/null >/dev/null || return 3
   case "$repo" in /*) ;; *) return 3 ;; esac
-  top=$(_repo_state_git -C "$repo" rev-parse --path-format=absolute --show-toplevel 2>/dev/null) || return 3
   temp=$(mktemp -d "$(dirname "$out")/.repo-state.XXXXXX") || return 3
   trap 'rm -rf "$temp"' EXIT
+  # Standalone CLI snapshots share a private salt beside their output files.
+  if [ -z "${REPO_STATE_SALT:-}" ]; then
+    local saltfile
+    saltfile="$(dirname "$out")/.repo-state-private/salt"
+    mkdir -p "${saltfile%/*}" || return 3
+    chmod 700 "${saltfile%/*}" || return 3
+    if [ ! -f "$saltfile" ]; then
+      (set -C; od -An -tx1 -N16 /dev/urandom | tr -d ' \n' > "$saltfile") || return 3
+    fi
+    REPO_STATE_SALT=$(cat "$saltfile") || return 3
+    [ -n "$REPO_STATE_SALT" ] || return 3
+  fi
+  local path file digest target kind metadata_unsafe=0 common gitdir
+  common=${REVIEW_GIT_COMMON_DIR:-}
+  gitdir=${REVIEW_GIT_DIR:-}
+  if [ -z "$common" ] || [ -z "$gitdir" ]; then
+    common=$(_repo_state_git -C "$repo" rev-parse --path-format=absolute --git-common-dir) || return 3
+    gitdir=$(_repo_state_git -C "$repo" rev-parse --absolute-git-dir) || return 3
+  fi
+  repo_state_nonregular_sweep "$temp/unsafe" "$common" "$gitdir" || return 3
+  [ ! -s "$temp/unsafe" ] || metadata_unsafe=1
+  top=$(_repo_state_git -C "$repo" rev-parse --path-format=absolute --show-toplevel 2>/dev/null) || return 3
   config="$temp/config"
   if ! _repo_state_git -C "$repo" config --list --show-scope --show-origin -z > "$config"; then
     return 3
@@ -165,12 +211,11 @@ repo_state_snapshot() (
     name=${ident% <*}; email=${ident##*<}; email=${email%>}
     printf 'identity\t%s\t%s\n' "$(_repo_state_encode "$name")" "$(_repo_state_encode "$email")"
     cat "$config.refs"
-    hooks="$(_repo_state_git -C "$repo" rev-parse --path-format=absolute --git-common-dir)/hooks"
+    hooks="$common/hooks"
     _repo_state_hooks "$hooks" ''
     custom=$(_repo_state_git -C "$repo" rev-parse --path-format=absolute --git-path hooks)
     [ "$custom" = "$hooks" ] || _repo_state_hooks "$custom" 'core.hooksPath/'
-    local path file digest target kind metadata_unsafe=0 common
-    common=$(_repo_state_git -C "$repo" rev-parse --path-format=absolute --git-common-dir) || return 3
+    cat "$temp/unsafe"
     for path in info/exclude info/attributes objects/info/alternates info/grafts shallow; do
       file="$common/$path"
       digest='(absent)'
@@ -248,6 +293,13 @@ repo_state_compare() (
     printf 'state: <unreadable before snapshot>\n' > "$changes"
     return 3
   fi
+  if grep -q '^unsafe'"$(printf '\t')" "$before"; then
+    while IFS=$'\t' read -r kind key; do
+      [ "$kind" = unsafe ] || continue
+      printf 'nonregular %s: critical\n' "$(_repo_state_escape_value "$(_repo_state_decode "$key")")" >> "$changes"
+    done < "$before"
+    return 2
+  fi
   IFS= read -r first < "$before" || true
   if [ "$first" = unreadable ]; then
     printf 'state: <unreadable before snapshot>\n' > "$changes"
@@ -259,7 +311,11 @@ repo_state_compare() (
   fi
   IFS= read -r first < "$after" || true
   if [ "$first" = unreadable ]; then
-    printf 'config: <unreadable after review>\n' > "$changes"
+    while IFS=$'\t' read -r kind key; do
+      [ "$kind" = unsafe ] || continue
+      printf 'nonregular %s: critical\n' "$(_repo_state_escape_value "$(_repo_state_decode "$key")")" >> "$changes"
+    done < "$after"
+    printf 'config: <unreadable after review>\n' >> "$changes"
     return 2
   fi
   temp=$(mktemp -d "$(dirname "$changes")/.repo-state-compare.XXXXXX") || return 3
@@ -319,6 +375,12 @@ repo_state_compare() (
   repo=$(_repo_state_decode "$repo")
   identity_name=$(awk -F '\t' '$1=="identity" {print $2;exit}' "$before")
   identity_email=$(awk -F '\t' '$1=="identity" {print $3;exit}' "$before")
+  local unsafe=0
+  while IFS=$'\t' read -r kind key; do
+    [ "$kind" = unsafe ] || continue
+    printf 'nonregular %s: critical\n' "$(_repo_state_escape_value "$(_repo_state_decode "$key")")" >> "$changes"
+    unsafe=1; rc=2
+  done < "$after"
   while IFS=$'\t' read -r kind key old new remote line; do
     [ "$rc" -ge 1 ] || rc=1
     case "$kind" in
@@ -336,6 +398,7 @@ repo_state_compare() (
         case "$key" in
           refs/replace/*) rc=2 ;;
           refs/heads/*)
+          [ "$unsafe" = 0 ] || continue
           if [ ! -f "$temp/exclude" ]; then
             { awk -F '\t' '$1=="ref" {print $3}' "$before";
               awk -F '\t' '$1=="ref" && $2 ~ /^refs\/remotes\// {print $3}' "$after"; } |
@@ -398,12 +461,25 @@ _repo_state_escape_output() {
 }
 
 _repo_state_escape_value() {
+  if command -v perl >/dev/null 2>&1; then
+    printf '%s' "$1" | LC_ALL=C perl -pe 's/([\x00-\x1f\x7f]|\xc2[\x80-\x9f])/join "", map { sprintf "\\x%02x", ord $_ } split \/\/, $1/ge'
+    return
+  fi
   local value=$1 char code i
   local LC_ALL=C
   for ((i=0; i<${#value}; i++)); do
     char=${value:i:1}
     printf -v code '%d' "'$char"
     code=$((code & 255))
+    if [ "$code" -eq 194 ] && [ "$((i + 1))" -lt "${#value}" ]; then
+      printf -v code '%d' "'${value:i+1:1}"
+      code=$((code & 255))
+      if [ "$code" -ge 128 ] && [ "$code" -le 159 ]; then
+        printf '\\xc2\\x%02x' "$code"
+        i=$((i + 1)); continue
+      fi
+      code=194
+    fi
     if [ "$code" -lt 32 ] || [ "$code" -eq 127 ]; then
       printf '\\x%02x' "$code"
     else

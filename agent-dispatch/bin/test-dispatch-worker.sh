@@ -1528,6 +1528,7 @@ env | grep -c '^GIT_DIR=' > "$AGY_ARGS_FILE.env"
 ACTIONS
 before=$(git -C "$R43" worktree list)
 run_cfg_review "$R43" || fail 'V1 launch failed'
+[ ! -e "$(git -C "$R43" rev-parse --absolute-git-dir)/review-pinned" ] || fail "review pin not released normal"
 review_pwd=$(sed -n 's/^PWD=//p' "$AGY_ARGS_FILE")
 [ "$(cat "$AGY_ARGS_FILE.gitdir")" = "$review_pwd/.git" ] || fail 'V1 git dir shared'
 [ "$(cat "$AGY_ARGS_FILE.common")" = "$review_pwd/.git" ] || fail 'V1 common dir shared'
@@ -1569,6 +1570,7 @@ linked="$TMP/linked43"
 git -C "$R43" checkout review-main >/dev/null 2>&1
 git -C "$R43" worktree add "$linked" feature >/dev/null 2>&1
 run_cfg_review "$linked"
+[ ! -e "$(git -C "$linked" rev-parse --absolute-git-dir)/review-pinned" ] || fail "review pin not released linked"
 [ "$(sed -n '3p' "$AGY_ARGS_FILE.refs")" = "$expected_head" ] || fail 'linked source HEAD changed'
 git -C "$R43" config filter.x.clean cat
 run_cfg_review "$R43" || fail 'unsuitable fallback failed'
@@ -1648,16 +1650,115 @@ git -C "$SRC" remote add origin https://example.invalid/source
 cp "$SRC/.git/config" "$TMP/state-config.before"
 
 # Snapshot bounds apply to git internals and worktree ignore reads.
-for hostile in .git/objects/info/alternates .gitignore; do
-  printf 'mkfifo "$SRC/%s"\n' "$hostile" > "$AGY_STUB_ACTIONS"
-  snapshot_rc=0
-  DISPATCH_SNAPSHOT_TIMEOUT_SECS=1 run_cfg_review "$SRC" || snapshot_rc=$?
-  [ "$snapshot_rc" = 10 ] || fail "snapshot timeout expected critical, got $snapshot_rc"
-  if [ "$hostile" = .gitignore ]; then
-    grep -qF 'drift snapshot timed out (possible hostile file such as a FIFO in the git dir)' "$TMP/cfg.err" || fail 'snapshot timeout diagnostic missing'
+# Bound the suite's own child even when the implementation bound regresses.
+run_hostile_review() (
+  local timer='' child guard rc=0
+  timer=$(command -v timeout || command -v gtimeout) || timer=''
+  if [ -n "$timer" ]; then
+    export DW TMP BRIEF
+    export -f run_cfg_review
+    "$timer" -k 5 60 bash -c 'run_cfg_review "$1"' _ "$SRC" || rc=$?
+  else
+    set -m
+    run_cfg_review "$SRC" &
+    child=$!
+    (
+      set +m
+      sleep 60
+      kill -TERM -- "-$child" 2>/dev/null || true
+      sleep 5
+      kill -KILL -- "-$child" 2>/dev/null || true
+    ) </dev/null >/dev/null 2>&1 &
+    guard=$!
+    wait "$child" || rc=$?
+    kill -TERM -- "-$guard" 2>/dev/null || true
+    wait "$guard" 2>/dev/null || true
   fi
-  rm "$SRC/$hostile"
+  case "$rc" in
+    124|137|143) fail "hostile $hostile: review hung (snapshot or pin-release unbounded)" ;;
+  esac
+  exit "$rc"
+)
+
+mkdir "$TMP/tagged-git"
+export REAL_HOSTILE_GIT
+REAL_HOSTILE_GIT=$(command -v git)
+cat > "$TMP/tagged-git/git" <<'TAGGED'
+#!/usr/bin/env bash
+printf '%s\n' "$$" >> "$RUN_PID_FILE"
+# git reads a "git-<x>" argv[0] as a dashed builtin; keep the tag elsewhere.
+exec -a "tagged-$RUN_ID" "$REAL_HOSTILE_GIT" "$@"
+TAGGED
+chmod +x "$TMP/tagged-git/git"
+for hostile in .git/objects/info/alternates .gitignore .git/FETCH_HEAD loose-object; do
+  (
+  fail() { echo "FAIL: $*" >&2; exit 1; }
+  planted="$SRC/$hostile"
+  trap 'rm -f "$planted" "$SRC/.git/review-pinned"; if [ "$hostile" = loose-object ]; then git -C "$SRC" update-ref -d refs/heads/fifo; fi' EXIT
+  if [ "$hostile" = loose-object ]; then
+    sha=$(git -C "$SRC" -c user.name=t -c user.email=t@e commit-tree -m fifo 'HEAD^{tree}')
+    git -C "$SRC" update-ref refs/heads/fifo "$sha"
+    # Put the branch in place only after the readable baseline.
+    git -C "$SRC" update-ref -d refs/heads/fifo
+    planted="$SRC/.git/objects/${sha:0:2}/${sha:2}"
+    printf 'git -C "$SRC" update-ref refs/heads/fifo %s\nrm "%s"\nmkfifo "%s"\n' "$sha" "$planted" "$planted" > "$AGY_STUB_ACTIONS"
+  else
+    printf 'mkfifo "$SRC/%s"\n' "$hostile" > "$AGY_STUB_ACTIONS"
+  fi
+  (
+    fail() { echo "FAIL: $*" >&2; exit 1; }
+    trap 'rm -f "$planted"' EXIT
+    snapshot_rc=0
+    RUN_ID="hostile-$$-$(printf %s "$hostile" | tr -c 'A-Za-z0-9' _)"
+    export RUN_ID RUN_PID_FILE="$TMP/hostile-pids"
+    : > "$RUN_PID_FILE"
+    PATH="$TMP/tagged-git:$PATH" DISPATCH_SNAPSHOT_TIMEOUT_SECS=5 run_hostile_review || snapshot_rc=$?
+    while IFS= read -r tagged_pid; do
+      if ps -p "$tagged_pid" -o command= 2>/dev/null | grep -Fq "tagged-$RUN_ID"; then
+        fail "hostile $hostile left tagged git pid $tagged_pid"
+      fi
+    done < "$RUN_PID_FILE"
+    [ "$snapshot_rc" = 10 ] || fail "hostile $hostile expected critical, got $snapshot_rc"
+    ! grep -q 'baseline unreadable' "$TMP/cfg.err" || fail 'BEFORE snapshot unreadable'
+    grep -q 'SOURCE REPO CHANGED' "$TMP/cfg.err" || fail 'missing source changes'
+    if [ "$hostile" = .gitignore ]; then
+      grep -q 'drift snapshot timed out' "$TMP/cfg.err" || fail 'snapshot timeout missing'
+    else
+      grep -q 'nonregular ' "$TMP/cfg.err" || fail 'nonregular file not listed'
+    fi
+  ) || fail "hostile $hostile failed"
+  [ ! -e "$(git -C "$SRC" rev-parse --absolute-git-dir)/review-pinned" ] || fail "review pin not released hostile $hostile"
+  if [ "$hostile" = loose-object ]; then git -C "$SRC" update-ref -d refs/heads/fifo; fi
+  ) || fail "hostile $hostile failed"
+  git -C "$SRC" status --porcelain >/dev/null || fail "hostile $hostile left unusable repo"
 done
+# Before-launch FIFO uses metadata that setup does not need to open.
+: > "$AGY_STUB_ACTIONS"
+hostile='before-FETCH_HEAD'
+(
+  fail() { echo "FAIL: $*" >&2; exit 1; }
+  planted="$SRC/.git/FETCH_HEAD"
+  trap 'rm -f "$planted"' EXIT
+  mkfifo "$planted"
+  snapshot_rc=0
+  DISPATCH_SNAPSHOT_TIMEOUT_SECS=5 run_hostile_review || snapshot_rc=$?
+  [ "$snapshot_rc" = 10 ] || fail "before FIFO expected critical, got $snapshot_rc"
+) || fail "before-launch FIFO failed"
+# Termination inside the after-snapshot window must leave a pessimistic EXIT status.
+mkdir -p "$TMP/sentinel/bin/lib"
+cp "$DW" "$TMP/sentinel/bin/dispatch-worker"
+cp "$SELF_DIR/lib/"*.sh "$TMP/sentinel/bin/lib/"
+cp "$SELF_DIR/review-pin.sh" "$SELF_DIR/agy-auth-probe.sh" "$TMP/sentinel/bin/"
+# Inject only into the test-owned copy, before the bounded helper does any work.
+sed '/^review_state_snapshot_bounded() {$/a\
+  if [ "$2" = "$REVIEW_SNAPSHOT_DIR/after" ]; then kill -TERM "$$"; fi
+' "$DW" > "$TMP/sentinel/bin/dispatch-worker"
+actual=0
+TIMEOUT=0 "$TMP/sentinel/bin/dispatch-worker" --runtime agy --review --brief "$BRIEF" --workdir "$SRC" > "$TMP/sentinel.out" 2> "$TMP/sentinel.err" || actual=$?
+[ "$actual" = 143 ] || fail "sentinel TERM expected 143, got $actual"
+grep -q 'DISPATCH_REVIEW_STATE=critical(incomplete)' "$TMP/sentinel.err" || fail 'after window status not critical'
+DISPATCH_SNAPSHOT_TIMEOUT_SECS=00 run_cfg_review "$SRC" || fail '00 default review failed'
+grep -q 'invalid DISPATCH_SNAPSHOT_TIMEOUT_SECS; using 120' "$TMP/cfg.err" || fail '00 accepted unbounded'
 : > "$AGY_STUB_ACTIONS"
 
 check_state_run() {
