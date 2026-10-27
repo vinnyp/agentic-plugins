@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.9.0](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.8.5...agent-dispatch-v1.9.0) (2026-10-27)
+
+
+### Features
+
+* **agent-dispatch:** attribute mutation catches with expected text and a knock-out ([#68](https://github.com/vinnyp/agentic-plugins/issues/68)) ([c854fc2](https://github.com/vinnyp/agentic-plugins/commit/c854fc2149b2d116bbe410ed33d317e1d2390753))
+* **agent-dispatch:** parallel mutation sweeps and a measurement design round ([#73](https://github.com/vinnyp/agentic-plugins/issues/73)) ([0b68fdb](https://github.com/vinnyp/agentic-plugins/commit/0b68fdbf053b0a97f8a30bf89fd50336932320c3))
+* **agent-dispatch:** run test suites in parallel with fail-closed accounting ([d82f103](https://github.com/vinnyp/agentic-plugins/commit/d82f103ef20f6fbd3c6c07ded2a9d95bd1bfae44))
+
+
+### Bug Fixes
+
+* **agent-dispatch:** repo-state test flake, credential redaction and drift-gate hardening ([#71](https://github.com/vinnyp/agentic-plugins/issues/71)) ([9f6cf0e](https://github.com/vinnyp/agentic-plugins/commit/9f6cf0e586cafbd5690ec7054c32a4b03a9f000c))
+* **agent-dispatch:** stop capture readers leaking when no writer arrives ([#72](https://github.com/vinnyp/agentic-plugins/issues/72)) ([f3cb715](https://github.com/vinnyp/agentic-plugins/commit/f3cb71570a5c21f978dd4a68713c9c5e9fbcda6f))
+
+
+### Performance Improvements
+
+* **agent-dispatch:** split the dispatch-worker suite and raise the default job cap ([#74](https://github.com/vinnyp/agentic-plugins/issues/74)) ([6240fa0](https://github.com/vinnyp/agentic-plugins/commit/6240fa025b30462925d6c7f75fab77df202ae546))
+
 ## [1.8.5](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.8.4...agent-dispatch-v1.8.5) (2026-10-26)
 
 
