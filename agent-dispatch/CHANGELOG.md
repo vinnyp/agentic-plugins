@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.5](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.8.4...agent-dispatch-v1.8.5) (2026-10-26)
+
+
+### Bug Fixes
+
+* **agent-dispatch:** explain a SIGPIPE baseline; bound load generators ([#66](https://github.com/vinnyp/agentic-plugins/issues/66)) ([142b07c](https://github.com/vinnyp/agentic-plugins/commit/142b07c45fc2f579d7ca0c8ddf727d5c4fa15419))
+
 ## [1.8.4](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.8.3...agent-dispatch-v1.8.4) (2026-10-24)
 
 
