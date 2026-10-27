@@ -96,7 +96,8 @@ for key in credential.helper remote.origin.url; do
   git -C "$R" config "$key" 'https://u:PWTWO_SECRET@h/r'
   snap "$TMP/after"
   rc_is 2 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
-  rc_is 0 grep -Eq 'p1|p2' "$TMP/before" "$TMP/after" "$TMP/changes"
+  grep -q "^config $key " "$TMP/changes"
+  grep -Eq 'p1|p2' "$TMP/before" "$TMP/after" "$TMP/changes" || { echo "fixture premise lost: snapshot no longer records the repo-p1p2 path" >&2; exit 1; }
   if grep -E 'PWONE_SECRET|PWTWO_SECRET' "$TMP/before" "$TMP/after" "$TMP/changes"; then
     echo "secret leaked into snapshot/changes for $key" >&2
     exit 1
@@ -306,7 +307,7 @@ for addition in none uploadpack branch; do
     branch) grep -q '^config branch.main.remote ' "$TMP/changes" ;;
   esac
 done
-for key in credential.helper http.extraheader foo.apitoken secrets.apikey token.x; do
+for key in credential.helper http.extraheader foo.apitoken secrets.apikey token.x foo.password password.x proxy.x; do
   fixture
   case "$key" in
     credential.helper) value='store --file /x-PWONE_SECRET' ;;
@@ -324,6 +325,32 @@ for key in credential.helper http.extraheader foo.apitoken secrets.apikey token.
     exit 1
   fi
 done
+# Credentialed URL keys must stay private and remain distinct snapshot entries.
+fixture
+key_one='url.https://u:PWONE_SECRET@h/.insteadOf'
+key_two='url.https://u:PWTWO_SECRET@h/.insteadOf'
+git -C "$R" config "$key_one" https://x
+snap "$TMP/before"
+git -C "$R" config --unset "$key_one"
+git -C "$R" config "$key_two" https://x
+snap "$TMP/after"
+rc_is 2 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
+grep -q '^config url.https://h/.insteadof ' "$TMP/changes"
+if grep -E 'PWONE_SECRET|PWTWO_SECRET' "$TMP/before" "$TMP/after" "$TMP/changes"; then
+  echo "secret leaked into snapshot/changes for credentialed key" >&2
+  exit 1
+fi
+git -C "$R" config "$key_one" https://x
+snap "$TMP/after"
+for secret in PWONE_SECRET PWTWO_SECRET; do
+  digest=$(printf 'u:%s' "$secret" | _repo_state_sha256)
+  grep -Fq "$(printf '\turl.https://%s@h/.insteadof\t' "${digest:0:12}")" "$TMP/after"
+done
+[ "$(grep -c 'url.https://.*@h/.insteadof' "$TMP/after")" = 2 ]
+if grep -E 'PWONE_SECRET|PWTWO_SECRET' "$TMP/after"; then
+  echo "secret leaked into snapshot for distinct credentialed keys" >&2
+  exit 1
+fi
 fixture
 clone="$TMP/upstream-clone"
 git -C "$R" clone -q -b main "$R.git" "$clone"
