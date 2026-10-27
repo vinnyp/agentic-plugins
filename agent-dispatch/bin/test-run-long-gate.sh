@@ -13,6 +13,8 @@ fail() {
 # Cleanup function
 TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT
+# Private default workdir so concurrent copies of this suite do not collide on the per-workdir gate lock.
+cd "$TMP_DIR"
 
 # Test 1: Successful gate -> --wait exits 0; log ends GATE_EXIT=0
 echo "Running Test 1..."
@@ -37,7 +39,7 @@ echo "Test 2 PASS"
 # Test 3: --status while running (exit 3) and after completion (exit 0)
 echo "Running Test 3..."
 LOG3="$TMP_DIR/test3.log"
-"$RUNNER" --cmd "sleep 1.5" --log "$LOG3"
+"$RUNNER" --cmd "sleep 4.5" --log "$LOG3"
 # Immediate status check should be 3
 set +e
 "$RUNNER" --status --log "$LOG3"
@@ -45,8 +47,8 @@ RC=$?
 set -e
 [ "$RC" -eq 3 ] || fail "Test 3 status check on running gate got $RC instead of 3"
 
-# Wait for completion
-sleep 2
+# Wait for completion (widened x3 for parallel runs)
+sleep 6
 set +e
 STATUS_OUT=$("$RUNNER" --status --log "$LOG3")
 RC=$?
@@ -72,7 +74,7 @@ LOG5="$TMP_DIR/test5.log"
   "$RUNNER" --cmd "sleep 2 && exit 42" --log "$LOG5"
 )
 # The subshell above has exited. Give it a moment to run and complete
-sleep 3.5
+sleep 10.5
 set +e
 "$RUNNER" --status --log "$LOG5"
 RC=$?
@@ -82,6 +84,7 @@ grep -q "GATE_EXIT=42" "$LOG5" || fail "Test 5 did not write correct GATE_EXIT=4
 echo "Test 5 PASS"
 
 # Test 6: --wait --timeout-secs 1 against a longer gate -> exit 124, gate still running (not killed)
+# KEPT: the 1s wait cap vs the 4s gate is the property under test.
 echo "Running Test 6..."
 LOG6="$TMP_DIR/test6.log"
 # Spawn a 4-second sleep command
@@ -97,8 +100,8 @@ set -e
 # Check if process is still running
 kill -0 "$pid" 2>/dev/null || fail "Test 6 gate process was killed on timeout"
 
-# Wait for it to finish and clean up
-sleep 4
+# Wait for it to finish and clean up (poll up to 12s)
+for _ in $(seq 1 120); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
 kill -0 "$pid" 2>/dev/null && fail "Test 6 process did not finish eventually"
 echo "Test 6 PASS"
 
@@ -110,10 +113,10 @@ echo "Running Test 7..."
 LOG7="$TMP_DIR/test7.log"
 WD7="$TMP_DIR/wd7"; mkdir -p "$WD7"
 start_time=$(date +%s)
-"$RUNNER" --cmd "sleep 3" --log "$LOG7" --workdir "$WD7"
+"$RUNNER" --cmd "sleep 9" --log "$LOG7" --workdir "$WD7"
 end_time=$(date +%s)
 elapsed=$((end_time - start_time))
-[ "$elapsed" -lt 2 ] || fail "Test 7 launch took $elapsed seconds, did not return immediately"
+[ "$elapsed" -lt 6 ] || fail "Test 7 launch took $elapsed seconds, did not return immediately"
 echo "Test 7 PASS"
 
 # Test 8: Stdin is not consumed from the caller
@@ -123,7 +126,7 @@ WD8="$TMP_DIR/wd8"; mkdir -p "$WD8"
 echo "input_sentinel" | "$RUNNER" --cmd "sleep 0.5" --log "$LOG8" --workdir "$WD8"
 # If it tried to read from stdin, it might block or get EOF.
 # Proving stdin is not consumed: the command runs and exits
-"$RUNNER" --wait --log "$LOG8" --timeout-secs 5 --poll-secs 1
+"$RUNNER" --wait --log "$LOG8" --timeout-secs 15 --poll-secs 1
 echo "Test 8 PASS"
 
 # --- same-workdir concurrency guard ---
@@ -135,7 +138,7 @@ echo "Running Test 9..."
 WD9="$TMP_DIR/wd9"; mkdir -p "$WD9"
 LOG9A="$TMP_DIR/test9a.log"
 LOG9B="$TMP_DIR/test9b.log"
-"$RUNNER" --cmd "sleep 4" --log "$LOG9A" --workdir "$WD9" > /dev/null
+"$RUNNER" --cmd "sleep 12" --log "$LOG9A" --workdir "$WD9" > /dev/null
 set +e
 GUARD_OUT=$("$RUNNER" --cmd "echo second_gate_ran" --log "$LOG9B" --workdir "$WD9" 2>&1)
 RC=$?
@@ -199,7 +202,7 @@ LOG13A="$TMP_DIR/test13a.log"
 LOG13B="$TMP_DIR/test13b.log"
 "$RUNNER" --cmd "echo first" --log "$LOG13A" --workdir "$WD13" > /dev/null
 "$RUNNER" --wait --log "$LOG13A" --timeout-secs 10 --poll-secs 1 || fail "Test 13 first gate failed"
-sleep 0.5
+sleep 1.5
 "$RUNNER" --cmd "echo second" --log "$LOG13B" --workdir "$WD13" > /dev/null \
   || fail "Test 13 serial re-run was blocked -- the lock was not released"
 "$RUNNER" --wait --log "$LOG13B" --timeout-secs 10 --poll-secs 1 || fail "Test 13 second gate failed"
@@ -240,7 +243,7 @@ rc=$?
 set -e
 [ "$rc" -eq 2 ] || fail "Test 15 symlink --log should exit 2, got $rc ($OUT15)"
 case "$OUT15" in *symlink*) ;; *) fail "Test 15 refusal did not mention the symlink: $OUT15";; esac
-sleep 0.5
+sleep 1.5
 [ ! -s "$TARGET15" ] || fail "Test 15 wrote through the symlink to $TARGET15: $(cat "$TARGET15")"
 echo "Test 15 PASS"
 

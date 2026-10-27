@@ -329,6 +329,8 @@ if [ -n "$build_cmd" ]; then
       break
     fi
   done
+  _partial_runner=
+  _partial_advisory=
   if [ -n "$_runner" ]; then
     _runner_base="$(basename "$_runner")"
     case "$build_cmd" in
@@ -336,15 +338,62 @@ if [ -n "$build_cmd" ]; then
       *) _found_targets="${_found_targets:+$_found_targets }$_runner" ;;
     esac
   fi
+  # Inspect each simple command independently: flags on a later command or
+  # pipeline destination do not select suites in the runner.
+  while IFS= read -r _simple; do
+    printf '%s\n' "$_simple" | tr -d "\"'" | grep -qE '(^|[[:space:]])--(only|changed)([=[:space:]]|$)' || continue
+    _command_runner=
+    # Tokenize without glob expansion or evaluating the caller's shell code.
+    while IFS= read -r _token; do
+      # Attached shell punctuation is not part of the runner path.
+      _token=${_token%;}
+      case "$_token" in
+        */run-tests.sh|run-tests.sh|scripts/test.sh|./scripts/test.sh)
+          if [ -f "$workdir/$_token" ]; then
+            _command_runner=$_token
+            if grep -qFx '# agent-dispatch-run-tests: partial runs exit 4' "$workdir/$_token"; then
+              _partial_runner=$_token
+            fi
+          fi ;;
+      esac
+    done < <(printf '%s\n' "$_simple" | tr '[:space:]' '\n')
+    [ -z "$_command_runner" ] || _partial_advisory=$_command_runner
+  # Drop only unquoted shell comments; keep literal and escaped hash signs.
+  done < <(printf '%s\n' "$build_cmd" | awk '
+    { quote = ""; escaped = 0
+      for (i = 1; i <= length($0); i++) {
+        c = substr($0, i, 1)
+        if (escaped) { escaped = 0; continue }
+        if (c == "\\" && quote != sprintf("%c", 39)) { escaped = 1; continue }
+        if (quote != "") { if (c == quote) quote = ""; continue }
+        if (c == "\"" || c == sprintf("%c", 39)) { quote = c; continue }
+        if (c == "#" && (i == 1 || substr($0, i - 1, 1) ~ /[[:space:]]/)) {
+          $0 = substr($0, 1, i - 1); break
+        }
+      }
+      print
+    }' | sed -E 's/&&|\|\||;|(^|[^|])\|([^|]|$)/\1\
+\2/g')
 
-  if [ -n "$_found_targets" ]; then
+  if [ -n "$_partial_runner" ]; then
+    die "--build-cmd runs a partial gate (this runner's --only/--changed exit 4 even when the selected suites pass); use the full runner as the build gate"
+  fi
+  emit_gate_advisories() {
+    if [ -n "$_partial_advisory" ]; then
+      note "gate-target advisory: --build-cmd '$build_cmd' may run a partial gate via $_partial_advisory"
+    fi
+    if [ -n "$_found_targets" ]; then
+      note "Advisory: --build-cmd '$build_cmd' skips gate-target(s): $_found_targets"
+    fi
+  }
+  if [ -n "$_found_targets$_partial_advisory" ]; then
     # Marker dedupes to one advisory per (workdir, build-cmd) per TTL. If the
     # workdir has no resolvable git dir we cannot dedupe — warn anyway. The
     # advisory's whole purpose is visibility, so every failure path here
     # errs toward emitting, never toward silence.
     _git_dir="$(git -C "$workdir" rev-parse --absolute-git-dir 2>/dev/null)"
     if [ -z "$_git_dir" ]; then
-      note "Advisory: --build-cmd '$build_cmd' skips gate-target(s): $_found_targets"
+      emit_gate_advisories
     else
       _advisory_marker="$_git_dir/gate-advisory"
       _should_warn=1
@@ -379,7 +428,7 @@ if [ -n "$build_cmd" ]; then
       fi
       if [ "$_should_warn" -eq 1 ]; then
         printf 'cmd_hash=%s\ntimestamp=%s\n' "$_cmd_hash" "$_now" > "$_advisory_marker" 2>/dev/null || true
-        note "Advisory: --build-cmd '$build_cmd' skips gate-target(s): $_found_targets"
+        emit_gate_advisories
       fi
     fi
   fi

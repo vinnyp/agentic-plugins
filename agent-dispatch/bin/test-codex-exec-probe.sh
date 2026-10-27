@@ -36,8 +36,8 @@ case "$BEHAVIOR" in
   term) echo "$$" > "$LOG.pid"; exec sleep 30 ;;
   host) echo 'timed out negotiating with the code-mode host' ;;
   host-copy) echo 'timed out negotiating with the code-mode host'; shasum -a 256 nonce.in > nonce.out ;;
-  host-sleep) echo 'timed out negotiating with the code-mode host'; sleep 3 ;;
-  sleep) sleep 3 ;;
+  host-sleep) echo 'timed out negotiating with the code-mode host'; sleep 10 ;;
+  sleep) sleep 10 ;;
 esac
 STUB
 chmod +x "$TMP/bin/codex"
@@ -52,7 +52,8 @@ chmod +x "$TMP/bin/timeout"
 # shellcheck disable=SC1091
 . "$BIN_DIR/codex-exec-probe.sh"
 fail() { echo "FAIL: $*" >&2; exit 1; }
-export CODEX_BIN="$TMP/bin/codex" CODEX_EXEC_PROBE_TIMEOUT=1s
+# 3s (widened from 1s for parallel runs): the copy stub must finish inside it; the sleep stubs (10s) must exceed it.
+export CODEX_BIN="$TMP/bin/codex" CODEX_EXEC_PROBE_TIMEOUT=3s
 for behavior in copy wrong empty host host-copy host-sleep sleep failure limit missing; do
   export BEHAVIOR="$behavior"
   rm -f "$LOG" "$LOG.dir" "$LOG.git" "$LOG.stdin"
@@ -72,7 +73,7 @@ for behavior in copy wrong empty host host-copy host-sleep sleep failure limit m
     [ ! -f "$LOG" ] || fail 'missing binary invoked'
     continue
   fi
-  grep -q '^-k 10s 1s ' "$LOG.timeout" || fail 'timeout argv'
+  grep -q '^-k 10s 3s ' "$LOG.timeout" || fail 'timeout argv'
   dir="$(cat "$LOG.dir")"
   [ "$(cat "$LOG")" = "exec --dangerously-bypass-approvals-and-sandbox -C $dir -" ] || fail argv
   case "$dir" in "$XDG_CACHE_HOME"/agent-dispatch/codex-probe.*) : ;; *) fail 'cache location' ;; esac
@@ -121,11 +122,11 @@ for behavior in copy host skip inconclusive false; do
 done
 # Invalid bounds must never disable timeout; valid integer units pass through.
 export BEHAVIOR=copy
-for bound in "" 0 0s -1 0.2s nonsense 2s 2m 2h 2; do
+for bound in "" 0 0s -1 0.2s nonsense 6s 6m 6h 6; do
   export CODEX_EXEC_PROBE_TIMEOUT="$bound"
   codex_exec_probe > "$TMP/out" 2> "$TMP/err" || fail "bound $bound"
   case "$bound" in
-    2*) expected="$bound" ;;
+    6*) expected="$bound" ;;
     *) expected=75s; grep -q 'invalid timeout' "$TMP/err" || fail 'invalid note' ;;
   esac
   grep -q "^-k 10s $expected " "$LOG.timeout" || fail "bound argv $bound"
@@ -133,7 +134,7 @@ done
 unset CODEX_EXEC_PROBE_TIMEOUT
 codex_exec_probe > "$TMP/out" 2> "$TMP/err" || fail 'default timeout'
 grep -q '^-k 10s 75s ' "$LOG.timeout" || fail 'default timeout argv'
-export CODEX_EXEC_PROBE_TIMEOUT=1s
+export CODEX_EXEC_PROBE_TIMEOUT=3s
 # Ambient git state must not redirect init into a host repository.
 git init -q "$TMP/host"
 rm -f "$LOG.git"
@@ -165,7 +166,7 @@ for signal in TERM HUP; do
   ${probe_launcher[@]+"${probe_launcher[@]}"} bash -c '. "$1"; codex_exec_probe; exit $?' _ "$BIN_DIR/codex-exec-probe.sh" > "$TMP/out" 2> "$TMP/err" &
   launcher=$!
   # The function is a subshell of this launcher.
-  for ((i=0; i<100; i++)); do
+  for ((i=0; i<300; i++)); do
     [ ! -f "$LOG.pid" ] || break
     sleep 0.05
   done
@@ -178,6 +179,7 @@ for signal in TERM HUP; do
   expected=143
   [ "$signal" != HUP ] || expected=129
   [ "$rc" -eq "$expected" ] || fail "$signal status: $rc"
+  # KEPT: stub sleeps 30s under a 60s cap; <=5s proves the signal stops the child promptly.
   [ "$((SECONDS - signal_start))" -le 5 ] || fail "$signal exceeded 5s"
   ! kill -0 "$(cat "$LOG.pid")" 2>/dev/null || fail "$signal left child"
   [ ! -e "$(cat "$LOG.dir")" ] || fail "$signal left directory"
