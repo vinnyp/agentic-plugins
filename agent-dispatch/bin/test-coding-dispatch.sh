@@ -3,7 +3,8 @@ set -uo pipefail
 unset RUN_TESTS_JOBS RUN_TESTS_TIMEOUT RUN_TESTS_KEEP_LOGS RUN_TESTS__PS_AVAILABLE
 for run_tests_hook in ${!RUN_TESTS__TEST_@}; do unset "$run_tests_hook"; done
 unset run_tests_hook
-SELF_DIR="$(cd "$(dirname "$0")" && pwd)"; TMP="$(cd "$(mktemp -d)" && pwd -P)"; trap 'rm -rf "$TMP"' EXIT
+SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+TMP="$(set -eu; scratch=$(mktemp -d "${TMPDIR:-/tmp}/coding-tests.XXXXXX"); [ -n "$scratch" ]; cd "$scratch"; pwd -P)"; trap 'rm -rf "$TMP"' EXIT
 export TMPDIR="$TMP"
 # shellcheck disable=SC1091
 . "$SELF_DIR/lib/test-env-reset.sh"
@@ -35,7 +36,7 @@ fi
 
 # Build a NON-Go git repo (no go.mod).
 REPO="$TMP/repo"; mkdir -p "$REPO"; git -C "$REPO" init -q
-git -C "$REPO" config user.email t@t; git -C "$REPO" config user.name t
+export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 echo "base" > "$REPO/existing.txt"; git -C "$REPO" add -A; git -C "$REPO" commit -qm base
 printf 'do the task\n' > "$TMP/prompt"
 
@@ -56,7 +57,6 @@ echo "test 2 (non-Go passing gate keeps work) PASS"
 # Helper: a fresh parent repo with one tracked file + one commit (physical path).
 new_parent() {
   local p="$1"; mkdir -p "$p"; git -C "$p" init -q
-  git -C "$p" config user.email t@t; git -C "$p" config user.name t
   echo base > "$p/tracked.txt"; git -C "$p" add -A; git -C "$p" commit -qm base
 }
 
@@ -1130,7 +1130,6 @@ echo "test #128a rc=124 fail message says TIMEOUT and names the cap PASS"
 # since the whole bug is that the marker is invisible to the empty-diff check.
 new_parent_gitignoring_marker() {
   local p="$1"; mkdir -p "$p"; git -C "$p" init -q
-  git -C "$p" config user.email t@t; git -C "$p" config user.name t
   echo base > "$p/tracked.txt"
   echo "_coding-result.json" > "$p/.gitignore"
   git -C "$p" add -A; git -C "$p" commit -qm base
@@ -1746,6 +1745,17 @@ echo "test #187 targeted HEAD-derived gate warning and negative control PASS"
 
 
 # #234: capacity verdict, stream capture, timeout priority and signal cleanup.
+# BSD mktemp -t ignores TMPDIR; keep every fixture's brief and capture under its
+# private directory so missing-brief injection and capture leak assertions work there.
+real_mktemp234=$(command -v mktemp)
+cat > "$TMP/bin/mktemp" <<STUB
+#!/usr/bin/env bash
+if [ "\${1:-}" = -t ]; then
+  exec "$real_mktemp234" "\$TMPDIR/\$2"
+fi
+exec "$real_mktemp234" "\$@"
+STUB
+chmod +x "$TMP/bin/mktemp"
 mkdir -p "$TMP/cap234"
 for case234 in a a-wt h b c d e f i j; do
   p234="$TMP/parent234-$case234"; new_parent "$p234"
@@ -1830,7 +1840,7 @@ echo 'test #234g PASS'
 # window, the blocked readers outlived it in the caller's process group.
 mkdir -p "$TMP/cap234k" "$TMP/bin234k"
 p234="$TMP/parent234k"; new_parent "$p234"
-printf '#!/usr/bin/env bash\nexit 0\n' > "$TMP/bin/codex"
+printf '#!/usr/bin/env bash\ntouch "$TMPDIR/agent-launched"\n' > "$TMP/bin/codex"
 cat > "$TMP/bin234k/mkfifo" <<STUB
 #!/usr/bin/env bash
 "$(command -v mkfifo)" "\$@" || exit
@@ -1848,8 +1858,123 @@ if kill -0 "$dispatch234" 2>/dev/null; then
   fail '#234k dispatch hung on a capture reader with no writer'
 fi
 wait "$dispatch234"; rc=$?
-[ "$rc" -eq 1 ] && grep -qF 'empty diff (agent changed nothing' "$TMP/out234k" || fail "#234k verdict rc=$rc: $(cat "$TMP/out234k")"
+[ "$rc" -eq 1 ] && grep -qFx 'DISPATCH=fail: empty diff (agent changed nothing, rc=1) — nothing to revert' "$TMP/out234k" || fail "#234k verdict rc=$rc: $(cat "$TMP/out234k")"
 ! pgrep -f "tee.*$TMP/cap234k" >/dev/null || fail '#234k tee survived'
+[ ! -e "$TMP/cap234k/agent-launched" ] || fail '#234k agent launched'
+[ -z "$(find "$TMP/cap234k" -name 'coding-dispatch-cap.*')" ] || fail '#234k capture remains'
 echo 'test #234k PASS'
+
+# #234l-n: exercise both capture streams in every remaining launch branch.
+for branch234 in l m n; do
+  agent234=agy; path234="$TMP/bin:$PATH"
+  if [ "$branch234" != m ]; then
+    path234="$TMP/bin:$TMP/no-timeout-bin"
+  fi
+  [ "$branch234" != l ] || agent234=codex
+  for mode234 in capacity streams; do
+    p234="$TMP/parent234-$branch234-$mode234"; new_parent "$p234"
+    cat > "$TMP/bin/$agent234" <<'STUB'
+#!/usr/bin/env bash
+if [ "$MODE234" = capacity ]; then
+  echo 'Selected model is at capacity' >&2
+else
+  echo OUT-LINE; echo ERR-LINE >&2
+fi
+exit 1
+STUB
+    chmod +x "$TMP/bin/$agent234"
+    TMPDIR="$TMP/cap234" MODE234="$mode234" PATH="$path234" bash "$CD" "$agent234" "$p234" "$TMP/prompt" true > "$TMP/out234" 2> "$TMP/err234"; rc=$?
+    if [ "$branch234" != m ]; then
+      grep -q 'no timeout/gtimeout binary' "$TMP/err234" "$TMP/out234" || fail "#234$branch234 timeout present"
+    fi
+    if [ "$mode234" = capacity ]; then
+      [ "$rc" -eq 6 ] || fail "#234$branch234 capacity rc=$rc"
+    else
+      [ "$rc" -eq 1 ] || fail "#234$branch234 streams rc=$rc"
+      grep -qx OUT-LINE "$TMP/out234" && ! grep -q ERR-LINE "$TMP/out234" && grep -qx ERR-LINE "$TMP/err234" && ! grep -q OUT-LINE "$TMP/err234" || fail "#234$branch234 streams crossed"
+    fi
+    [ -z "$(find "$TMP/cap234" -name 'coding-dispatch-cap.*')" ] || fail "#234$branch234 capture remains"
+  done
+  echo "test #234$branch234 PASS"
+done
+
+# #234o: kill the dispatcher from its err reader, before an agent can start.
+mkdir -p "$TMP/cap234o" "$TMP/bin234o"
+p234="$TMP/parent234o"; new_parent "$p234"
+real_tee234=$(command -v tee)
+cat > "$TMP/bin234o/tee" <<'STUB'
+#!/usr/bin/env bash
+case "$*" in
+  *err.log*) echo $$ > "$TMPDIR/err.pid"; echo "$PPID" > "$TMPDIR/dispatch.pid"; kill -KILL "$PPID" ;;
+  *) echo $$ > "$TMPDIR/out.pid" ;;
+esac
+exec "$REAL_TEE234" "$@"
+STUB
+cat > "$TMP/bin234o/codex" <<'STUB'
+#!/usr/bin/env bash
+touch "$TMPDIR/agent-launched"
+exit 0
+STUB
+chmod +x "$TMP/bin234o/tee" "$TMP/bin234o/codex"
+# Pause at the launch boundary so scheduling cannot let the agent beat the err tee.
+cat > "$TMP/bin234o/env" <<'STUB'
+trap 'if [ -n "${_tee_err:-}" ] && [ -z "${child:-}" ]; then sleep 1; fi' DEBUG
+STUB
+BASH_ENV="$TMP/bin234o/env" TMPDIR="$TMP/cap234o" REAL_TEE234="$real_tee234" PATH="$TMP/bin234o:$TMP/bin:$TMP/no-timeout-bin" bash "$CD" codex "$p234" "$TMP/prompt" true > "$TMP/out234o" 2>&1 &
+dispatch234=$!
+for ((i234=0; i234<30; i234++)); do
+  [ ! -f "$TMP/cap234o/dispatch.pid" ] || break
+  sleep 0.1
+done
+[ -f "$TMP/cap234o/dispatch.pid" ] || fail '#234o reader never started'
+wait "$dispatch234" 2>/dev/null; rc=$?
+[ "$rc" -eq 137 ] || fail "#234o expected SIGKILL, rc=$rc"
+for ((i234=0; i234<30; i234++)); do
+  pgrep -f "tee.*$TMP/cap234o" >/dev/null || break
+  sleep 0.1
+done
+if pgrep -f "tee.*$TMP/cap234o" >/dev/null; then
+  for pidfile234 in "$TMP/cap234o/out.pid" "$TMP/cap234o/err.pid"; do
+    [ ! -f "$pidfile234" ] || kill -KILL "$(cat "$pidfile234")" 2>/dev/null || true
+  done
+  fail '#234o tee survived killed dispatcher'
+fi
+[ ! -e "$TMP/cap234o/agent-launched" ] || fail '#234o agent launched'
+echo 'test #234o PASS'
+
+# #234p: a daemonized child redirects its streams and cannot retain FIFO writers.
+p234="$TMP/parent234p"; new_parent "$p234"
+cat > "$TMP/bin/codex" <<'STUB'
+#!/usr/bin/env bash
+sleep 20 >/dev/null 2>&1 & echo $! > "$PID234"
+exit 0
+STUB
+chmod +x "$TMP/bin/codex"
+TMPDIR="$TMP/cap234" PID234="$TMP/pid234p" bash "$CD" codex "$p234" "$TMP/prompt" true > "$TMP/out234p" 2>&1 &
+dispatch234=$!
+for ((i234=0; i234<50; i234++)); do
+  kill -0 "$dispatch234" 2>/dev/null || break
+  sleep 0.1
+done
+hung234=0
+if kill -0 "$dispatch234" 2>/dev/null; then hung234=1; kill -KILL "$dispatch234"; fi
+[ ! -f "$TMP/pid234p" ] || kill "$(cat "$TMP/pid234p")" 2>/dev/null || true
+wait "$dispatch234" 2>/dev/null; rc=$?
+[ "$hung234" -eq 0 ] && [ "$rc" -eq 1 ] || fail '#234p grandchild held capture open'
+[ -f "$TMP/pid234p" ] || fail '#234p grandchild never started'
+[ -z "$(find "$TMP/cap234" -name 'coding-dispatch-cap.*')" ] || fail '#234p capture remains'
+echo 'test #234p PASS'
+
+# #234q: FIFO creation failure must stop before descriptors or agents are opened.
+mkdir -p "$TMP/bin234q" "$TMP/cap234q"
+p234="$TMP/parent234q"; new_parent "$p234"
+printf '#!/usr/bin/env bash\nexit 1\n' > "$TMP/bin234q/mkfifo"
+printf '#!/usr/bin/env bash\ntouch "$TMPDIR/agent-launched"\n' > "$TMP/bin234q/codex"
+chmod +x "$TMP/bin234q/mkfifo" "$TMP/bin234q/codex"
+TMPDIR="$TMP/cap234q" PATH="$TMP/bin234q:$PATH" bash "$CD" codex "$p234" "$TMP/prompt" true > "$TMP/out234q" 2>&1; rc=$?
+[ "$rc" -eq 2 ] && grep -qFx 'DISPATCH=error: could not create capture FIFOs' "$TMP/out234q" || fail '#234q did not fail closed'
+[ ! -e "$TMP/cap234q/agent-launched" ] || fail '#234q agent launched'
+[ -z "$(find "$TMP/cap234q" -name 'coding-dispatch-cap.*')" ] || fail '#234q capture remains'
+echo 'test #234q PASS'
 
 echo "ALL PASS"

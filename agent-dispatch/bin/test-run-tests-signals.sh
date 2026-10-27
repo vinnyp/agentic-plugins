@@ -326,10 +326,15 @@ if ! grep -qFx 'run-tests.sh: NOTICE: ps not found; runner identity check disabl
  echo 'FAIL: inherited ps cache suppressed no-ps NOTICE'
  exit 1
 fi
+suite bin/test-leak.sh 'echo LEAK-LOG; sleep 40 & echo $! > "$TMPDIR/leak.pid"; exit 0'
+PATH="$shim" run
+check test "$rc" = 1
+check grep -qF 'LEAK test-leak.sh: ps not found' "$TMP/out"
 printf '#!/usr/bin/env bash\nexit 1\n' > "$shim/ps"
 chmod +x "$shim/ps"
 PATH="$shim" run
-check test "$rc" = 0
+check test "$rc" = 1
+check grep -qFx 'LEAK test-leak.sh: survivors could not be listed' "$TMP/out"
 rm "$shim/ps"
 ln -s "$(command -v ps)" "$shim/ps"
 fi

@@ -681,6 +681,8 @@ _tee_out=""
 _tee_err=""
 # shellcheck disable=SC2329 # invoked by the signal trap
 cleanup_signal() {
+  # Recover the worker if a signal arrived between its fork and child assignment.
+  if [ -z "$child" ] && [ -n "$_tee_err" ] && [ "${!:-}" != "$_tee_err" ]; then child=$!; fi
   trap '' HUP INT TERM
   if [ -n "$child" ]; then
     if [ -n "$TIMEOUT_BIN" ]; then
@@ -719,9 +721,13 @@ cleanup_signal() {
 trap cleanup_signal HUP INT TERM
 
 _cap_dir="$(mktemp -d -t coding-dispatch-cap.XXXXXX)"
-mkfifo "$_cap_dir/out.fifo" "$_cap_dir/err.fifo"
+mkfifo "$_cap_dir/out.fifo" "$_cap_dir/err.fifo" || {
+  rm -rf "$_cap_dir"
+  die "could not create capture FIFOs"
+}
 # Open both ends of each FIFO here, before forking either side: a read-write open never
-# blocks, so neither a reader nor the agent ever waits in a FIFO open. A reader whose writer
+# blocks on Linux/macOS (not guaranteed by POSIX), so neither side waits in a FIFO
+# open. A reader whose writer
 # never arrived (the launch failed first, or this script was killed between the forks)
 # used to block forever, hanging the dispatch or outliving it in the caller's process
 # group. Each FIFO now behaves as a pipe: its reader sees EOF once every writer closes.
