@@ -1017,7 +1017,7 @@ After a full run, shellcheck checks executable non-test `bin/` entrypoints at
 `--severity=warning` when installed. Zero discovered suites is a failure.
 
 `-j` overrides `RUN_TESTS_JOBS`; `--timeout` overrides `RUN_TESTS_TIMEOUT`.
-Jobs default to min(cores, 8), using `getconf _NPROCESSORS_ONLN`, then
+Jobs default to min(cores, 16), using `getconf _NPROCESSORS_ONLN`, then
 `sysctl -n hw.ncpu`, then 2. The per-suite timeout defaults to 420 seconds, with
 `timeout -k 15` (or `gtimeout -k 15`) giving a 15-second kill grace. Both numeric
 settings, including environment values, must match `^[1-9][0-9]*$`; invalid values
@@ -1164,7 +1164,7 @@ as unknown identity; only a definite parent mismatch stops a wrapper.
 | `MUTATION_VERIFY_FILE` | commands in `mutation-verify.sh` copy mode | output-only absolute copied subject path; caller values are not inputs |
 | `MUTATION_VERIFY_SWEEP_TIMEOUT` | `mutation-sweep.sh` | 600 seconds; positive decimal integer; overridden by `--timeout` |
 | `MUTATION_VERIFY_SWEEP_JOBS` | `mutation-sweep.sh` | min(cores, 8); positive decimal integer; overridden by `-j` |
-| `RUN_TESTS_JOBS` | `run-tests.sh` | min(cores, 8); positive decimal integer; overridden by `-j` |
+| `RUN_TESTS_JOBS` | `run-tests.sh` | min(cores, 16); positive decimal integer; overridden by `-j` |
 | `RUN_TESTS_TIMEOUT` | `run-tests.sh` | `420` seconds per suite; positive decimal integer; overridden by `--timeout`; kill grace 15 seconds |
 | `RUN_TESTS__TEST_KILL_GRACE` | `run-tests.sh` | test-only TERM-to-KILL grace override; positive integer seconds (default `15`) |
 | `RUN_TESTS_KEEP_LOGS` | `run-tests.sh` | `1` retains logs after a passing full or partial run; failure and interruption always retain them |

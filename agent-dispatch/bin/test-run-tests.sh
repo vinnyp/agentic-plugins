@@ -128,6 +128,38 @@ fi
 if group basics; then
 full default
 failures default
+# Observe the effective concurrency passed to xargs without timing assertions.
+fixture default-jobs
+suite bin/test-a.sh 'exit 0'
+jobs_shim="$TMP/jobs-shim"
+mkdir -p "$jobs_shim"
+export RUN_TESTS_TEST_REAL_XARGS
+RUN_TESTS_TEST_REAL_XARGS=$(command -v xargs)
+cat > "$jobs_shim/xargs" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$TMPDIR/xargs-args"
+exec "$RUN_TESTS_TEST_REAL_XARGS" "$@"
+SH
+cat > "$jobs_shim/getconf" <<'SH'
+#!/usr/bin/env bash
+[ "$RUN_TESTS_TEST_CORE_SOURCE" = getconf ] || exit 1
+printf '%s\n' "$RUN_TESTS_TEST_CORES"
+SH
+cat > "$jobs_shim/sysctl" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$RUN_TESTS_TEST_CORES"
+SH
+chmod +x "$jobs_shim/"*
+for core_source in getconf sysctl; do
+ for cores in 32 4; do
+  expected_jobs=16
+  [ "$cores" != 4 ] || expected_jobs=4
+  PATH="$jobs_shim:$PATH" RUN_TESTS_TEST_CORE_SOURCE="$core_source" RUN_TESTS_TEST_CORES="$cores" run
+  check test "$rc" = 0
+  check test "$(sed -n '/^-P$/{n;p;}' "$TMP/xargs-args")" = "$expected_jobs"
+ done
+done
+unset RUN_TESTS_TEST_REAL_XARGS
 fixture exit255
 suite bin/test-0.sh 'exit 255'; suite bin/test-1.sh 'touch "$TMPDIR/one"'; suite bin/test-2.sh 'touch "$TMPDIR/two"'
 run -j 1
