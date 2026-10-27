@@ -220,3 +220,7 @@ its tier), e.g. `gemini-4-argon` for `gemini-4-argon-high`. With today's IDs,
 ## License
 
 MIT.
+
+Repository-state snapshots hash sensitive config values and replace URL userinfo
+in config keys with the first 12 hex digits of its SHA-256 digest. Credentialed
+keys remain distinct for change detection; change reports omit the userinfo.

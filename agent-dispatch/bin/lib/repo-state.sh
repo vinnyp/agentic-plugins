@@ -34,7 +34,7 @@ _repo_state_encode() {
 }
 
 _repo_state_configs() {
-  local scope origin kv key value lower
+  local scope origin kv key value lower prefix rest userinfo digest
   while IFS= read -r -d '' scope && IFS= read -r -d '' origin && IFS= read -r -d '' kv; do
     case "$kv" in
       *$'\n'*) key=${kv%%$'\n'*}; value=${kv#*$'\n'} ;;
@@ -53,6 +53,17 @@ _repo_state_configs() {
           value="sha256:$(printf '%s' "$value" | _repo_state_sha256)"
         fi ;;
     esac
+    # Hash URL userinfo in keys while preserving distinct credentialed keys.
+    rest=$key
+    key=''
+    while [[ "$rest" =~ ([a-zA-Z][a-zA-Z0-9+.-]*://)([^/@]*)@ ]]; do
+      prefix=${rest%%"${BASH_REMATCH[0]}"*}
+      userinfo=${BASH_REMATCH[2]}
+      digest=$(printf '%s' "$userinfo" | _repo_state_sha256) || return 1
+      key="$key$prefix${BASH_REMATCH[1]}${digest:0:12}@"
+      rest=${rest#*"${BASH_REMATCH[0]}"}
+    done
+    key="$key$rest"
     printf 'config\t%s\t%s\t%s\t%s\n' "$(_repo_state_encode "$scope")" \
       "$(_repo_state_encode "$origin")" "$(_repo_state_encode "$key")" "$(_repo_state_encode "$value")"
   done
