@@ -451,14 +451,17 @@ only, in these exact forms:
 
 | Runner | `--test-cmd` | append to make `--knockout-cmd` | scope proof |
 |---|---|---|---|
-| cargo | `cargo test -q`, no positional filter | `-- --exact --skip <path::name>` | `--knockout-expect-output '1 filtered out'` |
+| cargo | `cargo test -q`, no positional filter and no `--` section | `-- --exact --skip <path::name>` | `--knockout-expect-output '1 filtered out'` |
 | go | `go test -v -count=1 <one package>` | `-skip '^TestName$'`, or `-skip '^TestName$/^row$'` for one table row | `--knockout-delta-line '=== RUN '` |
 | pytest | `pytest -q <path>` | `--deselect <full node id, including any [param] id>` | `--knockout-expect-output '1 deselected'` |
 
 The tool enforces these shapes: the part of `--knockout-cmd` after `--test-cmd` must be exactly
 one of `-- --exact --skip <path::name>`, `-skip '^Name$'` / `-skip '^Name$/^row$'` (names of
-letters, digits and `_`), or `--deselect <path::id>` (optionally single-quoted, no spaces or shell
-metacharacters), with nothing before or after it. An extra runner flag (`--lib`, `--ignore`), an
+letters, digits and `_`), or `--deselect <path::id>` (optionally single-quoted; the id may use only
+letters, digits, `_ . / = , + @ - [ ]` and `::`), with nothing before or after it. For the cargo
+shape, `--test-cmd` must not contain its own `--` section (such as `-- --nocapture`): the appended
+`-- --exact --skip` would become a second `--`, and libtest would read every word after it as a name
+filter that runs only the hazard test. An extra runner flag (`--lib`, `--ignore`), an
 unanchored or unquoted go pattern, a cargo `--skip` without `--exact`, or anything chained after the
 deselect is refused (exit `2`) before any test runs.
 
@@ -477,7 +480,7 @@ How the tool checks the scope proof, on the unmutated copy and again on the muta
   one line and are refused.
 - cargo: `--exact` applies to any positional filter as well, and the count adds to tests the
   command already filters out, so keep `--test-cmd` free of positional filters (a full run that
-  already prints a count is refused).
+  already prints a count is refused) and of a `--` section (refused).
 - go: `-skip` applies in every package the command runs; name one package, never `./...`. To
   isolate one table row, skip the row, not the table.
 - pytest: `-q` keeps the count to the one summary line (without it pytest prints `deselected` in
@@ -488,7 +491,8 @@ For any other runner (node included) there is no verified exact form: record the
 UNPROVEN, never CAUGHT, until one exists.
 
 Refusals, all exit `2`: an empty command; one that does not start with `--test-cmd` (the same
-command plus a deselect) or is identical to it; a suffix that is not one documented deselect; no
+command plus a deselect) or is identical to it; a suffix that is not one documented deselect; a
+cargo `--test-cmd` with its own `--` section; no
 scope proof; a count line that does not start with its number, declares a count other than `1`, or
 is empty or multi-line; a delta line other than `'=== RUN '`; one that is red on the unmutated copy (a bad flag or
 runner error would otherwise "confirm" by printing nothing); one whose baseline prints an expected

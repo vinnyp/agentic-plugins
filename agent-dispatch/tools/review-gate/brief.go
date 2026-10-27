@@ -251,7 +251,7 @@ const mutationCheckRule = "\nMutation checks (required for any mutant you report
 	"`--expect-fail-output '<the line only the hazard test prints when it fails>'` AND " +
 	"`--knockout-cmd '<the same test command with only the hazard test deselected>'` plus its required scope proof. " +
 	"The knock-out is supported only for cargo, go and pytest, in these exact forms: cargo test -q (no positional " +
-	"filter) + -- --exact --skip <path::name> with --knockout-expect-output '1 filtered out'; go test -v -count=1 " +
+	"filter, no -- section) + -- --exact --skip <path::name> with --knockout-expect-output '1 filtered out'; go test -v -count=1 " +
 	"<one package> + -skip '^TestName$' (or '^TestName$/^row$' for one table row) with --knockout-delta-line " +
 	"'=== RUN '; pytest -q <path> + --deselect <full node id> with --knockout-expect-output '1 deselected'. The tool " +
 	"sums every count line and counts the RUN lines itself. For any other runner (node included), record the mutant " +

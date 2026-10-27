@@ -361,10 +361,25 @@ if [ "$have_knockout" -eq 1 ]; then
   _ko_suffix="${knockout_cmd#"$test_cmd"}"
   _re_cargo='^ -- --exact --skip [A-Za-z_][A-Za-z0-9_]*(::[A-Za-z_][A-Za-z0-9_]*)*$'
   _re_go="^ -skip '\\^[A-Za-z0-9_]+\\\$(/\\^[A-Za-z0-9_]+\\\$)?'\$"
-  _re_pytest="^ --deselect ('[^' ;&|<>\$\`()]+::[^' ;&|<>\$\`()]+'|[^' ;&|<>\$\`()]+::[^' ;&|<>\$\`()]+)\$"
+  # pytest ids: an allowlist (letters, digits, _ . / = , + @ - [ ] and ::), no
+  # whitespace, braces, globs, quotes or other shell metacharacters.
+  _id_chars='[]A-Za-z0-9_./=,+@[-]'
+  _re_pytest="^ --deselect ('${_id_chars}+::${_id_chars}+(::${_id_chars}+)*'|${_id_chars}+::${_id_chars}+(::${_id_chars}+)*)\$"
   if [[ ! "$_ko_suffix" =~ $_re_cargo ]] && [[ ! "$_ko_suffix" =~ $_re_go ]] && [[ ! "$_ko_suffix" =~ $_re_pytest ]]; then
     echo "mutation-verify.sh: --knockout-cmd must be --test-cmd plus exactly one documented deselect (cargo: -- --exact --skip <path::name>; go: -skip '^Name\$' or '^Name\$/^row\$'; pytest: --deselect <path::id>), with nothing else; got the suffix:$_ko_suffix" >&2
     exit 2
+  fi
+  # cargo: a test command that already has a "--" section would make the
+  # appended "-- --exact --skip <name>" a second "--", turning every word after
+  # it into a name FILTER (run only the hazard test). Refuse it.
+  if [[ "$_ko_suffix" =~ $_re_cargo ]]; then
+    read -r -a _tc_words <<<"$test_cmd"
+    for _w in ${_tc_words[@]+"${_tc_words[@]}"}; do
+      if [ "$_w" = "--" ]; then
+        echo "mutation-verify.sh: the cargo knock-out needs a --test-cmd without its own '--' section (e.g. no '-- --nocapture'); the appended '-- --exact --skip' would become a name filter" >&2
+        exit 2
+      fi
+    done
   fi
 else
   for _k in ${knockout_expect_outputs[@]+"${knockout_expect_outputs[@]}"}; do

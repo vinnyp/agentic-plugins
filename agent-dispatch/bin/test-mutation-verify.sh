@@ -1815,7 +1815,7 @@ echo "test a go knock-out that crashes on the mutant -> exit 2 PASS"
 # after it are refused before any test runs.
 for suffix in " --lib -- --exact --skip tests::hazard" " -- --skip tests::hazard" " -skip TestHazard" \
               " -skip '^TestHazard'" " --ignore=t.py --deselect t.py::hazard" " --deselect t.py::hazard; echo x" \
-              " --deselect hazard"; do
+              " --deselect hazard" " --deselect {t.py::hazard,-x}" " --deselect t.py::hazard$(printf '\t')-x"; do
   ko_run "$TMP/out92" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "AssertionError: value mismatch" \
     --knockout-cmd "$TMP/ko_suite.sh$suffix" --knockout-expect-output "1 deselected"
   rc=$?
@@ -1824,5 +1824,42 @@ for suffix in " --lib -- --exact --skip tests::hazard" " -- --skip tests::hazard
   grep -q -- "--- FAIL: hazard\|^1 deselected$" "$TMP/out92" && { cat "$TMP/out92"; fail "off-form knock-out suffix '$suffix': must refuse before running"; }
 done
 echo "test off-form knock-out suffixes are refused PASS"
+
+# 93: a cargo test command with its own "--" section is refused: the appended
+# "-- --exact --skip <name>" would become a second "--", and libtest would read
+# every word after it as a name FILTER (run only the hazard test).
+for tc in "$TMP/ko_suite.sh -- --nocapture" "$TMP/ko_suite.sh -- --test-threads=1"; do
+  bash "$MV" --file "$F67" --test-cmd "$tc" --mutate-sed 's/^guard=on$/guard=off/' \
+    --expect-fail-output "AssertionError: value mismatch" --knockout-cmd "$tc -- --exact --skip tests::hazard" \
+    --knockout-expect-output "1 filtered out" >"$TMP/out93" 2>&1
+  rc=$?
+  [ "$rc" -eq 2 ] || { cat "$TMP/out93"; fail "cargo test command with its own '--' ($tc): expected exit 2, got $rc"; }
+  grep -q "needs a --test-cmd without its own '--' section" "$TMP/out93" || { cat "$TMP/out93"; fail "cargo test command with its own '--': expected the message"; }
+  grep -q "mutation CAUGHT" "$TMP/out93" && { cat "$TMP/out93"; fail "cargo test command with its own '--': must not report CAUGHT"; }
+done
+[ "$(cat "$F67")" = "$before67" ] || fail "cargo double-dash: file not byte-identical"
+echo "test a cargo test command with its own '--' section is refused PASS"
+
+# 93b: the same on real cargo (skipped without cargo): the weak hazard test and
+# the real catcher are the only two tests; with "-- --nocapture" in the test
+# command, "-- --exact --skip tests::hazard_weak" would run ONLY the hazard
+# test and print "1 filtered out" -> a false CAUGHT without the refusal.
+if command -v cargo >/dev/null 2>&1; then
+  RS93="$TMP/rs_doubledash"; mkdir -p "$RS93/src"
+  printf '[package]\nname = "ko93"\nversion = "0.1.0"\nedition = "2021"\n\n[lib]\npath = "src/lib.rs"\ndoctest = false\n' > "$RS93/Cargo.toml"
+  printf 'pub fn parse(s: &str) -> usize { s.len() + 1 }\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test] fn hazard_weak() { assert!(parse("ab") < 1000, "value mismatch"); }\n    #[test] fn sibling_catches() { assert!(parse("") == 1, "value mismatch"); }\n}\n' > "$RS93/src/lib.rs"
+  before93="$(cat "$RS93/src/lib.rs")"
+  RS93_TEST="cd '$RS93' && CARGO_TARGET_DIR='$TMP/rs93-target' cargo test -q --offline -- --nocapture"
+  bash "$MV" --file "$RS93/src/lib.rs" --test-cmd "$RS93_TEST" --mutate-sed 's/s.len() + 1/s.len() + 2/' \
+    --expect-fail-output "value mismatch" --knockout-cmd "$RS93_TEST -- --exact --skip tests::hazard_weak" \
+    --knockout-expect-output "1 filtered out" >"$TMP/out93b" 2>&1
+  rc=$?
+  [ "$rc" -eq 2 ] || { cat "$TMP/out93b"; fail "real cargo test command with its own '--': expected exit 2, got $rc"; }
+  grep -q "needs a --test-cmd without its own '--' section" "$TMP/out93b" || { cat "$TMP/out93b"; fail "real cargo test command with its own '--': expected the message"; }
+  [ "$(cat "$RS93/src/lib.rs")" = "$before93" ] || fail "real cargo double-dash: file not byte-identical"
+  echo "test real cargo: a test command with its own '--' section is refused PASS"
+else
+  echo "SKIP: real cargo double-dash knock-out (cargo absent)"
+fi
 
 echo "ALL PASS"
