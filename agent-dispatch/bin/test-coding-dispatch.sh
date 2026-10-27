@@ -1824,4 +1824,32 @@ wait "$dispatch234"; rc=$?
 ! pgrep -f "tee.*$TMP/cap234g" >/dev/null || fail '#234g tee survived'
 echo 'test #234g PASS'
 
+# #234k: a capture reader must not wait for a writer that may never come. Here the agent
+# launch dies before opening its output (the brief vanishes once capture is set up). A
+# reader blocked in a FIFO open hung the dispatch; when the dispatcher was killed in that
+# window, the blocked readers outlived it in the caller's process group.
+mkdir -p "$TMP/cap234k" "$TMP/bin234k"
+p234="$TMP/parent234k"; new_parent "$p234"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$TMP/bin/codex"
+cat > "$TMP/bin234k/mkfifo" <<STUB
+#!/usr/bin/env bash
+"$(command -v mkfifo)" "\$@" || exit
+rm -f "\$TMPDIR"/coding-dispatch-brief.*
+STUB
+chmod +x "$TMP/bin/codex" "$TMP/bin234k/mkfifo"
+TMPDIR="$TMP/cap234k" PATH="$TMP/bin234k:$TMP/bin:$PATH" bash "$CD" codex "$p234" "$TMP/prompt" true > "$TMP/out234k" 2>&1 &
+dispatch234=$!
+for ((i234=0; i234<150; i234++)); do kill -0 "$dispatch234" 2>/dev/null || break; sleep 0.1; done
+if kill -0 "$dispatch234" 2>/dev/null; then
+  # Reap only what this test launched: the dispatcher and its own children.
+  kids234="$(pgrep -P "$dispatch234" || true)"
+  kill -KILL "$dispatch234" ${kids234:+$kids234} 2>/dev/null
+  wait "$dispatch234" 2>/dev/null
+  fail '#234k dispatch hung on a capture reader with no writer'
+fi
+wait "$dispatch234"; rc=$?
+[ "$rc" -eq 1 ] && grep -qF 'empty diff (agent changed nothing' "$TMP/out234k" || fail "#234k verdict rc=$rc: $(cat "$TMP/out234k")"
+! pgrep -f "tee.*$TMP/cap234k" >/dev/null || fail '#234k tee survived'
+echo 'test #234k PASS'
+
 echo "ALL PASS"
