@@ -959,6 +959,7 @@ unset EVIDENCE_FIXTURE
 echo "test 31c-d (both file:line evidence alternatives pass independently) PASS"
 
 restore_default_agy_stub
+assert_no_review_residue
 if [ "$FAILS" -ne 0 ]; then
   echo "$FAILS TEST(S) FAILED"
   exit 1

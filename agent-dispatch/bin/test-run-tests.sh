@@ -140,24 +140,20 @@ cat > "$jobs_shim/xargs" <<'SH'
 printf '%s\n' "$@" > "$TMPDIR/xargs-args"
 exec "$RUN_TESTS_TEST_REAL_XARGS" "$@"
 SH
-cat > "$jobs_shim/getconf" <<'SH'
+for core_source in nproc getconf sysctl; do
+ cat > "$jobs_shim/$core_source" <<'SH'
 #!/usr/bin/env bash
-[ "$RUN_TESTS_TEST_CORE_SOURCE" = getconf ] || exit 1
+[ "$RUN_TESTS_TEST_CORE_SOURCE" = "${0##*/}" ] || exit 1
 printf '%s\n' "$RUN_TESTS_TEST_CORES"
 SH
-cat > "$jobs_shim/sysctl" <<'SH'
-#!/usr/bin/env bash
-printf '%s\n' "$RUN_TESTS_TEST_CORES"
-SH
+done
 chmod +x "$jobs_shim/"*
-for core_source in getconf sysctl; do
- for cores in 32 4; do
-  expected_jobs=16
-  [ "$cores" != 4 ] || expected_jobs=4
-  PATH="$jobs_shim:$PATH" RUN_TESTS_TEST_CORE_SOURCE="$core_source" RUN_TESTS_TEST_CORES="$cores" run
-  check test "$rc" = 0
-  check test "$(sed -n '/^-P$/{n;p;}' "$TMP/xargs-args")" = "$expected_jobs"
- done
+# Alternate expected values so stale xargs arguments cannot satisfy the next case.
+for core_case in nproc:4:4 getconf:11:11 sysctl:12:12 none:0:2 nproc:13:12 getconf:4:4 sysctl:32:12; do
+ IFS=: read -r core_source cores expected_jobs <<< "$core_case"
+ PATH="$jobs_shim:$PATH" RUN_TESTS_TEST_CORE_SOURCE="$core_source" RUN_TESTS_TEST_CORES="$cores" run
+ check test "$rc" = 0
+ check test "$(sed -n '/^-P$/{n;p;}' "$TMP/xargs-args")" = "$expected_jobs"
 done
 unset RUN_TESTS_TEST_REAL_XARGS
 fixture exit255

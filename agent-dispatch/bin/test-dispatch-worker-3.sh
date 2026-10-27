@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-set -uo pipefail
 SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=lib/test-dispatch-worker-lib.sh
 . "$SELF_DIR/lib/test-dispatch-worker-lib.sh"
@@ -7,11 +6,11 @@ SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 # The preceding roster case originally enabled errexit for these blocks.
 set -e
 
-# Recreate fixtures previously inherited from private-clone/config tests.
+# Recreate the populated global config, feature branch, and origin from test 44.
 install_cfg_agy_stub
 unset AGY_ROSTER_MODE
 decoy="$TMP/decoy43"; make_git_repo "$decoy"
-r44="$TMP/repo44"; make_git_repo "$r44"
+r44="$TMP/repo44"; make_config_fixture "$r44"
 : > "$AGY_STUB_ACTIONS"
 
 # Source-state contract: actions deliberately target only test-owned repos.
@@ -345,15 +344,16 @@ done
 rm "$TMP/bin/mktemp"
 
 # Count suite-local stubs and the definitions factored into the shared helper.
-# The file had 22 agy stubs before the four persona-specific controls above;
+# There are 28 agy stubs across the three parts and shared helper;
 # every definition must answer the roster subcommand instead of falling into cat.
 agy_stub_defs="$(grep -h 'cat > .*bin/ag[y].*STUB' "$SELF_DIR"/test-dispatch-worker*.sh "$SELF_DIR/lib/test-dispatch-worker-lib.sh" | wc -l | tr -d ' ')"
 agy_stub_arms="$(grep -h '^# PERSONA_ROSTER_STU[B]$' "$SELF_DIR"/test-dispatch-worker*.sh "$SELF_DIR/lib/test-dispatch-worker-lib.sh" | wc -l | tr -d ' ')"
-[ "$agy_stub_defs" -eq 28 ] || fail "expected 22 original + 4 persona-control + 1 row-verdict agy stubs, found $agy_stub_defs"
+[ "$agy_stub_defs" -eq 28 ] || fail "expected 28 agy stubs, found $agy_stub_defs"
 [ "$agy_stub_arms" -eq "$agy_stub_defs" ] || fail "not every agy stub has an agent) arm ($agy_stub_arms/$agy_stub_defs)"
 echo "test 42 (all 22 original agy stubs handle the agent subcommand) PASS"
 
 restore_default_agy_stub
+assert_no_review_residue
 if [ "$FAILS" -ne 0 ]; then
   echo "$FAILS TEST(S) FAILED"
   exit 1

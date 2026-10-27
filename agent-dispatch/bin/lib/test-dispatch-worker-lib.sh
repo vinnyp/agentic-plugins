@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -uo pipefail
 # Shared isolated environment and runtime fixtures for dispatch-worker suites.
 SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck disable=SC1091
@@ -85,6 +86,36 @@ printf 'PERSONA: peer-code-reviewer\nReview the diff.\n' > "$BRIEF"
 
 FAILS=0
 fail() { echo "FAIL: $1"; FAILS=$((FAILS + 1)); }
+
+assert_no_review_residue() {
+  local residue
+  [ ! -d "$TMP/.worktrees" ] || fail 'empty default .worktrees parent was left behind'
+  residue=$(find "$TMPDIR" \( -name 'dispatch-review-wt.*' -o -name 'dispatch-review-state.*' \
+    -o -name 'dispatch-snapshots.*' -o -name 'dispatch-review.*.md' \) -print) || fail 'review residue scan failed'
+  [ -z "$residue" ] || fail "review residue leaked: $residue"
+}
+
+# Match the global config and source refs inherited after the original test 44.
+make_config_fixture() {
+  local origin="$TMP/origin43" r44="$1"
+  [ -d "$origin" ] || git -C "$TMP" init --bare "$origin" >/dev/null 2>&1
+  make_git_repo "$r44"
+  git -C "$r44" branch feature
+  git -C "$r44" remote add origin "$origin"
+  cat > "$TMP/included.gitconfig" <<'CONFIG'
+[core]
+ editor = ed
+CONFIG
+  cat > "$GIT_CONFIG_GLOBAL" <<CONFIG
+[user]
+ name = Review Test
+ email = review@example.invalid
+[include]
+ path = $TMP/included.gitconfig
+[x]
+ flag
+CONFIG
+}
 
 agy_exec_args() {
   grep -vFx 'models' "$AGY_ARGS_FILE" || true

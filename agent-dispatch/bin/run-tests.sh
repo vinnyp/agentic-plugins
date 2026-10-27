@@ -162,8 +162,8 @@ while [ "$#" -gt 0 ]; do
 done
 [ "$changed" -eq 0 ] || [ "$only_set" -eq 0 ] || usage_error "--only and --changed are exclusive"
 if [ -z "$jobs" ]; then
-  jobs=$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 2)
-  [ "$jobs" -le 16 ] || jobs=16
+  jobs=$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 2)
+  [ "$jobs" -le 12 ] || jobs=12
 fi
 [[ "$jobs" =~ ^[1-9][0-9]*$ ]] || usage_error "$jobs_label: expected a positive integer: $jobs"
 [[ "$kill_grace" =~ ^[1-9][0-9]*$ ]] || usage_error "RUN_TESTS__TEST_KILL_GRACE (test-only): expected a positive integer: $kill_grace"

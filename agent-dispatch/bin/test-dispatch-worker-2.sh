@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-set -uo pipefail
 SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=lib/test-dispatch-worker-lib.sh
 . "$SELF_DIR/lib/test-dispatch-worker-lib.sh"
@@ -70,7 +69,6 @@ rc=$?
 [ "$rc" -eq 0 ] || fail "disabled evidence gate should allow the same long output, got rc $rc"
 echo "test 31 (evidence gate can be disabled) PASS"
 
-# Evidence, worktree cleanup, personas, and private-clone/config fixtures.
 # R33 is reused by persona retries; origin and decoy are reused by config cases.
 # 31e. Requirements-mode evidence: a per-row disposition table (row ID
 # + ALIGN/OBJECT/ABSTAIN) is the deliverable a PRD review brief asks for and carries neither
@@ -477,22 +475,7 @@ grep -qF "falling back to $review_pwd, where agy" "$TMP/cfg.err" || fail "last-r
 echo 'test 43 (private clone, refs, environment and fallback) PASS'
 
 # V3. Global reads are flattened and every reviewer write stays private.
-r44="$TMP/repo44"; make_git_repo "$r44"
-git -C "$r44" branch feature
-git -C "$r44" remote add origin "$origin"
-cat > "$TMP/included.gitconfig" <<'CONFIG'
-[core]
- editor = ed
-CONFIG
-cat > "$GIT_CONFIG_GLOBAL" <<CONFIG
-[user]
- name = Review Test
- email = review@example.invalid
-[include]
- path = $TMP/included.gitconfig
-[x]
- flag
-CONFIG
+r44="$TMP/repo44"; make_config_fixture "$r44"
 cp "$GIT_CONFIG_GLOBAL" "$TMP/global.before"
 cp "$r44/.git/config" "$TMP/local.before"
 git -C "$r44" for-each-ref > "$TMP/refs.before"
@@ -534,6 +517,7 @@ GIT_CONFIG_GLOBAL="$TMP/missing-global" run_cfg_review "$r44" || fail 'missing g
 echo 'test 44 (private flattened global config and absent global config) PASS'
 
 restore_default_agy_stub
+assert_no_review_residue
 if [ "$FAILS" -ne 0 ]; then
   echo "$FAILS TEST(S) FAILED"
   exit 1
