@@ -24,6 +24,10 @@ _repo_state_sha256() (
   printf '%s\n' "$digest"
 )
 
+repo_state_digest() {
+  _repo_state_sha256
+}
+
 _repo_state_encode() {
   local value=$1
   value=${value//%/%25}
@@ -49,7 +53,7 @@ _repo_state_configs() {
         digest=$(printf '%s' "$value" | _repo_state_sha256) || return 1
         value="sha256:$digest" ;;
       *)
-        if [[ "$value" =~ ://[^/]*@ ]]; then
+        if [[ "$value" =~ //.*@ ]]; then
           digest=$(printf '%s' "$value" | _repo_state_sha256) || return 1
           value="sha256:$digest"
         fi ;;
@@ -57,13 +61,13 @@ _repo_state_configs() {
     # Hash URL userinfo in keys while preserving distinct credentialed keys.
     # A slash in a password is malformed URL syntax, but still sensitive.
     # Conservatively hash through the last @ even in that malformed shape.
-    if [[ "$key" =~ //[^?#]*@ ]] && ! [[ "$key" =~ //[^/?#]*@ ]]; then
+    if [[ "$key" =~ //.*@ ]] && ! [[ "$key" =~ //[^/]*@ ]]; then
       digest=$(printf '%s' "$key" | _repo_state_sha256) || return 1
       key="redacted.$digest"
     fi
     rest=$key
     key=''
-    while [[ "$rest" =~ (//)([^/?#]*)@ ]]; do
+    while [[ "$rest" =~ (//)([^/]*)@ ]]; do
       prefix=${rest%%"${BASH_REMATCH[0]}"*}
       userinfo=${BASH_REMATCH[2]}
       digest=$(printf '%s' "$userinfo" | _repo_state_sha256) || return 1
@@ -71,6 +75,11 @@ _repo_state_configs() {
       rest=${rest#*"${BASH_REMATCH[0]}"}
     done
     key="$key$rest"
+    # An earlier malformed authority may precede a later well-formed one.
+    if [[ "$key" =~ //.*@ ]] && [[ "$key" =~ //[^@]*/[^@]*@ ]]; then
+      digest=$(printf '%s' "$kv" | _repo_state_sha256) || return 1
+      key="redacted.$digest"
+    fi
     printf 'config\t%s\t%s\t%s\t%s\n' "$(_repo_state_encode "$scope")" \
       "$(_repo_state_encode "$origin")" "$(_repo_state_encode "$key")" "$(_repo_state_encode "$value")"
   done
@@ -109,7 +118,7 @@ _repo_state_hooks() {
 
 _repo_state_tree() {
   local wt=$1 status=$2 record path skip
-  if [ ! -d "$wt" ] || ! _repo_state_git -C "$wt" -c core.fsmonitor=false status --porcelain=v2 -z --untracked-files=all > "$status" 2>/dev/null; then
+  if [ "${metadata_unsafe:-0}" = 1 ] || [ ! -d "$wt" ] || ! _repo_state_git -C "$wt" -c core.fsmonitor=false status --porcelain=v2 -z --untracked-files=all > "$status" 2>/dev/null; then
     printf 'tree\t%s\tunreadable\n' "$(_repo_state_encode "$wt")"
     return
   fi
@@ -154,13 +163,27 @@ repo_state_snapshot() (
     _repo_state_hooks "$hooks" ''
     custom=$(_repo_state_git -C "$repo" rev-parse --path-format=absolute --git-path hooks)
     [ "$custom" = "$hooks" ] || _repo_state_hooks "$custom" 'core.hooksPath/'
-    local path file digest
+    local path file digest target kind metadata_unsafe=0 common
+    common=$(_repo_state_git -C "$repo" rev-parse --path-format=absolute --git-common-dir) || return 3
     for path in info/exclude info/attributes objects/info/alternates; do
-      file=$(_repo_state_git -C "$repo" rev-parse --path-format=absolute --git-path "$path") || return 3
+      file="$common/$path"
       digest='(absent)'
-      if [ -e "$file" ] || [ -L "$file" ]; then
+      if [ -L "$file" ]; then
+        target=$(readlink "$file") || return 3
+        digest="link:$target"
+        if [ -f "$file" ]; then
+          digest="$digest:$(_repo_state_sha256 < "$file")" || return 3
+        else
+          metadata_unsafe=1
+        fi
+      elif [ -f "$file" ]; then
         digest=$(_repo_state_sha256 < "$file") || return 3
+      elif [ -e "$file" ]; then
+        kind=$(stat -f '%HT' "$file" 2>/dev/null) || kind=$(stat -c '%F' "$file") || return 3
+        digest="nonregular:$kind"
+        metadata_unsafe=1
       fi
+      digest=$(_repo_state_encode "$digest")
       printf 'metadata\t%s\t%s\n' "$path" "$digest"
     done
     wt='' head='' branch=''
@@ -195,15 +218,20 @@ repo_state_mark_unreadable() (
 )
 
 _repo_state_display() {
-  local key=$1 value=$2
+  local key=$1 value
+  value=$(_repo_state_decode "$2")
   if [ "$value" = '(absent)' ]; then printf '%s' "$value"; return; fi
   case "$key" in
-    core.hookspath|core.editor|core.pager|core.fsmonitor) case "$value" in true|false|/*) ;; *) value='<changed>' ;; esac ;;
+    core.editor|core.pager|core.fsmonitor)
+      if [[ "$value" =~ ^[[:space:]]*([^[:space:]]+)([[:space:]]+.*)?$ ]]; then
+        value=${BASH_REMATCH[1]}${BASH_REMATCH[2]:+…}
+      fi ;;
+    core.hookspath) case "$value" in true|false|/*) ;; *) value='<changed>' ;; esac ;;
     core.*) case "$value" in true|false) ;; *) value='<changed>' ;; esac ;;
     commit.gpgsign|tag.gpgsign) ;;
     *) value='<changed>' ;;
   esac
-  printf '%s' "$value" | sed -E 's#(://)[^/]*@#\1#g'
+  printf '%s' "$value" | sed -E 's#(//)[^/]*@#\1#g; s#[?].*#?<redacted>#'
 }
 
 repo_state_compare() (
@@ -254,6 +282,7 @@ repo_state_compare() (
       branch.*.pushremote) rc=2 ;;
       branch.*.remote)
         remote=$(_repo_state_decode "$new")
+        if [ "$remote" = . ] && REPO_STATE_MERGE="${key%.remote}.merge" awk -F '\t' '$3==ENVIRON["REPO_STATE_MERGE"] {found=1} END {exit !found}' "$temp/diff"; then rc=2; fi
         # Local repository sentinel and pre-existing remote names are benign.
         if [ "$remote" != . ] && [ "$new" != '(absent)' ] &&
            ! REPO_STATE_REMOTE="$remote" awk -F '\t' '$1=="config" && $4 ~ /^remote\./ {name=$4; sub(/^remote\./,"",name); sub(/\.[^.]*$/,"",name); if(name==ENVIRON["REPO_STATE_REMOTE"]) found=1} END {exit !found}' "$before"; then rc=2; fi ;;
@@ -268,7 +297,7 @@ repo_state_compare() (
       *) rc=2 ;;
     esac
     printf 'config %s (%s:%s): %s -> %s\n' \
-      "$(printf '%s' "$key" | sed -E 's#(://)[^/]*@#\1#g')" "$scope" "$origin" \
+      "$(printf '%s' "$key" | sed -E 's#(//)[^/]*@#\1#g; s#[?].*#?<redacted>#')" "$scope" "$origin" \
       "$(_repo_state_display "$key" "$old")" "$(_repo_state_display "$key" "$new")" >> "$changes"
   done < "$temp/diff"
   # Pair records by kind and name; compare complete payloads (including modes/branches).
@@ -287,7 +316,7 @@ repo_state_compare() (
     [ "$rc" -ge 1 ] || rc=1
     case "$kind" in
       metadata)
-        rc=2
+        [ "$key" != objects/info/alternates ] || rc=2
         printf 'metadata %s: <changed>\n' "$key" >> "$changes" ;;
       hooks)
         rc=2
@@ -297,14 +326,16 @@ repo_state_compare() (
         printf 'hooks %s: %s\n' "$key" "$line" >> "$changes" ;;
       ref)
         printf 'ref %s: %s -> %s\n' "$key" "$old" "$new" >> "$changes"
-        case "$key" in refs/heads/*)
+        case "$key" in
+          refs/replace/*) rc=2 ;;
+          refs/heads/*)
           if [ ! -f "$temp/exclude" ]; then
             awk -F '\t' '$1=="ref" {print $3}' "$before" |
               _repo_state_git -C "$repo" cat-file --batch-check='%(objectname) %(objecttype)' 2>/dev/null |
               awk '($2=="commit" || $2=="tag") {print "^" $1}' > "$temp/exclude"
           fi
           [ "$new" != '(absent)' ] || continue
-          if ! _repo_state_git -C "$repo" rev-list --stdin "$new" --not --remotes < "$temp/exclude" > "$temp/commits" 2>/dev/null; then
+          if ! _repo_state_git -C "$repo" rev-list --stdin "$new" < "$temp/exclude" > "$temp/commits" 2>/dev/null; then
             printf 'commit-check %s: failed\n' "$key" >> "$changes"; rc=2; continue
           fi
           while IFS= read -r sha; do

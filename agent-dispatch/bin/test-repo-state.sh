@@ -2,6 +2,7 @@
 set -euo pipefail
 BIN=$(cd "$(dirname "$0")" && pwd)
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/repo-state-test.XXXXXX")
+[ -n "$TMP" ] || exit 1
 TMP=$(cd "$TMP" && pwd -P)
 trap 'rm -rf "$TMP"' EXIT
 export GIT_CONFIG_GLOBAL="$TMP/global" GIT_CONFIG_NOSYSTEM=1
@@ -84,7 +85,7 @@ snap "$TMP/after"
 rc_is 2 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
 fixture
 snap "$TMP/before"
-git config --file "$GIT_CONFIG_GLOBAL" user.email changed@example.invalid
+git -C "$R" config --file "$GIT_CONFIG_GLOBAL" user.email changed@example.invalid
 snap "$TMP/after"
 rc_is 2 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
 grep -q '(global:' "$TMP/changes"
@@ -165,7 +166,7 @@ ln -s "$BIN/repo-state-check" "$TMP/links/check"
 rc_is 0 "$TMP/links/check" snapshot "$R" "$TMP/after"
 repo_state_mark_unreadable "$TMP/after"
 rc_is 2 "$TMP/links/check" compare "$TMP/before" "$TMP/after"
-git config --file "$GIT_CONFIG_GLOBAL" user.email fixture@example.invalid
+git -C "$R" config --file "$GIT_CONFIG_GLOBAL" user.email fixture@example.invalid
 fixture
 snap "$TMP/before"
 printf '#!/bin/sh\n' > "$R/.git/hooks/pre-commit"
@@ -362,9 +363,9 @@ git -C "$clone" push -q origin main
 snap "$TMP/before"
 git -C "$R" pull -q --ff-only origin main
 snap "$TMP/after"
-rc_is 1 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
+rc_is 2 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
 grep -q '^ref refs/heads/main:' "$TMP/changes"
-if grep -q '^commit ' "$TMP/changes"; then exit 1; fi
+grep -q '^commit ' "$TMP/changes"
 fixture
 snap "$TMP/before"
 git -C "$R" -c user.email=foreign@example.invalid commit -qm email-only --allow-empty
@@ -494,9 +495,11 @@ for path in info/exclude info/attributes objects/info/alternates; do
   snap "$TMP/before"
   printf '# fixture\n' >> "$R/.git/$path"
   snap "$TMP/after"
-  rc_is 2 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
+  expected=1
+  [ "$path" != objects/info/alternates ] || expected=2
+  rc_is "$expected" repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
 done
-for authority in 'https://u:PASS/SECRET@h/' 'https://u:PASS@SECRET@h/' '//u:SECRET@h/' 'https://SECRET@h/'; do
+for authority in 'https://u:PASS/SECRET@h/' 'https://u:PASS@SECRET@h/' '//u:SECRET@h/' 'https://SECRET@h/' 'https://u:SECRET?x@h/' 'https://u:SECRET#x@h/' 'https://u:pa/SECRET@h//x@y/'; do
   fixture
   snap "$TMP/before"
   git -C "$R" config "url.$authority.insteadOf" https://x
@@ -531,4 +534,62 @@ git -C "$R" config credential.helper SECRET
   mktemp() { echo 'plaintext hash spool attempted' >&2; return 1; }
   printf SECRET | _repo_state_sha256 >/dev/null
 )
+# Final drift regressions: bound snapshots even for hostile metadata types.
+TIMEOUT=$(command -v timeout || command -v gtimeout)
+for shape in fifo zero dangling; do
+  fixture
+  snap "$TMP/before"
+  case "$shape" in
+    fifo) rm "$R/.git/info/exclude"; mkfifo "$R/.git/info/exclude" ;;
+    zero) ln -s /dev/zero "$R/.git/info/attributes" ;;
+    dangling) ln -s "$TMP/absent-target" "$R/.git/info/attributes" ;;
+  esac
+  rc_is 0 "$TIMEOUT" -k 1 10 bash -c '. "$1"; repo_state_snapshot "$2" "$3"' _ "$BIN/lib/repo-state.sh" "$R" "$TMP/after"
+  rc_is 1 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
+  path=info/attributes
+  [ "$shape" != fifo ] || path=info/exclude
+  grep -qx "metadata $path: <changed>" "$TMP/changes" || { echo "metadata $shape missed" >&2; exit 1; }
+done
+fixture
+snap "$TMP/before"
+git -C "$R" -c user.name=Foreign -c user.email=foreign@example.invalid commit -qm injected --allow-empty
+git -C "$R" update-ref refs/remotes/origin/zz HEAD
+snap "$TMP/after"
+rc_is 2 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
+grep -q '^commit ' "$TMP/changes" || { echo 'remote exemption hole' >&2; exit 1; }
+fixture
+replacement=$(git -C "$R" -c user.name=Fixture -c user.email=fixture@example.invalid commit-tree -m replacement "HEAD^{tree}")
+for operation in add move remove; do
+  snap "$TMP/before"
+  case "$operation" in
+    add) git -C "$R" replace HEAD "$replacement" ;;
+    move)
+      replacement=$(git -C "$R" -c user.name=Fixture -c user.email=fixture@example.invalid commit-tree -m moved "HEAD^{tree}")
+      git -C "$R" replace -f HEAD "$replacement" ;;
+    remove) git -C "$R" replace -d HEAD ;;
+  esac
+  snap "$TMP/after"
+  rc_is 2 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
+done
+fixture
+git -C "$R" config branch.main.remote origin
+git -C "$R" config branch.main.merge refs/heads/main
+snap "$TMP/before"
+git -C "$R" config branch.main.remote .
+git -C "$R" config branch.main.merge refs/heads/redirected
+snap "$TMP/after"
+rc_is 2 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
+check_key remote.origin.pushurl 'https://u:SECRET/password@host.invalid/' 2
+if grep -q SECRET "$TMP/after" "$TMP/changes"; then echo 'value userinfo leaked' >&2; exit 1; fi
+for setting in 'editor /usr/local/bin/ed-wrap --api-key=SECRET' 'pager /usr/bin/env GH_TOKEN=SECRET less' 'fsmonitor /usr/bin/monitor --token=SECRET' 'editor ed --key=SECRET'; do
+  key=${setting%% *}; value=${setting#* }
+  check_key "core.$key" "$value" 2
+  grep -Fq -- "-> ${value%% *}…" "$TMP/changes" || { echo 'command display not truncated' >&2; exit 1; }
+  if grep -q SECRET "$TMP/changes"; then echo 'command arguments leaked' >&2; exit 1; fi
+done
+check_key core.editor $'/usr/bin/editor\t--secret=SECRET' 2
+grep -Fq -- '-> /usr/bin/editor…' "$TMP/changes" || { echo 'encoded command whitespace leaked' >&2; exit 1; }
+check_key 'url.https://host.invalid/?SECRET.insteadOf' https://x 2
+if grep -q SECRET "$TMP/changes"; then echo 'displayed key query leaked' >&2; exit 1; fi
+[ "$(printf fixture | repo_state_digest)" = "$(printf fixture | _repo_state_sha256)" ]
 echo 'repo-state tests passed'

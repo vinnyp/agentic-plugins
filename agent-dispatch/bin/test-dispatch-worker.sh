@@ -22,7 +22,8 @@ reset_dispatch_env  # neutralize any operator-exported dispatch vars before the 
 . "$(cd "$(dirname "$0")" && pwd)/lib/agy-models.sh"
 export AGY_TEST_CODING_PIN="$AGY_MODEL_CODING_DEFAULT" AGY_TEST_REVIEW_PIN="$AGY_MODEL_REVIEW_DEFAULT"
 DW="$SELF_DIR/dispatch-worker"
-TMP="$(mktemp -d)"
+TMP="$(set -eu; scratch=$(mktemp -d "${TMPDIR:-/tmp}/dispatch-worker-test.XXXXXX"); [ -n "$scratch" ]; printf '%s\n' "$scratch")" || exit 1
+TMP="$(cd "$TMP" && pwd -P)" || exit 1
 cd "$TMP" || exit 1
 trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home"
@@ -1631,10 +1632,12 @@ cmp -s "$TMP/refs.before" "$TMP/refs.after" || fail 'V3 source refs changed'
 cmp -s "$TMP/worktrees.before" "$TMP/worktrees.after" || fail 'V3 source worktrees changed'
 grep -q '^push=[1-9][0-9]*$' "$AGY_ARGS_FILE.push" || fail 'V3 push enabled'
 [ -z "$(find "$TMPDIR" -name 'dispatch-review-state.*' -print)" ] || fail 'V3 state directory leaked'
+[ -z "$(find "$TMPDIR" -name 'dispatch-snapshots.*' -print)" ] || fail 'V3 snapshot directory leaked'
 : > "$AGY_STUB_ACTIONS"
 GIT_CONFIG_GLOBAL="$TMP/missing-global" run_cfg_review "$r44" || fail 'missing global config launch failed'
 [ ! -e "$TMP/missing-global" ] || fail 'missing global config created outside review'
 [ -z "$(find "$TMPDIR" -name 'dispatch-review-state.*' -print)" ] || fail 'missing global state directory leaked'
+[ -z "$(find "$TMPDIR" -name 'dispatch-snapshots.*' -print)" ] || fail 'missing global snapshot directory leaked'
 echo 'test 44 (private flattened global config and absent global config) PASS'
 
 # Source-state contract: actions deliberately target only test-owned repos.
@@ -1821,6 +1824,7 @@ done
 ACTIONS
 check_state_run 10
 grep -qF 'state: snapshot integrity' "$TMP/cfg.err" || fail 'agy baseline loss passed'
+if grep -q 'No such file or directory' "$TMP/cfg.err"; then fail 'missing snapshot leaked shell error'; fi
 # Removing the whole state directory must preserve the critical exit and diagnostic.
 # shellcheck disable=SC2016
 printf 'rm -rf "$(dirname "$GIT_CONFIG_GLOBAL")"\n' > "$AGY_STUB_ACTIONS"
@@ -1836,7 +1840,22 @@ done
 STUB
 (cd "$SRC" && run_state_runtime claude 10)
 grep -qF 'DISPATCH_REVIEW_STATE=critical(' "$TMP/cfg.err" || fail 'claude baseline loss passed'
-grep -qE 'state: (drift check could not complete|snapshot integrity)' "$TMP/cfg.err" || fail 'claude compare diagnostic absent'
+grep -qF 'state: snapshot integrity' "$TMP/cfg.err" || fail 'claude compare diagnostic absent'
+
+# Snapshot allocation failures must explain the failing allocation on both paths.
+REAL_MKTEMP=$(command -v mktemp)
+export REAL_MKTEMP
+cat > "$TMP/bin/mktemp" <<'STUB'
+#!/usr/bin/env bash
+case "$*" in *dispatch-snapshots.*) exit 1 ;; esac
+exec "$REAL_MKTEMP" "$@"
+STUB
+chmod +x "$TMP/bin/mktemp"
+for runtime in agy claude; do
+  (cd "$SRC" && run_state_runtime "$runtime" 3)
+  grep -qF 'could not create the review snapshot directory' "$TMP/cfg.err" || fail "$runtime snapshot allocation diagnostic absent"
+done
+rm "$TMP/bin/mktemp"
 
 # The file had 22 agy stubs before the four persona-specific controls above;
 # every definition must answer the roster subcommand instead of falling into cat.

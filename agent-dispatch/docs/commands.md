@@ -256,10 +256,6 @@ if you want the review judged, or judge it yourself.
 
 The clone mirrors the source's local branches, remote-tracking refs and tags at dispatch time.
 Origin's fetch and push URLs point at a disabled path; fetch or rebase in the source before dispatching.
-Snapshots live separately from reviewer configuration, with no snapshot path in the
-reviewer environment or brief. SHA-256 pins detect missing or modified baselines
-and interim snapshots; tampering exits 10. The drift check also detects changes
-to `info/exclude`, `info/attributes`, and `objects/info/alternates`.
 
 Other remotes and the operator's credential helper remain reachable, so the drift check,
 not the clone, detects source changes. Git config,
@@ -270,11 +266,18 @@ passing `--dangerously-skip-permissions`. Allocation refusal remains exit 3.
 `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`, `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY` and
 `GIT_PREFIX` are cleared for repository operations and the review child.
 
+Snapshots live separately from reviewer configuration, with no snapshot path in the
+reviewer environment or brief. SHA-256 pins detect missing or modified baselines
+and interim snapshots; tampering exits 10. The drift check also detects changes
+to `info/exclude`, `info/attributes`, and `objects/info/alternates`.
+
 Every runtime's `--review`, including fallback, snapshots source state before and after.
 Unexpected config changes, hook changes, foreign committers on new local commits, or an
 unreadable after-snapshot exit 10, overriding every post-launch result. A compare that
-cannot complete is also critical (rc 10). Ref, worktree and
-working-tree movement only warn. stderr reports
+cannot complete is also critical (rc 10). Exclude and attributes changes warn; alternates and replace-ref changes are critical.
+Other ref, worktree and working-tree movement warns unless new branch commits
+have a foreign identity. Only commits reachable from baseline refs are exempt.
+Changing a branch remote to `.` together with its merge target is critical. stderr reports
 `DISPATCH_REVIEW_STATE=clean|warn(<n>)|critical(<n>)|skipped(<reason>) original_rc=<n>`:
 clean means no drift; `<n>` in both `warn(<n>)` and `critical(<n>)` counts all change lines.
 The closed skipped-reason set is `not-launched`, `not-a-git-repo`, `snapshot-failed`,
@@ -319,6 +322,17 @@ Artifacts (agy `--review` only): the review is also tee'd to a file whose path i
 stderr as `REVIEW_OUTFILE=<path> (rc=<n>)`. If **you** set `REVIEW_OUTFILE`, that file is yours and
 is kept; otherwise the file is an `$TMPDIR` temp and is deleted when `dispatch-worker` exits. The
 codex and claude review paths write no such file. Capture stdout, not the path.
+
+### Limits
+
+The drift gate is DETECTIVE, not containment. A same-user reviewer can defeat it
+with a detached process that acts after the final snapshot, writes to ignored
+paths (`.venv`, `node_modules`, `__pycache__`), or commits using the operator's
+own Git identity, which reach the branch only as a warning.
+
+Containment needs an OS-level write boundary on the source repository: a sandbox
+profile, a separate user, or a container that does not mount the live repository
+writable. This boundary is not provided.
 
 ## `gate-run.sh`
 
@@ -1056,7 +1070,7 @@ repo-state-check compare <before> <after>
 Snapshot records effective config (including worktree config), hook hashes and modes, refs,
 worktrees, dirty paths and configured identity. Files are mode 0600; keep them in a private
 temp directory and remove them after inspection. Snapshot exits 0 on success or 3 for an
-empty, relative or invalid repository path, a missing hasher, or unreadable config.
+empty, relative or invalid repository path, a missing hasher, unreadable config or metadata files, or a hash failure in config.
 A failed snapshot writes an `unreadable` marker to the output file when possible.
 Invalid CLI arguments exit 64.
 Snapshots also hash `info/exclude`, `info/attributes`, and
