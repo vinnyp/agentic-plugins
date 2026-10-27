@@ -13,6 +13,13 @@ same safety wrapper: the timeout that the agent's own `--print-timeout` doesn't 
 "did it actually change anything?" check, the revert that doesn't eat a concurrent session's work,
 and the exit code that tells an out-of-credit account apart from a failing build.
 
+Coding dispatch refuses build commands that invoke a detected runner with `--only`
+or `--changed` in the same simple command, exiting 2 before agent launch only
+when the runner carries the `agent-dispatch-run-tests: partial runs exit 4` signature.
+Other runners receive a TTL-deduped advisory for partial flags in the same simple
+command. Quoted flags count; shell comments and flags on subsequent commands do
+not select a partial gate. Use the full runner as the build gate.
+
 **Review workspaces.** agy reviews use a disposable private clone with mirrored refs,
 private global Git config; origin's fetch and push URLs point at a disabled path.
 Other remotes and the operator's credential helper remain reachable, so the drift check,
@@ -153,8 +160,16 @@ driving a live tmux/cmux session — are documented per command in the
 bash bin/run-tests.sh
 ```
 
-Runs every `bin/test-*.sh` suite in sorted order, then `shellcheck --severity=warning` over the
-non-test entrypoints when shellcheck is installed. It fails fast on the first failing suite.
+Each top-level runner checks `ps` availability against its own PATH, including
+nested runs. Internal suite wrappers inherit that invocation’s cached result.
+
+Runs every `bin/test-*.sh` and `test/*.sh` suite in parallel by default, then
+`shellcheck --severity=warning` over the non-test entrypoints when installed. Use `-j <jobs>`
+to set concurrency and `--changed` or `--only <suite>[,<suite>...]` to iterate on a subset.
+A passing partial run exits 4 and is never the gate; run the full gate before each review
+round and before handing back. Suites allow surviving children 5 seconds to exit
+before reporting a process leak. See [run-tests.sh](docs/commands.md#run-testssh) for selection,
+timeouts, exit codes, and reporting.
 
 The suites **stub `codex`, `agy` and `claude` on `PATH`** and never launch a real agent — no
 network, no tokens, no OAuth prompt. If you add a suite that shells `coding-dispatch.sh`,
@@ -162,6 +177,19 @@ network, no tokens, no OAuth prompt. If you add a suite that shells `coding-disp
 `reset_dispatch_env` before the body, so an operator's exported `CODING_DISPATCH_TIMEOUT` (or any
 other knob) cannot redden your suite; a completeness check fails if a new knob is added without
 being registered there.
+
+Passing full and partial runs remove their run directory unless `RUN_TESTS_KEEP_LOGS=1`.
+The runner prints sorted per-suite timings, counts, slowest suites, failure logs,
+then lifted `SKIP` lines, shellcheck (full only), total wall time, and a final
+`GATE PASS:`, `GATE FAIL:`, or `PARTIAL RUN:` line. See the command reference for
+`NOT RUN`, `FAIL (no result)`, usage, and the changes from the previous runner.
+
+See [changes from the previous runner](docs/commands.md#changed-from-the-previous-runner)
+for the compatibility changes.
+
+Interrupted runs end with `INTERRUPTED: …` then `Total wall:` and no verdict line.
+TIMEOUT/KILLED indicate enforced limits; suites leaving children running fail with
+`FAIL <suite> (exited N; left processes running)`.
 
 ## Contributing
 

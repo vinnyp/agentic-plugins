@@ -98,6 +98,18 @@ synthesized marker rather than a false failure.
 | `9` | a review pin is active on the workdir (see [`review-pin.sh`](#review-pinsh)) |
 | `143` | killed by INT/TERM mid-dispatch; a fresh empty worktree is removed, a partial diff is left for salvage |
 
+Refusal applies only to runner files containing the exact signature line
+`# agent-dispatch-run-tests: partial runs exit 4`. A simple command (split on
+`&&`, `||`, `;`, or `|`) must invoke that runner and contain a whole `--only`
+or `--changed` token (including `--only=…`). Nested paths such as
+`agent-dispatch/bin/run-tests.sh` are checked relative to the workdir too.
+The refusal exits 2 before agent launch and is never deduplicated. Other
+runners receive a non-blocking, TTL-deduped `gate-target advisory` when their
+command selects a partial gate. Quoted flag tokens are also recognized.
+Whitespace-preceded shell comments are ignored. Flags on other commands do not
+trigger refusal or a partial-gate advisory.
+Use the full runner as the build gate.
+
 Every failure snapshots the pre-revert diff — captured with `git diff <base>` against a throwaway
 index copy, so it covers untracked files *and* per-task commits without mutating your real index —
 and prints where it landed.
@@ -805,10 +817,169 @@ FAIL. So an `--install` that skipped an entrypoint (a foreign symlink it refused
 2, not 0 — an installer script must not read that as "done". If `~/.local/bin` is not on your
 `PATH`, `--install` tells you and prints the line to add to your shell profile.
 
+## run-tests.sh
+
+```text
+bash bin/run-tests.sh [-h|--help] [-j <jobs>] [--timeout <seconds>]
+bash bin/run-tests.sh [-h|--help] [-j <jobs>] [--timeout <seconds>] --only <suite>[,<suite>...]
+bash bin/run-tests.sh [-h|--help] [-j <jobs>] [--timeout <seconds>] --changed [<base>]
+```
+
+Run from the plugin directory, or use `bash agent-dispatch/bin/run-tests.sh` from the
+repository root. The full gate discovers `bin/test-*.sh` and `test/*.sh`, sorts them,
+and runs suites in parallel through `xargs -0 -P N`. Each suite receives stdin from
+`/dev/null`; failures do not stop the remaining suites and are never retried.
+After a full run, shellcheck checks executable non-test `bin/` entrypoints at
+`--severity=warning` when installed. Zero discovered suites is a failure.
+
+`-j` overrides `RUN_TESTS_JOBS`; `--timeout` overrides `RUN_TESTS_TIMEOUT`.
+Jobs default to min(cores, 8), using `getconf _NPROCESSORS_ONLN`, then
+`sysctl -n hw.ncpu`, then 2. The per-suite timeout defaults to 420 seconds, with
+`timeout -k 15` (or `gtimeout -k 15`) giving a 15-second kill grace. Both numeric
+settings, including environment values, must match `^[1-9][0-9]*$`; invalid values
+exit 2. When neither timeout executable is available, the worker poll loop enforces
+the same limit and 15-second kill grace:
+
+```text
+run-tests.sh: NOTICE: no timeout/gtimeout found; enforcing timeout in worker poll loop
+```
+
+`--only` accepts comma-separated bare basenames or exact plugin-relative suite paths.
+Repeated `--only` values append to the selection. Repository-relative paths such as
+`agent-dispatch/bin/test-x.sh` are also accepted. Unknown, empty, or ambiguous names
+are selection errors; duplicates are removed. `-h` / `--help` prints usage and exits 0.
+Usage errors print a `run-tests.sh: <reason>` and one-line usage to stderr before
+creating a run directory.
+`--only` and `--changed` are mutually exclusive.
+
+`--changed [<base>]` combines committed changes (`<base>...HEAD`), staged changes,
+unstaged changes, and untracked files. Without a base it uses the merge base of
+`HEAD` and the remote default branch (`refs/remotes/origin/HEAD`), so already-pushed
+branch commits remain visible. Changed discovered suites select themselves. Other
+files select suites mentioning their repository-relative path, plugin-relative path,
+or basename. A deleted suite, another `bin/` or `tools/` change
+(`FULL GATE: code change`), or a file whose basename is referenced by a non-test file under `bin/` forces the full gate. So do a file with
+no matching suite, no changed files, an unavailable Git repository or base, or a
+failed Git change listing. Each fallback prints `FULL GATE: <reason>` and restores
+full-gate semantics. An explicit invalid base exits 2 with
+`run-tests.sh: unknown base: <base>`; only default-base resolution failure falls back.
+
+Iterate with `--changed`/`--only`; run the full gate before each review round and
+before handing back; a partial run exits 4 and is never the gate. A
+`coding-dispatch.sh` build command invoking a signature-bearing runner with a
+whole `--only` or `--changed` token in the same simple command is refused with
+exit 2 before agent launch; use the full runner. Other runners get an advisory. Give
+`mutation-verify.sh --test-cmd` a suite directly, never `run-tests.sh --only`.
+Use **one tree, one runner**: do not overlap runners in the same checkout.
+
+| Exit | Meaning |
+|---|---|
+| `0` | Full run: all suites passed; shellcheck passed or is not installed |
+| `1` | Zero suites; any suite FAIL, TIMEOUT, KILLED, or missing/invalid result; or shellcheck failed |
+| `2` | Usage or selection error |
+| `4` | PARTIAL-PASS: every selected suite passed |
+| `130` / `143` / `129` | Interrupted by INT / TERM / HUP |
+
+The first output line is `Run dir: <path>`. The directory is created outside the
+tree with `mktemp -d "${TMPDIR:-/tmp}/run-tests.XXXXXX"`. It holds per-suite logs,
+exit codes (`<key>.rc`), and durations (`<key>.secs`); `<key>` is the plugin-relative
+path with `/` replaced by `__`. Exit codes and durations are written atomically
+through temporary files and `mv`. The directory is retained on failure and
+interruption; passing full and partial runs remove it unless `RUN_TESTS_KEEP_LOGS=1`.
+
+Suite starts stream immediately; the summary prints one result per suite sorted by
+name, using the bare suite basename and integer elapsed seconds:
+
+```text
+RUN  <suite>
+PASS <suite> (<s>s)
+FAIL <suite> (exit <rc>, <s>s)
+TIMEOUT <suite> (<s>s)
+KILLED <suite> (<s>s)
+```
+
+TIMEOUT and KILLED mean the runner enforced the limit (TERM and KILL respectively).
+A suite returning 124 or 137 itself is an ordinary FAIL. Enforcement reasons are
+stored in `<key>.why` as `timeout` or `killed`. If a suite exits but leaves its
+process group running, the runner waits at least 50 polls of 0.1 seconds (a true
+5-second grace), terminates the leftovers, and
+prints `FAIL <suite> (exited N; left processes running)` both live and in the
+summary. Its `.rc` is `leaked` and its `.why` contains `leaked`; the result
+alone counts as failed even if the diagnostic sidecar is absent.
+The summary block is authoritative and computes every verdict from result files
+only. A missing or unrecognised result (other than `leaked`) appears as `FAIL <suite> (no result)`.
+Interrupted suites without a result or with `not-run` appear as `NOT RUN <suite>`:
+
+```text
+FAIL <suite> (no result)
+Summary: <p> passed, <f> failed, <n> total
+```
+
+After execution, full and partial runs print in this order:
+
+1. Per-suite summary lines, sorted by name.
+2. `Summary: <p> passed, <f> failed, <n> total`.
+3. `Slowest suites:` and up to five timing lines.
+4. Failed-suite log tails (last 20 lines); `CI=true` prints full logs. Missing logs and their `Log tail:` headers are omitted.
+5. `SKIP <suite>: <text>` for every log line starting with `SKIP`, sorted by suite; `<text>` is the full log line.
+6. Shellcheck output, for full runs only.
+7. `Total wall: <s>s`.
+8. The final line:
+
+```text
+GATE PASS: all <n> suites passed; shellcheck passed
+GATE PASS: all <n> suites passed; shellcheck skipped (not installed)
+GATE FAIL: <f> of <n> suites failed
+GATE FAIL: <f> of <n> suites failed; shellcheck failed
+```
+
+Missing shellcheck prints this notice before the total wall time:
+
+```text
+run-tests.sh: NOTICE: shellcheck not found; skipping shellcheck --severity=warning
+```
+
+A partial run ends with `PARTIAL RUN: <k> of <n> suites — NOT the gate`, where
+`<k>` is the selected count and `<n>` is the discovered count. Failed partial runs
+exit 1 rather than 4.
+
+On INT, TERM, or HUP the runner stops dispatch, sends TERM to recorded process
+groups, allows a 10-second interrupt grace, then sends KILL to those groups.
+The parent signals only recorded live groups without a result; a wrapper may
+signal both the group and its bare child PID, guarded by `kill -0` before reaping.
+It never uses `pkill` or `killall`.
+It ends with `INTERRUPTED: <d> finished, <k> not run` then `Total wall: <s>s`,
+with no verdict line, and retains the run directory.
+A runner started as a background `&` job of a non-interactive script ignores INT
+(POSIX); stop it with TERM. Suite TERM traps must be idempotent because GNU timeout
+can deliver TERM more than once.
+A suite counts as finished if its `.rc` was written before the `INTERRUPTED`
+sentinel, regardless of whether it passed.
+
+If `ps` is unavailable, the runner prints
+`run-tests.sh: NOTICE: ps not found; runner identity check disabled (liveness only)`.
+Wrappers then use PID liveness alone. Empty or failed `ps` output is also treated
+as unknown identity; only a definite parent mismatch stops a wrapper.
+
+### Changed from the previous runner
+
+- Suites run in parallel by default, so shared global state can now race.
+- Suite stdin is `/dev/null`.
+- There is a per-suite 420 s timeout.
+- Unknown arguments exit 2; previously they were ignored.
+- No fail-fast: all selected suites run.
+- Failure/usage/partial-pass exits are now 1/2/4 rather than the failing suite's rc.
+- Per-suite lines carry timing; suite output goes to per-suite logs.
+- The `failing suite:` line is replaced by the summary block and `GATE FAIL:`.
+
 ## Environment variables
 
 | Variable | Read by | Default / effect |
 |---|---|---|
+| `RUN_TESTS_JOBS` | `run-tests.sh` | min(cores, 8); positive decimal integer; overridden by `-j` |
+| `RUN_TESTS_TIMEOUT` | `run-tests.sh` | `420` seconds per suite; positive decimal integer; overridden by `--timeout`; kill grace 15 seconds |
+| `RUN_TESTS__TEST_KILL_GRACE` | `run-tests.sh` | test-only TERM-to-KILL grace override; positive integer seconds (default `15`) |
+| `RUN_TESTS_KEEP_LOGS` | `run-tests.sh` | `1` retains logs after a passing full or partial run; failure and interruption always retain them |
 | `CODING_DISPATCH_TIMEOUT` | `coding-dispatch.sh` | `15m` (codex) / `25m` (agy) — the external bound on the agent |
 | `CODING_DISPATCH_WORKTREE` | `coding-dispatch.sh`, `coding-build-phase.sh` | the worktree/branch slug; a worktree with that slug is reused so a multi-task phase accumulates on one branch |
 | `CODING_DISPATCH_RM_ON_FAIL` | `coding-dispatch.sh` | `1` = remove the worktree on failure instead of salvaging it; the patch still survives under the parent repo's git dir |
@@ -821,7 +992,7 @@ FAIL. So an `--install` that skipped an entrypoint (a foreign symlink it refused
 | `CODING_COMMIT_SCOPE` | `coding-build-phase.sh` | conventional-commit scope (default: repo dir basename) |
 | `AGY_MODEL` | `coding-dispatch.sh` | agy model for edit dispatches (default: coding pin in `bin/lib/agy-models.sh`) |
 | `DISPATCH_NO_VENV` | `gate-run.sh` via `lib/gate-env.sh` | any value = same as `--no-venv` |
-| `DISPATCH_GATE_ADVISORY_TTL_SECS` | `coding-dispatch.sh` | `3600` — how long a "your build-cmd skips gate-target X" advisory is deduplicated |
+| `DISPATCH_GATE_ADVISORY_TTL_SECS` | `coding-dispatch.sh` | `3600` — how long skipped gate-target advisories are deduplicated; partial-runner refusals are never deduplicated |
 | `DISPATCH_REVIEW_PIN_TTL_SECS` | `review-pin.sh` | `14400` — after this a pin is stale and auto-removed |
 | `RUNTIME`, `MODEL`, `WORKDIR`, `MODULE_DIR`, `CEREMONY`, `REVIEW` | `dispatch-worker` | env twins of the matching flags |
 | `TIMEOUT` | `dispatch-worker` | `15m`; `0` or `none` disables the external bound |

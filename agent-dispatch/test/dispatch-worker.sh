@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 set -uo pipefail
+unset RUN_TESTS_JOBS RUN_TESTS_TIMEOUT RUN_TESTS_KEEP_LOGS RUN_TESTS__PS_AVAILABLE
+for run_tests_hook in ${!RUN_TESTS__TEST_@}; do unset "$run_tests_hook"; done
+unset run_tests_hook
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DW_SRC="$ROOT/bin/dispatch-worker"
 TMP="$(mktemp -d)"
+export TMPDIR="$TMP"
 trap 'rm -rf "$TMP"' EXIT
 
 fail() { echo "FAIL: $1"; exit 1; }
@@ -97,8 +101,6 @@ grep -qFx 'for legacy_suite in "$ROOT"/test/*.sh; do' "$ROOT/bin/run-tests.sh" \
   || fail "run-tests does not discover every test/*.sh suite via a directory glob"
 grep -qF 'discovered 0 test suites' "$ROOT/bin/run-tests.sh" \
   || fail "run-tests lost its zero-suite failure guard"
-grep -qFx '  echo "RUN  $name"' "$ROOT/bin/run-tests.sh" \
-  || fail "run-tests lost its anchored RUN reporting contract"
 # Assert DISCOVERY, not a count: a hardcoded total goes stale the moment a suite is
 # added or removed, and an earlier revision of this gate passed against a stale constant
 # while the suite it guarded went unrun. Pin the glob instead.

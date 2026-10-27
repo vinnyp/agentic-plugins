@@ -7,10 +7,13 @@
 #   3. --install refuses to overwrite a real file; non-zero exit + file unchanged
 #   4. Every executable non-test bin file is registered or explicitly opted out
 #   5. Verify mode check 1 sees every registered entrypoint on PATH
-#   6. run-tests.sh handles pass, fail-fast, and zero-suite cases
+#   6. run-tests.sh handles pass, runs all suites, and zero-suite cases
 #
 # Uses a mktemp dir as HOME so the real ~/.local/bin is never touched.
 set -uo pipefail
+unset RUN_TESTS_JOBS RUN_TESTS_TIMEOUT RUN_TESTS_KEEP_LOGS RUN_TESTS__PS_AVAILABLE
+for run_tests_hook in ${!RUN_TESTS__TEST_@}; do unset "$run_tests_hook"; done
+unset run_tests_hook
 
 BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck disable=SC1091
@@ -94,6 +97,7 @@ assert_registry_complete() {
 # Set up a temp HOME
 # ---------------------------------------------------------------------------
 TMP="$(mktemp -d)"
+export TMPDIR="$TMP"
 UNREGISTERED_FIXTURE=""
 cleanup() {
   [ -n "$UNREGISTERED_FIXTURE" ] && rm -f "$UNREGISTERED_FIXTURE"
@@ -246,14 +250,15 @@ printf '#!/usr/bin/env bash\nexit 0\n' > "$RUNNER_PASS/test-b.sh"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$RUNNER_PASS/test-a.sh"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$TMP/runner-pass/test/stray_commit.sh"
 chmod +x "$RUNNER_PASS/test-a.sh" "$RUNNER_PASS/test-b.sh" "$TMP/runner-pass/test/stray_commit.sh"
-pass_out="$("$RUNNER_PASS/run-tests.sh" 2>&1)"
+pass_out="$("$RUNNER_PASS/run-tests.sh" -j 1 2>&1)"
 pass_rc=$?
 if [ "$pass_rc" -eq 0 ] &&
-   printf '%s\n' "$pass_out" | grep -qFx "PASS test-a.sh" &&
-   printf '%s\n' "$pass_out" | grep -qFx "PASS test-b.sh" &&
+   printf '%s\n' "$pass_out" | grep -qx 'PASS test-a.sh ([0-9]*s)' &&
+   printf '%s\n' "$pass_out" | grep -qx 'PASS test-b.sh ([0-9]*s)' &&
    printf '%s\n' "$pass_out" | grep -qFx "RUN  stray_commit.sh" &&
-   printf '%s\n' "$pass_out" | grep -qFx "PASS stray_commit.sh" &&
-   printf '%s\n' "$pass_out" | grep -qFx "Summary: 3 passed, 0 failed, 3 total"; then
+   printf '%s\n' "$pass_out" | grep -qx 'PASS stray_commit.sh ([0-9]*s)' &&
+   printf '%s\n' "$pass_out" | grep -qFx "Summary: 3 passed, 0 failed, 3 total" &&
+   printf '%s\n' "$pass_out" | grep -q '^GATE PASS:'; then
   pass "Test 6: run-tests.sh passes all suites and summarizes count"
 else
   printf '%s\n' "$pass_out"
@@ -265,20 +270,23 @@ mkdir -p "$RUNNER_FAIL"
 cp "$RUN_TESTS_BIN" "$RUNNER_FAIL/run-tests.sh"
 chmod +x "$RUNNER_FAIL/run-tests.sh"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$RUNNER_FAIL/test-a.sh"
-printf '#!/usr/bin/env bash\nexit 7\n' > "$RUNNER_FAIL/test-b.sh"
+printf '#!/usr/bin/env bash\necho MARK-B\nexit 7\n' > "$RUNNER_FAIL/test-b.sh"
+printf '#!/usr/bin/env bash\necho MARK-D\nexit 3\n' > "$RUNNER_FAIL/test-d.sh"
 printf '#!/usr/bin/env bash\ntouch "%s/test-c-ran"\nexit 0\n' "$TMP" > "$RUNNER_FAIL/test-c.sh"
-chmod +x "$RUNNER_FAIL/test-a.sh" "$RUNNER_FAIL/test-b.sh" "$RUNNER_FAIL/test-c.sh"
-fail_out="$("$RUNNER_FAIL/run-tests.sh" 2>&1)"
+chmod +x "$RUNNER_FAIL/test-a.sh" "$RUNNER_FAIL/test-b.sh" "$RUNNER_FAIL/test-c.sh" "$RUNNER_FAIL/test-d.sh"
+fail_out="$("$RUNNER_FAIL/run-tests.sh" -j 1 2>&1)"
 fail_rc=$?
-if [ "$fail_rc" -ne 0 ] &&
-   printf '%s\n' "$fail_out" | grep -qF "FAIL test-b.sh" &&
-   printf '%s\n' "$fail_out" | grep -qF "run-tests.sh: failing suite: test-b.sh" &&
-   ! printf '%s\n' "$fail_out" | grep -qF "Summary: 3 passed, 0 failed, 3 total" &&
-   [ ! -e "$TMP/test-c-ran" ]; then
-  pass "Test 6: run-tests.sh fails fast and names failing suite"
+if [ "$fail_rc" -eq 1 ] &&
+   [ -e "$TMP/test-c-ran" ] &&
+   printf '%s\n' "$fail_out" | grep -qF "FAIL test-b.sh (exit 7," &&
+   printf '%s\n' "$fail_out" | grep -qF "FAIL test-d.sh (exit 3," &&
+   printf '%s\n' "$fail_out" | grep -qF "MARK-B" &&
+   printf '%s\n' "$fail_out" | grep -qF "MARK-D" &&
+   ! printf '%s\n' "$fail_out" | grep -q '^GATE PASS'; then
+  pass "Test 6: run-tests.sh runs all suites and names every failing suite"
 else
   printf '%s\n' "$fail_out"
-  fail "Test 6: run-tests.sh failing fixture did not fail fast with expected message"
+  fail "Test 6: run-tests.sh failing fixture did not run all suites with expected failures"
 fi
 
 RUNNER_ZERO="$TMP/runner-zero/bin"
