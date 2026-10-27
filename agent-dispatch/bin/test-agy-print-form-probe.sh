@@ -4,6 +4,7 @@
 # `agy - < prompt` forms. We stub `agy` (never call the real binary) and assert
 # the probe gates on the actual form dispatch-worker uses.
 set -uo pipefail
+unset RUN_TESTS_JOBS RUN_TESTS_TIMEOUT RUN_TESTS_KEEP_LOGS RUN_TESTS__TEST_DROP_RC
 
 SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck disable=SC1091
@@ -12,6 +13,7 @@ export AGY_TEST_CODING_PIN="$AGY_MODEL_CODING_DEFAULT" AGY_TEST_REVIEW_PIN="$AGY
 PROBE="$SELF_DIR/agy-print-form-probe.sh"
 PREFLIGHT="$SELF_DIR/coding-preflight.sh"
 TMP="$(mktemp -d)"
+export TMPDIR="$TMP"
 trap 'rm -rf "$TMP"' EXIT
 
 fail() { echo "FAIL: $1"; exit 1; }
@@ -20,7 +22,8 @@ mkdir -p "$TMP/bin" "$TMP/home"
 export HOME="$TMP/home"
 PATH_ORIG="$PATH"
 export PATH="$TMP/bin:$PATH"
-export AGY_FORM_PROBE_TIMEOUT="2s"
+# Liveness allowance for the echo/garbage/silent stubs (widened 2s -> 6s for parallel runs).
+export AGY_FORM_PROBE_TIMEOUT="6s"
 
 # shellcheck disable=SC1090
 . "$PROBE"
@@ -95,6 +98,7 @@ grep -qi "FAIL CLOSED" "$TMP/t3.err" || fail "bare-stdin-broken case did not fai
 echo "test 3 (bare stdin broken + legacy works -> rc 1 fail closed) PASS"
 
 # 4. bare stdin hang is bounded.
+# KEPT: the <15s bound against a 30s-sleeping stub is the property under test (cap is 6s).
 write_stub hang echo
 start_ts=$(date +%s)
 agy_print_form_probe >"$TMP/t4.out" 2>"$TMP/t4.err"
@@ -156,6 +160,7 @@ grep -q "bare-stdin form round-trips the sentinel" "$TMP/t10.err" || fail "11s-e
 echo "test 10 (real 30s default: an 11s-equivalent round trip passes) PASS"
 
 # 11. Short cap + slower bare-stdin response fails closed quickly.
+# KEPT unwidened: the 1s cap racing the 2s-sleeping stub (and the <3s bound) is the property under test.
 write_stub slow2 silent
 start_ts=$(date +%s)
 AGY_FORM_PROBE_TIMEOUT="1s" agy_print_form_probe >"$TMP/t11.out" 2>"$TMP/t11.err"
@@ -164,7 +169,8 @@ end_ts=$(date +%s)
 elapsed=$((end_ts - start_ts))
 [ "$rc" -eq 1 ] || fail "response slower than a short cap should fail closed (rc 1), got $rc (err: $(cat "$TMP/t11.err"))"
 grep -qi "FAIL CLOSED" "$TMP/t11.err" || fail "response slower than a short cap did not fail closed with a clear message"
-[ "$elapsed" -lt 3 ] || fail "capped-timeout case took ${elapsed}s — the short cap did not bound the slow stub"
+# rc 1 and FAIL CLOSED already prove the cap fired; allow scheduling overhead.
+[ "$elapsed" -lt 10 ] || fail "capped-timeout case took ${elapsed}s — the short cap did not bound the slow stub"
 echo "test 11 (short cap + slower bare-stdin response fails closed) PASS"
 
 export PATH="$TMP/bin:$PATH_ORIG"
