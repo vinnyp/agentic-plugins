@@ -303,7 +303,10 @@ without a scope proof, red on the unmutated copy, changing nothing, a scope proo
 the unmutated copy or on the mutant (summed count, full-run count, one-fewer delta line), or still
 printing the expected text on the mutant, or a refused control: its text already
 in the main run, inert, red for an unrelated reason, or printing the expected text), `3` with `--expect-fail-output`, a RED run that failed for an
-unrelated reason (treat it as a surviving mutant). Use it for every mutation-verify pass,
+unrelated reason (treat it as a surviving mutant). `--test-cmd` runs under `pipefail`: pass the
+test runner's own exit status, and never pipe into `grep -q` or `head` (early pipe close sends
+`SIGPIPE` / exit 141 to the upstream runner and aborts the baseline). Use it for every
+mutation-verify pass,
 orchestrator or reviewer alike, and pass BOTH `--expect-fail-output` with the hazard assertion's
 rendered failure line (see the skill's mutation rules for how to choose it) AND
 `--knockout-cmd` (the test command with only the hazard test deselected, by the exact form for

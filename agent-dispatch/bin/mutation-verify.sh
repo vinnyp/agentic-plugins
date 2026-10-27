@@ -104,8 +104,10 @@ usage: mutation-verify.sh --file <path> --test-cmd <shell-command> \
 
 Exactly one of --mutate-sed or --mutate-cmd is required.
 
---test-cmd is run twice: once as a baseline against the unmutated file
-(must pass, or the script aborts) and once under mutation.
+--test-cmd is run twice under pipefail: once as a baseline against the
+unmutated file (must pass, or the script aborts) and once under mutation.
+Use the test runner's own exit status; do not pipe into grep -q or head
+(early pipe closure sends SIGPIPE / exit 141 under pipefail).
 
 --expect-anchor may be repeated and must be present in the original snapshot.
 --expect-marker may be repeated and must be present in the mutated file.
@@ -622,6 +624,9 @@ if [ "$baseline_rc" -ne 0 ]; then
   baseline_note=""
   [ "$baseline_cmd" = "$test_cmd" ] || baseline_note=", run with -coverprofile added for --cover-check"
   echo "mutation-verify.sh: test-cmd does not pass before mutation (baseline exited $baseline_rc$baseline_note) — the instrument is invalid" >&2
+  if [ "$baseline_rc" -eq 141 ]; then
+    echo "mutation-verify.sh: hint: exit 141 is SIGPIPE under pipefail — if --test-cmd pipes a test runner into grep -q or head, the early pipe close kills the runner; pass the test runner's own exit status instead" >&2
+  fi
   exit 2
 fi
 # An --expect-fail-output (or --control-expect-fail-output) string that a

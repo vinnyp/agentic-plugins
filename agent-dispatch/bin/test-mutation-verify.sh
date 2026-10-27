@@ -114,6 +114,7 @@ bash "$MV" --file "$F4B" --test-cmd "$TMP/this-command-does-not-exist-anywhere" 
 rc=$?
 [ "$rc" -eq 2 ] || { cat "$TMP/out4b"; fail "baseline-fails: expected exit 2, got $rc"; }
 grep -qi "baseline\|before mutation" "$TMP/out4b" || { cat "$TMP/out4b"; fail "baseline-fails: expected a message naming the baseline failure"; }
+grep -q "SIGPIPE" "$TMP/out4b" && { cat "$TMP/out4b"; fail "baseline-fails: non-141 baseline failure must not emit SIGPIPE hint"; }
 [ "$(cat "$F4B")" = "$before4b" ] || fail "baseline-fails: file was NOT left untouched"
 echo "test baseline-fails (broken test-cmd) -> exit 2, file untouched PASS"
 
@@ -1861,5 +1862,27 @@ if command -v cargo >/dev/null 2>&1; then
 else
   echo "SKIP: real cargo double-dash knock-out (cargo absent)"
 fi
+
+# ---------------------------------------------------------------------------
+# Test 94 (main's SIGPIPE test, renumbered on merge): baseline exiting 141 (SIGPIPE under pipefail, e.g. piping a noisy
+# test runner into `grep -q`) exits 2 and emits an actionable SIGPIPE /
+# `grep -q` diagnostic hint, leaving the target file byte-identical.
+# The writer is perl resetting SIGPIPE itself: a shell cannot un-ignore a signal
+# it inherited as ignored (GitHub's runner starts jobs that way), so `trap - PIPE`
+# left `yes` exiting 1 on EPIPE there instead of dying of SIGPIPE (141).
+# ---------------------------------------------------------------------------
+F94="$TMP/sigpipe_baseline.txt"
+printf 'hello world\n' > "$F94"
+before94="$(cat "$F94")"
+bash "$MV" --file "$F94" \
+  --test-cmd "perl -e '\$SIG{PIPE}=\"DEFAULT\"; print \"y\\n\" while 1' | grep -q y" \
+  --mutate-sed 's/hello/goodbye/' >"$TMP/out94" 2>&1
+rc=$?
+[ "$rc" -eq 2 ] || { cat "$TMP/out94"; fail "sigpipe baseline: expected exit 2, got $rc"; }
+grep -q "baseline exited 141" "$TMP/out94" || { cat "$TMP/out94"; fail "sigpipe baseline: expected baseline exited 141 message"; }
+grep -q "SIGPIPE" "$TMP/out94" || { cat "$TMP/out94"; fail "sigpipe baseline: expected SIGPIPE diagnostic hint"; }
+grep -q "grep -q" "$TMP/out94" || { cat "$TMP/out94"; fail "sigpipe baseline: expected grep -q diagnostic hint"; }
+[ "$(cat "$F94")" = "$before94" ] || fail "sigpipe baseline: file not byte-identical after abort"
+echo "test baseline exit 141 emits SIGPIPE / grep -q hint -> PASS"
 
 echo "ALL PASS"
