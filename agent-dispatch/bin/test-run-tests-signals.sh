@@ -251,6 +251,8 @@ check test "$((SECONDS - began))" -lt 20
 check test "$(grep -cFx 'FAIL test-leak.sh (exited 0; left processes running)' "$TMP/out")" = 2
 check grep -qFx 'Log tail: test-leak.sh' "$TMP/out"
 check grep -qFx LEAK-LOG "$TMP/out"
+# The runner names each survivor (pid, elapsed time, command) before killing it.
+check grep -qE "^LEAK test-leak\.sh: pid $(cat "$TMP/leak.pid"), elapsed [0-9:-]+: sleep 40\$" "$TMP/out"
 check bash -c '! kill -0 "$1" 2>/dev/null' _ "$(cat "$TMP/leak.pid")"
 fixture timeout-respecting
 suite bin/test-hang.sh 'sleep 60'
@@ -324,10 +326,15 @@ if ! grep -qFx 'run-tests.sh: NOTICE: ps not found; runner identity check disabl
  echo 'FAIL: inherited ps cache suppressed no-ps NOTICE'
  exit 1
 fi
+suite bin/test-leak.sh 'echo LEAK-LOG; sleep 40 & echo $! > "$TMPDIR/leak.pid"; exit 0'
+PATH="$shim" run
+check test "$rc" = 1
+check grep -qF 'LEAK test-leak.sh: ps not found' "$TMP/out"
 printf '#!/usr/bin/env bash\nexit 1\n' > "$shim/ps"
 chmod +x "$shim/ps"
 PATH="$shim" run
-check test "$rc" = 0
+check test "$rc" = 1
+check grep -qFx 'LEAK test-leak.sh: survivors could not be listed' "$TMP/out"
 rm "$shim/ps"
 ln -s "$(command -v ps)" "$shim/ps"
 fi

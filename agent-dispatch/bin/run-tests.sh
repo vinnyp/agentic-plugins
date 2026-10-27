@@ -46,6 +46,21 @@ if [ "${1:-}" = --_run-one ]; then
       kill -"$1" "$pgid" 2>/dev/null || :
     fi
   }
+  # Name the survivors before signalling them: pid, elapsed time and command.
+  report_leak() {
+    if [ "$RUN_TESTS__PS_AVAILABLE" != 1 ]; then
+      printf 'LEAK %s: ps not found; cannot list surviving processes\n' "$name"; return 0
+    fi
+    local survivors
+    survivors=$(ps -A -o pid= -o pgid= -o etime= -o command= 2>/dev/null | awk -v g="$pgid" -v n="$name" '
+      $2 == g { c = $0; sub(/^[ \t]*[^ \t]+[ \t]+[^ \t]+[ \t]+[^ \t]+[ \t]*/, "", c)
+        printf "LEAK %s: pid %s, elapsed %s: %s\n", n, $1, $3, c }' || :)
+    if [ -n "$survivors" ]; then
+      printf '%s\n' "$survivors"
+    else
+      printf 'LEAK %s: survivors could not be listed\n' "$name"
+    fi
+  }
   write_rc() {
     printf '%s\n' "$1" > "$rundir/$key.rc.tmp"
     mv "$rundir/$key.rc.tmp" "$rundir/$key.rc"
@@ -87,6 +102,7 @@ if [ "${1:-}" = --_run-one ]; then
       if [ -z "$term_at" ]; then
         term_at=$now
         if [ "$interrupted" -eq 0 ] && [ "$leaked" -eq 0 ]; then timed_out=1; fi
+        if [ "$leaked" -eq 1 ]; then report_leak; fi
         if (set -C; : > "$rundir/$key.termed") 2>/dev/null; then
           signal_suite TERM
         fi

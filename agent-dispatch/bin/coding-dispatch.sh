@@ -681,6 +681,8 @@ _tee_out=""
 _tee_err=""
 # shellcheck disable=SC2329 # invoked by the signal trap
 cleanup_signal() {
+  # Recover the worker if a signal arrived between its fork and child assignment.
+  if [ -z "$child" ] && [ -n "$_tee_err" ] && [ "${!:-}" != "$_tee_err" ]; then child=$!; fi
   trap '' HUP INT TERM
   if [ -n "$child" ]; then
     if [ -n "$TIMEOUT_BIN" ]; then
@@ -719,18 +721,29 @@ cleanup_signal() {
 trap cleanup_signal HUP INT TERM
 
 _cap_dir="$(mktemp -d -t coding-dispatch-cap.XXXXXX)"
-mkfifo "$_cap_dir/out.fifo" "$_cap_dir/err.fifo"
-tee -a "$_cap_dir/out.log" < "$_cap_dir/out.fifo" & _tee_out=$!
-tee -a "$_cap_dir/err.log" < "$_cap_dir/err.fifo" >&2 & _tee_err=$!
+mkfifo "$_cap_dir/out.fifo" "$_cap_dir/err.fifo" || {
+  rm -rf "$_cap_dir"
+  die "could not create capture FIFOs"
+}
+# Open both ends of each FIFO here, before forking either side: a read-write open never
+# blocks on Linux/macOS (not guaranteed by POSIX), so neither side waits in a FIFO
+# open. A reader whose writer
+# never arrived (the launch failed first, or this script was killed between the forks)
+# used to block forever, hanging the dispatch or outliving it in the caller's process
+# group. Each FIFO now behaves as a pipe: its reader sees EOF once every writer closes.
+exec 9<>"$_cap_dir/out.fifo" 5<"$_cap_dir/out.fifo" 6>"$_cap_dir/out.fifo" 9>&-
+exec 9<>"$_cap_dir/err.fifo" 7<"$_cap_dir/err.fifo" 8>"$_cap_dir/err.fifo" 9>&-
+tee -a "$_cap_dir/out.log" <&5 5<&- 6>&- 7<&- 8>&- & _tee_out=$!
+tee -a "$_cap_dir/err.log" <&7 >&2 5<&- 6>&- 7<&- 8>&- & _tee_err=$!
 
 case "$agent" in
   codex)
     if [ -n "$TIMEOUT_BIN" ]; then
-      "$TIMEOUT_BIN" -k 30s "$TIMEOUT" codex exec --dangerously-bypass-approvals-and-sandbox -C "$target" - < "$_effective_prompt" > "$_cap_dir/out.fifo" 2> "$_cap_dir/err.fifo" &
+      "$TIMEOUT_BIN" -k 30s "$TIMEOUT" codex exec --dangerously-bypass-approvals-and-sandbox -C "$target" - < "$_effective_prompt" >&6 2>&8 5<&- 6>&- 7<&- 8>&- &
       child=$!
     else
       note "⚠ no timeout/gtimeout binary — codex hang cannot be externally bounded (brew install coreutils)"
-      codex exec --dangerously-bypass-approvals-and-sandbox -C "$target" - < "$_effective_prompt" > "$_cap_dir/out.fifo" 2> "$_cap_dir/err.fifo" &
+      codex exec --dangerously-bypass-approvals-and-sandbox -C "$target" - < "$_effective_prompt" >&6 2>&8 5<&- 6>&- 7<&- 8>&- &
       child=$!
     fi
     ;;
@@ -744,15 +757,17 @@ case "$agent" in
     # proven UNRELIABLE (observed hanging 6.5h past a 15m setting) and is tied to --print,
     # so the EXTERNAL timeout (separate process, own clock) is the real bound, as for codex.
     if [ -n "$TIMEOUT_BIN" ]; then
-      "$TIMEOUT_BIN" -k 30s "$TIMEOUT" agy --model "$agy_model" --dangerously-skip-permissions --add-dir "$target" < "$_effective_prompt" > "$_cap_dir/out.fifo" 2> "$_cap_dir/err.fifo" &
+      "$TIMEOUT_BIN" -k 30s "$TIMEOUT" agy --model "$agy_model" --dangerously-skip-permissions --add-dir "$target" < "$_effective_prompt" >&6 2>&8 5<&- 6>&- 7<&- 8>&- &
       child=$!
     else
       note "⚠ no timeout/gtimeout binary — agy hang cannot be externally bounded (brew install coreutils)"
-      agy --model "$agy_model" --dangerously-skip-permissions --add-dir "$target" < "$_effective_prompt" > "$_cap_dir/out.fifo" 2> "$_cap_dir/err.fifo" &
+      agy --model "$agy_model" --dangerously-skip-permissions --add-dir "$target" < "$_effective_prompt" >&6 2>&8 5<&- 6>&- 7<&- 8>&- &
       child=$!
     fi
     ;;
 esac
+# Drop this script's ends so the readers see EOF when the agent's side closes.
+exec 5<&- 6>&- 7<&- 8>&-
 wait "$child"
 agent_rc=$?
 wait "$_tee_out" "$_tee_err" 2>/dev/null || true
