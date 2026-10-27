@@ -8,6 +8,7 @@ SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 TMP="$(cd "$(mktemp -d)" && pwd -P)"
 trap 'chmod -R u+w "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT
 MV="$SELF_DIR/mutation-verify.sh"
+PERL=$(command -v perl || :)
 fail() { echo "FAIL: $1"; exit 1; }
 
 # ---------------------------------------------------------------------------
@@ -23,6 +24,7 @@ fail() { echo "FAIL: $1"; exit 1; }
 # that had actually succeeded. cleanup() must be idempotent, and its
 # stderr must NOT claim failure when the restore genuinely succeeded.
 # ---------------------------------------------------------------------------
+if [ -n "$PERL" ]; then
 F13="$TMP/sigint_target.txt"
 printf 'hello world\n' > "$F13"
 before13="$(cat "$F13")"
@@ -38,7 +40,8 @@ chmod +x "$TMP/slow_test.sh"
 # that was already ignored on entry — so `kill -INT` on the background job
 # would silently do nothing and this test would just run to completion.
 set -m
-MUTATION_VERIFY_TEST_READY="$TMP/int-ready" bash "$MV" --file "$F13" --test-cmd "$TMP/slow_test.sh" --mutate-sed 's/hello/goodbye/' >"$TMP/out13" 2>&1 &
+# Reset inherited ignored SIGINT before starting the shell.
+MUTATION_VERIFY_TEST_READY="$TMP/int-ready" "$PERL" -e '$SIG{INT}=$SIG{TERM}=$SIG{HUP}="DEFAULT"; exec @ARGV' bash "$MV" --file "$F13" --test-cmd "$TMP/slow_test.sh" --mutate-sed 's/hello/goodbye/' >"$TMP/out13" 2>&1 &
 sig_pid=$!
 ready_deadline=$((SECONDS+15))
 while [ ! -f "$TMP/int-ready" ]; do
@@ -59,7 +62,7 @@ echo "test SIGINT during test-cmd -> signal-derived exit, file restored, no spur
 mkdir -p "$TMP/int-root" "$TMP/int-tmp"
 printf 'hello\n' > "$TMP/int-root/subject"
 set -m
-(cd "$TMP/int-root" && TMPDIR="$TMP/int-tmp" exec bash "$MV" --copy-root . --file subject \
+(cd "$TMP/int-root" && TMPDIR="$TMP/int-tmp" exec "$PERL" -e '$SIG{INT}=$SIG{TERM}=$SIG{HUP}="DEFAULT"; exec @ARGV' bash "$MV" --copy-root . --file subject \
   --test-cmd 'sleep 9' --mutate-sed 's/hello/bye/' \
   --expect-fail-output hazard --control-sed 's/hello/control/' \
   --control-expect-fail-output control) > "$TMP/copy-int-out" 2>&1 &
@@ -76,6 +79,10 @@ set +m
 [ "$rc" -eq 130 ] || { cat "$TMP/copy-int-out"; fail 'copy INT must exit 130'; }
 [ -z "$(find "$TMP/int-tmp" -name 'mutation-verify-copy.*' -print)" ] || fail 'copy INT leaked directory'
 echo 'test copy-root: cleanup on INT PASS'
+else
+  echo 'SKIP in-place INT: perl unavailable to reset SIGINT'
+  echo 'SKIP copy INT: perl unavailable to reset SIGINT'
+fi
 
 # ---------------------------------------------------------------------------
 # Test 23 (cover-check): --cover-check function unreachable. Mutating a

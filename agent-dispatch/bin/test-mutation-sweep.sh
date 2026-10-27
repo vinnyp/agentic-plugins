@@ -5,6 +5,7 @@
 set -eu
 unset MUTATION_VERIFY_COPY_ROOT MUTATION_VERIFY_FILE MUTATION_VERIFY_SWEEP_JOBS MUTATION_VERIFY_SWEEP_TIMEOUT
 BIN=$(cd "$(dirname "$0")" && pwd)
+PERL=$(command -v perl || :)
 fail() { echo "FAIL: $*" >&2; exit 1; }
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/test-mutation-sweep.XXXXXX")
 [ -n "$TMP" ] || fail 'empty scratch directory'
@@ -274,8 +275,9 @@ CHECK
     printf 'if grep -q good subject && grep -q control subject; then sleep 30; fi\nbash check\n' > signal-check
   fi
   printf '%s\n' "${base/bash check/bash signal-check} --mutate-sed 's/good/bad/'" > "$TMP/signal-lines"
+  # Reset inherited ignored SIGINT before starting the shell.
   set -m
-  bash "$BIN/mutation-sweep.sh" --copy-root . --mutants "$TMP/signal-lines" --out "$TMP/$label" > "$TMP/$label.log" 2>&1 &
+  "$PERL" -e '$SIG{INT}=$SIG{TERM}=$SIG{HUP}="DEFAULT"; exec @ARGV' bash "$BIN/mutation-sweep.sh" --copy-root . --mutants "$TMP/signal-lines" --out "$TMP/$label" > "$TMP/$label.log" 2>&1 &
   sweep_pid=$!
   set +m
   wait_file "$TMP/$label/1.pid"
@@ -333,7 +335,7 @@ TIMEOUT
   chmod +x "$TMP/grace-bin/timeout"
   printf '%s\n' "${base/bash check/bash grace-check} --mutate-sed 's/good/bad/'" > "$TMP/grace-lines"
   set -m
-  PATH="$TMP/grace-bin:$PATH" bash "$BIN/mutation-sweep.sh" --copy-root . --mutants "$TMP/grace-lines" --out "$TMP/grace" > "$TMP/grace.log" 2>&1 &
+  PATH="$TMP/grace-bin:$PATH" "$PERL" -e '$SIG{INT}=$SIG{TERM}=$SIG{HUP}="DEFAULT"; exec @ARGV' bash "$BIN/mutation-sweep.sh" --copy-root . --mutants "$TMP/grace-lines" --out "$TMP/grace" > "$TMP/grace.log" 2>&1 &
   sweep_pid=$!
   set +m
   wait_file "$MUTATION_VERIFY__GRACE_READY"
@@ -350,7 +352,7 @@ finished_record() {
   set -m
   bash -c 'trap "exit 0" TERM; sleep 30' &
   canary_pid=$!
-  bash "$BIN/mutation-sweep.sh" --copy-root . --mutants "$TMP/record-lines" -j 1 --out "$TMP/record" > "$TMP/record.log" 2>&1 &
+  "$PERL" -e '$SIG{INT}=$SIG{TERM}=$SIG{HUP}="DEFAULT"; exec @ARGV' bash "$BIN/mutation-sweep.sh" --copy-root . --mutants "$TMP/record-lines" -j 1 --out "$TMP/record" > "$TMP/record.log" 2>&1 &
   sweep_pid=$!
   set +m
   wait_file "$TMP/record/1.rc"
@@ -407,6 +409,14 @@ sigkill_case() {
 selected=${1:-all}
 for test in known unsafe_lines killed_label short_child interface isolation file_env parallel subdirectory timeouts leftovers signal ignored grace_case finished_record sigkill; do
   [ "$selected" = all ] || [ "$selected" = "$test" ] || continue
+  case "$test" in
+    signal|ignored|grace_case|finished_record)
+      if [ -z "$PERL" ]; then
+        echo "SKIP $test: perl unavailable to reset SIGINT"
+        continue
+      fi
+      ;;
+  esac
   case "$test" in signal) signal_case signal no;; ignored) signal_case ignored yes;; sigkill) sigkill_case;; *) "$test";; esac
   echo "$test sweep PASS"
 done
