@@ -24,7 +24,8 @@ commit/merge:
 - **`peer-code-reviewer`** — correctness against the real contracts the change integrates with;
   seam bugs.
 - **`peer-test-reviewer`** — does the green suite actually **prove** the behavior (false-greens,
-  mutation check, coverage)? "Has tests" is not "is tested". Test review is baseline *because* a
+  mutation check — via `mutation-verify.sh` with `--expect-fail-output` and `--knockout-cmd`, or
+  the mutant is UNPROVEN — coverage)? "Has tests" is not "is tested". Test review is baseline *because* a
   redaction layer has shipped non-functional twice behind a passing suite.
 
 Both are written in diff-and-green-suite terms and do not fit a `design`-mode spec review, which has
@@ -288,16 +289,34 @@ The prose-only version of this rule ("commit first, or copy aside") failed three
 before a structural replacement shipped: **`mutation-verify.sh`**, in this plugin's `bin/`.
 
 ```
-mutation-verify.sh --file <path> --test-cmd <cmd> (--mutate-sed <expr> | --mutate-cmd <cmd>)
+mutation-verify.sh --file <path> --test-cmd <cmd> (--mutate-sed <expr> | --mutate-cmd <cmd>) \
+  --expect-fail-output <hazard failure line> \
+  --knockout-cmd <the test command with only the hazard test deselected>
 ```
 
 It snapshots the target file by **copy** into a temp dir outside the repo, mutates, runs the test,
 restores from the copy, and verifies byte-identity — immune to commit state, and it **never invokes
-git**. Exit codes: `0` mutation caught (the test genuinely isolates), `1` mutation not caught
-(false-green test), `2` harness error (bad args, a no-op mutation, a failed restore, or an invalid
-baseline). `--test-cmd` runs under `pipefail`: pass the test runner's own exit status, and never
-pipe into `grep -q` or `head` (early pipe close sends `SIGPIPE` / exit 141 to the upstream runner
-and aborts the baseline). Use it for every mutation-verify pass, orchestrator or reviewer alike.
+git**. Exit codes: `0` mutation caught, `1` mutation not caught (false-green test), `2` harness
+error (bad args, a no-op mutation, a failed restore, an invalid baseline, an unusable
+`--expect-fail-output` text, a refused knock-out: empty, not the test command plus a deselect,
+without a scope proof, red on the unmutated copy, changing nothing, a scope proof that fails on
+the unmutated copy or on the mutant (summed count, full-run count, one-fewer delta line), or still
+printing the expected text on the mutant, or a refused control: its text already
+in the main run, inert, red for an unrelated reason, or printing the expected text), `3` with `--expect-fail-output`, a RED run that failed for an
+unrelated reason (treat it as a surviving mutant). `--test-cmd` runs under `pipefail`: pass the
+test runner's own exit status, and never pipe into `grep -q` or `head` (early pipe close sends
+`SIGPIPE` / exit 141 to the upstream runner and aborts the baseline). Use it for every
+mutation-verify pass,
+orchestrator or reviewer alike, and pass BOTH `--expect-fail-output` with the hazard assertion's
+rendered failure line (see the skill's mutation rules for how to choose it) AND
+`--knockout-cmd` (the test command with only the hazard test deselected, by the exact form for
+cargo, go or pytest in `docs/commands.md`, plus its required scope proof, `--knockout-expect-output`
+or `--knockout-delta-line`; any other runner, node included, makes the mutant UNPROVEN):
+a caught result then shows the text was present, names it, and shows it disappears when that
+command runs. A control mutant is recommended, not required; a control refusal stands; record
+every control you tried, including refused ones. When mutation-verify.sh is
+unavailable, the runner cannot deselect the single hazard test, or no hazard-specific text exists,
+the mutant is UNPROVEN, never CAUGHT.
 
 **Concurrent mutation-DOING reviewers — isolate them, or make them read-only.** When you dispatch
 two or more reviewers that themselves RUN mutations (mutate a file → run the test → restore), do

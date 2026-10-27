@@ -152,7 +152,10 @@ authored both, say so **in the brief** — it is a slot, not an orchestrator's i
 
 > Author-wrote-both overlap: the same pass authored the fix in `<file>` AND the tests in
 > `<test-file>`. Treat those tests as UNPROVEN. Re-run the specific mutant that should catch a
-> regression in `<file>` (via `mutation-verify.sh`) before accepting any of them as evidence.
+> regression in `<file>` (via `mutation-verify.sh --syntax-cmd '<parse check>' --expect-fail-output
+> '<hazard failure text>' --knockout-cmd '<the test command with only the hazard test deselected>'`,
+> plus a recommended control mutant) before accepting any of them as evidence. A mutant run
+> without both, or whose knock-out or control is refused, stays UNPROVEN.
 
 A fix that ships with **no** new tests does not satisfy this rule by default — "nobody tested it" is
 not "an independent party tested it". Call it out in the brief the same way.
@@ -280,8 +283,39 @@ commit state and safe on a dirty tree. Do not eyeball a diff; use its applied-ve
 mutation-verify.sh --file <path> --test-cmd "<the gate>" --mutate-sed '<expr>' \
   --expect-anchor '<text that must be present BEFORE mutation>' \
   --expect-marker '<text that must be present AFTER mutation>' \
-  --syntax-cmd "bash -n <path>"     # or: python -m py_compile <path>, go build ./...
+  --syntax-cmd "bash -n <path>" \
+  --expect-fail-output '<text only the hazard assertion prints when it fails>' \
+  --knockout-cmd '<the same test command with only the hazard test deselected>'
+# --syntax-cmd alternatives: python -m py_compile <path>, go build ./...
+# Recommended in addition: --control-sed '<expr>' (or --control-cmd) with
+#   --control-expect-fail-output '<the control test's failure line>'.
 ```
+
+**Every mutation check the gate relies on carries BOTH `--expect-fail-output` and
+`--knockout-cmd`** — orchestrator and reviewer alike, in an isolated copy or worktree, and every
+build-mode brief `review-gate` emits says so. The knock-out is the same test command with only
+the hazard test deselected, plus its required scope proof, and it is supported for **cargo, go and
+pytest only**, in the exact forms of `docs/commands.md`: `cargo test -q` (no positional filter) +
+`-- --exact --skip <path::name>` with `--knockout-expect-output '1 filtered out'`; `go test -v
+-count=1 <one package>` + `-skip '^TestName$'` (or `'^TestName$/^row$'` for one table row) with
+`--knockout-delta-line '=== RUN '`; `pytest -q <path>` + `--deselect <full node id>` with
+`--knockout-expect-output '1 deselected'`. **For any other runner (node included), record the
+mutant as UNPROVEN until a verified exact form exists.** The default deselect forms match by
+substring, regex or prefix and also remove a sibling with a common name prefix, the sibling the
+knock-out exists to keep; the tool's own checks (every count line summed, absent from the full run;
+exactly one fewer RUN line) are what show exactly one test went. The knock-out must start with
+the test command, pass green on the unmutated copy, and print something different from the full
+run; on the same mutant the expected text must disappear, or another test prints it (or the
+deselect missed) and the mutant is refused (exit 2). The verdict names the command, its exit code
+on the mutant, and the scope proof. A
+control mutant (`--control-sed` / `--control-cmd` with `--control-expect-fail-output`, verified
+only with `--syntax-cmd`) is recommended, not required: it shows only that one other failure does
+not print the text; a control refusal stands; record every control you tried, including refused
+ones. **Every CAUGHT row quotes the verdict's `matched:` text and
+its knock-out and control clauses; a CAUGHT whose knock-out did not run, or whose deselect is not
+one of the documented exact forms, is UNPROVEN.** **Fallback: when mutation-verify.sh is unavailable, the runner cannot deselect the
+single hazard test, or no hazard-specific text exists, record the mutant as UNPROVEN, never
+CAUGHT** — in the disposition row, with the reason. `docs/commands.md` covers both checks.
 
 `--syntax-cmd` is the leg that matters most and the one hand-rolling always omits: a malformed
 mutant produces a syntax error, the test "fails" (or "passes") for the wrong reason, and the result
@@ -290,6 +324,32 @@ is indistinguishable from a genuine verdict. Pass the test runner's own exit sta
 close kills the runner with `SIGPIPE` / exit 141 and fails the unmutated baseline). **Never add a
 git-state check to `mutation-verify.sh`** — being git-free is precisely what makes it safe on
 uncommitted work.
+
+**A mutant proves a hazard only when the hazard assertion catches it.** A RED run caused by an
+incidental change (an error message, a needle, an unrelated assertion) is not a catch.
+`mutation-verify.sh` exit 3 (not the dispatch-worker rc 3 above) means the failing run lacked the
+hazard's failure text; record it as a surviving mutant, not a harness error to retry. Choose the
+text before the run, from the line the runner prints when the hazard assertion fails, including
+the runner's own framing (pytest's `AssertionError: <message>`, Go's `<file>_test.go:<line>:
+<message>`): a bare message literal is also in the test source, and pytest prints source on any
+failure. The text must be unique at run time: only the hazard test can make it appear. A literal
+found once by `grep -rF` is not enough inside a shared helper, a loop or a parametrized test; then
+name the hazard test or its call site (pytest's `FAILED <file>::<test> - <message>` summary line;
+Go helpers must call `t.Helper()`). Never use a message several assertions share, runner-wide
+text alone (`FAILED`, `AssertionError`, `panicked`), the product's error text, or a test name
+alone. After an exit 3, replace the text only when that output shows the hazard test itself
+failing at its own call site, not a shared helper's line (the rendering was wrong); cite that
+location and both runs. Otherwise the exit 3 stands as a survivor. See `docs/commands.md` for per-runner
+renderings. Quote the verdict's `matched:` text in the disposition row. The check is a presence check, so it cannot split
+one snapshot or diff assertion by cause. A mutant written to show that a fix
+closes a hazard must reproduce that hazard's real trigger (the fail-open input itself, not a
+neighbouring input the old code already refused).
+
+**A surviving mutant is a test gap by default.** Dismissing one needs a written reason it cannot
+matter (no input reaches the code, or the mutant is behaviorally equivalent), recorded in the review
+log's disposition table. "Defense in depth" or "possibly harmless" is not a reason: prove it, or add
+the test. (foundry#259: a survivor waved off as defense in depth was load-bearing at five call
+sites, and a "caught" snapshot mutant had failed only because a message changed.)
 
 ### 7. Keep the review log (a working record — verify where it landed with `review-log-status`)
 

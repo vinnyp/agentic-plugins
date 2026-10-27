@@ -20,12 +20,16 @@
 # Second, after mutation, to produce the actual verdict below.
 #
 # Verdict:
-#   test-cmd exits NON-ZERO under the mutation (went RED) -> the test
-#     genuinely isolates the fix -> exit 0.
+#   test-cmd exits NON-ZERO under the mutation (went RED) -> exit 0
+#     (CAUGHT). With --expect-fail-output, only when the RED run's output
+#     holds every expected text; otherwise -> exit 3 (RED for an unrelated
+#     reason: the hazard assertion is not shown to have caught this mutant).
 #   test-cmd exits ZERO under the mutation (stayed GREEN)  -> false-green
 #     test -> exit 1.
 #   Bad args, missing file, a failing baseline, a no-op mutation, failed
-#     applied-verification, or a failed restore -> exit 2.
+#     applied-verification, a failed restore, or an --expect-fail-output text
+#     that is empty, multi-line, or already printed by the passing baseline
+#     -> exit 2.
 #
 # Applied-verification flags:
 #   --expect-anchor <str> checks the original snapshot contains <str> before
@@ -34,6 +38,50 @@
 #     mutation; missing markers abort with exit 2.
 #   --syntax-cmd <cmd> runs after mutation and before the test; non-zero exits
 #     abort with exit 2. Example: --syntax-cmd "python -m py_compile path/to/file.py"
+#
+# Failure-cause flag (issue foundry#259):
+#   --expect-fail-output <str> (repeatable) requires the mutated run's combined
+#     stdout+stderr to contain <str> (text only the hazard assertion's own
+#     failure message prints) when it goes RED. A RED run without it failed
+#     for an unrelated reason (an incidental message or needle change), so the
+#     script exits 3 instead of reporting CAUGHT. Empty or multi-line text,
+#     and text the passing baseline already prints, are refused (exit 2): they
+#     cannot identify the failure. This is a presence check over all output:
+#     it cannot separate causes inside one snapshot/diff assertion that echoes
+#     expected content. With the flag, each run's output is captured to a file
+#     and printed on stdout (stderr merged) after the run finishes. Without the
+#     flag, a CAUGHT verdict says its cause was not checked.
+#
+# Knock-out (issue foundry#259; requires --expect-fail-output):
+#   --knockout-cmd <cmd> is the same test command with only the hazard test
+#     deselected, by an exact form (supported: cargo -- --exact --skip, go -v
+#     -skip '^Name$', pytest -q --deselect <full node id>; docs/commands.md),
+#     and nothing else after --test-cmd (any other suffix exits 2), with a
+#     required scope proof: --knockout-expect-output '1<rest>' (every
+#     "<n><rest>" in the output is summed; the full run must sum to 0 and the
+#     knock-out to 1) and/or --knockout-delta-line '=== RUN ' (exactly one
+#     fewer such line than the full run). The knock-out must
+#     start with --test-cmd and differ from it, pass green on the unmutated
+#     copy, print something different from the full baseline, not print any
+#     expected text there, and pass its scope proof, also on the mutant
+#     (exit 2 otherwise). On the same mutated copy, and only when the main run would
+#     be CAUGHT, the expected text must disappear; if it persists, another test
+#     prints it (or the deselect missed) and the run exits 2. The verdict names
+#     the command, its exit code on the mutant and the count line. Without it,
+#     CAUGHT says the knock-out did not run.
+#
+# Control mutant (issue foundry#259; requires --expect-fail-output; recommended):
+#   --control-sed <expr> | --control-cmd <cmd> (with --control-expect-fail-output,
+#     the control test's own failure line) applies a second mutation that
+#     breaks a DIFFERENT behavior, on a fresh copy of the original, with the
+#     same no-op, --control-anchor / --control-marker and --syntax-cmd checks.
+#     It must edit only --file. It runs only when the main run would be CAUGHT
+#     (a RED run without the expected text stays exit 3). Exit 2 when the
+#     control's text is already in the main run, the control is inert, its RED
+#     run lacks its own text, or it prints any expected text. One passing
+#     control shows only that that one other failure does not print the text.
+#     Without a control, a CAUGHT verdict says the control did not run. The
+#     control counts as verified only when --syntax-cmd checked its copy.
 #
 # --file is resolved to an ABSOLUTE path before snapshotting, and both
 # --test-cmd and --mutate-cmd run inside a subshell, so a --test-cmd that
@@ -47,6 +95,11 @@ usage() {
 usage: mutation-verify.sh --file <path> --test-cmd <shell-command> \
          [--expect-anchor <str>] [--expect-marker <str>] \
          [--syntax-cmd <shell-command>] [--cover-check <line-or-symbol>] \
+         [--expect-fail-output <str>] \
+         [--knockout-cmd <shell-command> (--knockout-expect-output <str> | --knockout-delta-line <prefix>)] \
+         [(--control-sed <sed-expr> | --control-cmd <shell-command>) \
+          --control-expect-fail-output <str> \
+          [--control-anchor <str>] [--control-marker <str>]] \
          (--mutate-sed <sed-expr> | --mutate-cmd <shell-command>)
 
 Exactly one of --mutate-sed or --mutate-cmd is required.
@@ -61,7 +114,27 @@ Use the test runner's own exit status; do not pipe into grep -q or head
 --syntax-cmd runs after mutation and before the test, for example:
   --syntax-cmd "python -m py_compile path/to/file.py"
 --cover-check runs the mutated Go test command with -coverprofile and
-asserts the target line/function in --file had non-zero coverage.
+asserts the target line/function in --file had non-zero coverage. With
+--expect-fail-output, the baseline also runs with -coverprofile.
+--expect-fail-output may be repeated; a RED mutated run whose output lacks
+any of them failed for an unrelated reason and exits 3, not CAUGHT. Empty or
+multi-line text, or text the passing baseline prints, exits 2.
+--knockout-cmd (requires --expect-fail-output and a scope proof:
+--knockout-expect-output '1<rest>', summed over the output, and/or
+--knockout-delta-line '=== RUN ', one fewer line than the full run) is
+--test-cmd plus exactly one documented deselect of only the hazard test (cargo
+-- --exact --skip <path::name>, go -skip '^Name$' or '^Name$/^row$', pytest
+--deselect <path::id>; anything else exits 2); it must pass on the unmutated
+copy and print something different from the full baseline; on the mutant the
+expected text must disappear and the scope proof must still hold, or the run
+exits 2.
+--control-sed / --control-cmd (requires --expect-fail-output and
+--control-expect-fail-output) applies a control mutation that breaks a
+different behavior, on a fresh copy, when the main run would be CAUGHT. It must
+edit only --file. An inert control, a control RED without its own text, a
+control text already in the main run, or a control output holding an expected
+text exits 2; --control-anchor / --control-marker verify it the way
+--expect-anchor / --expect-marker verify the main mutation.
 Missing anchors, missing markers, and failing syntax commands exit 2.
 EOF
 }
@@ -78,6 +151,19 @@ syntax_cmd=""
 have_syntax=0
 cover_check=""
 have_cover_check=0
+expect_fail_outputs=()
+control_sed=""
+control_cmd=""
+have_control_sed=0
+have_control_cmd=0
+control_anchors=()
+control_markers=()
+control_expect_outputs=()
+knockout_cmd=""
+have_knockout=0
+knockout_expect_outputs=()
+knockout_delta_line=""
+have_knockout_delta=0
 
 require_value() {
   # $1 = flag name, $2 = remaining arg count after the flag
@@ -98,6 +184,86 @@ while [ $# -gt 0 ]; do
     --expect-marker) require_value "--expect-marker" "$#"; expect_markers+=("$2"); shift 2 ;;
     --syntax-cmd) require_value "--syntax-cmd" "$#"; syntax_cmd="$2"; have_syntax=1; shift 2 ;;
     --cover-check) require_value "--cover-check" "$#"; cover_check="$2"; have_cover_check=1; shift 2 ;;
+    --expect-fail-output)
+      require_value "--expect-fail-output" "$#"
+      # An empty value matches every line under grep -F, and a newline splits
+      # the value into OR-ed patterns; either would report a false cause.
+      case "$2" in
+        *[![:space:]]*) : ;;
+        *) echo "mutation-verify.sh: --expect-fail-output must not be empty or whitespace-only" >&2; exit 2 ;;
+      esac
+      case "$2" in
+        *$'\n'*|*$'\r'*) echo "mutation-verify.sh: --expect-fail-output must be a single line" >&2; exit 2 ;;
+      esac
+      expect_fail_outputs+=("$2"); shift 2 ;;
+    --control-sed)
+      require_value "--control-sed" "$#"
+      [ "$have_control_sed" -eq 1 ] && { echo "mutation-verify.sh: --control-sed given twice" >&2; exit 2; }
+      control_sed="$2"; have_control_sed=1; shift 2 ;;
+    --control-cmd)
+      require_value "--control-cmd" "$#"
+      [ "$have_control_cmd" -eq 1 ] && { echo "mutation-verify.sh: --control-cmd given twice" >&2; exit 2; }
+      control_cmd="$2"; have_control_cmd=1; shift 2 ;;
+    --control-expect-fail-output)
+      require_value "--control-expect-fail-output" "$#"
+      case "$2" in
+        *[![:space:]]*) : ;;
+        *) echo "mutation-verify.sh: --control-expect-fail-output must not be empty or whitespace-only" >&2; exit 2 ;;
+      esac
+      case "$2" in
+        *$'\n'*|*$'\r'*) echo "mutation-verify.sh: --control-expect-fail-output must be a single line" >&2; exit 2 ;;
+      esac
+      control_expect_outputs+=("$2"); shift 2 ;;
+    --knockout-cmd)
+      require_value "--knockout-cmd" "$#"
+      [ "$have_knockout" -eq 1 ] && { echo "mutation-verify.sh: --knockout-cmd given twice" >&2; exit 2; }
+      case "$2" in
+        *[![:space:]]*) : ;;
+        *) echo "mutation-verify.sh: --knockout-cmd must not be empty or whitespace-only" >&2; exit 2 ;;
+      esac
+      knockout_cmd="$2"; have_knockout=1; shift 2 ;;
+    --knockout-expect-output)
+      require_value "--knockout-expect-output" "$#"
+      case "$2" in
+        *[![:space:]]*) : ;;
+        *) echo "mutation-verify.sh: --knockout-expect-output must not be empty or whitespace-only" >&2; exit 2 ;;
+      esac
+      case "$2" in
+        *$'\n'*|*$'\r'*) echo "mutation-verify.sh: --knockout-expect-output must be a single line" >&2; exit 2 ;;
+      esac
+      # The count line must START with its number ("1 filtered out", "1 deselected"):
+      # the tool sums every "<n><rest>" occurrence in the knock-out output.
+      case "$2" in
+        [0-9]*) : ;;
+        *) echo "mutation-verify.sh: --knockout-expect-output must start with its number (e.g. '1 deselected'): $2" >&2; exit 2 ;;
+      esac
+      case "${2#"${2%%[!0-9]*}"}" in
+        ''|[0-9]*) echo "mutation-verify.sh: --knockout-expect-output needs text after its number (e.g. '1 deselected'): $2" >&2; exit 2 ;;
+      esac
+      # The knock-out removes exactly the hazard test, so the count is 1.
+      if [ "$((10#${2%%[!0-9]*}))" -ne 1 ]; then
+        echo "mutation-verify.sh: --knockout-expect-output must declare a count of exactly 1 (the knock-out removes only the hazard test): $2" >&2
+        exit 2
+      fi
+      knockout_expect_outputs+=("$2"); shift 2 ;;
+    --knockout-delta-line)
+      require_value "--knockout-delta-line" "$#"
+      [ "$have_knockout_delta" -eq 1 ] && { echo "mutation-verify.sh: --knockout-delta-line given twice" >&2; exit 2; }
+      case "$2" in
+        *[![:space:]]*) : ;;
+        *) echo "mutation-verify.sh: --knockout-delta-line must not be empty or whitespace-only" >&2; exit 2 ;;
+      esac
+      case "$2" in
+        *$'\n'*|*$'\r'*) echo "mutation-verify.sh: --knockout-delta-line must be a single line" >&2; exit 2 ;;
+      esac
+      # Only the documented go -v prefix: one line per test and subtest.
+      if [ "$2" != "=== RUN " ]; then
+        echo "mutation-verify.sh: --knockout-delta-line must be exactly '=== RUN ' (the go -v per-test line): $2" >&2
+        exit 2
+      fi
+      knockout_delta_line="$2"; have_knockout_delta=1; shift 2 ;;
+    --control-anchor) require_value "--control-anchor" "$#"; control_anchors+=("$2"); shift 2 ;;
+    --control-marker) require_value "--control-marker" "$#"; control_markers+=("$2"); shift 2 ;;
     -h|--help) usage; exit 2 ;;
     *) echo "mutation-verify.sh: unknown argument: $1" >&2; usage; exit 2 ;;
   esac
@@ -117,6 +283,115 @@ if [ "$have_sed" -eq 1 ] && [ "$have_cmd" -eq 1 ]; then
   echo "mutation-verify.sh: --mutate-sed and --mutate-cmd are mutually exclusive" >&2
   usage
   exit 2
+fi
+have_control=0
+[ "$have_control_sed" -eq 1 ] && have_control=1
+[ "$have_control_cmd" -eq 1 ] && have_control=1
+have_control_checks=0
+for _c in ${control_anchors[@]+"${control_anchors[@]}"} ${control_markers[@]+"${control_markers[@]}"} ${control_expect_outputs[@]+"${control_expect_outputs[@]}"}; do
+  have_control_checks=1
+  break
+done
+if [ "$have_control_sed" -eq 1 ] && [ "$have_control_cmd" -eq 1 ]; then
+  echo "mutation-verify.sh: --control-sed and --control-cmd are mutually exclusive" >&2
+  usage
+  exit 2
+fi
+if [ "$have_control" -eq 0 ] && [ "$have_control_checks" -eq 1 ]; then
+  echo "mutation-verify.sh: --control-anchor / --control-marker / --control-expect-fail-output require --control-sed or --control-cmd" >&2
+  usage
+  exit 2
+fi
+if [ "$have_control" -eq 1 ]; then
+  _have_expect=0
+  for _o in ${expect_fail_outputs[@]+"${expect_fail_outputs[@]}"}; do
+    _have_expect=1
+    break
+  done
+  if [ "$_have_expect" -eq 0 ]; then
+    echo "mutation-verify.sh: a control mutant (--control-sed / --control-cmd) requires --expect-fail-output: the control checks that another failure does not print the expected text" >&2
+    usage
+    exit 2
+  fi
+  _have_control_expect=0
+  for _c in ${control_expect_outputs[@]+"${control_expect_outputs[@]}"}; do
+    _have_control_expect=1
+    break
+  done
+  if [ "$_have_control_expect" -eq 0 ]; then
+    echo "mutation-verify.sh: a control mutant requires --control-expect-fail-output: the text its own seeded failure prints, so a build break or crash cannot pass as a control" >&2
+    usage
+    exit 2
+  fi
+fi
+if [ "$have_knockout" -eq 1 ]; then
+  _have_expect_k=0
+  for _o in ${expect_fail_outputs[@]+"${expect_fail_outputs[@]}"}; do
+    _have_expect_k=1
+    break
+  done
+  if [ "$_have_expect_k" -eq 0 ]; then
+    echo "mutation-verify.sh: --knockout-cmd requires --expect-fail-output: the knock-out checks that the expected text disappears without the hazard test" >&2
+    usage
+    exit 2
+  fi
+  if [ "$knockout_cmd" = "$test_cmd" ]; then
+    echo "mutation-verify.sh: --knockout-cmd is identical to --test-cmd; it must be the test command with only the hazard test deselected" >&2
+    exit 2
+  fi
+  case "$knockout_cmd" in
+    "$test_cmd"*) : ;;
+    *)
+      echo "mutation-verify.sh: --knockout-cmd must start with --test-cmd (the same command plus a deselect of the hazard test): $knockout_cmd" >&2
+      exit 2 ;;
+  esac
+  _have_count=0
+  for _k in ${knockout_expect_outputs[@]+"${knockout_expect_outputs[@]}"}; do
+    _have_count=1
+    break
+  done
+  [ "$have_knockout_delta" -eq 1 ] && _have_count=1
+  if [ "$_have_count" -eq 0 ]; then
+    echo "mutation-verify.sh: --knockout-cmd requires --knockout-expect-output (the runner's deselection count, e.g. '1 deselected') or --knockout-delta-line (a per-test line prefix, e.g. '=== RUN '): the only proof of the knock-out's scope" >&2
+    exit 2
+  fi
+  # The part after --test-cmd must be one documented exact deselect (and
+  # nothing else, such as --lib or --ignore before it):
+  #   cargo:  -- --exact --skip <path::name>
+  #   go:     -skip '^Name$'  or  -skip '^Name$/^row$'
+  #   pytest: --deselect <path::id>
+  _ko_suffix="${knockout_cmd#"$test_cmd"}"
+  _re_cargo='^ -- --exact --skip [A-Za-z_][A-Za-z0-9_]*(::[A-Za-z_][A-Za-z0-9_]*)*$'
+  _re_go="^ -skip '\\^[A-Za-z0-9_]+\\\$(/\\^[A-Za-z0-9_]+\\\$)?'\$"
+  # pytest ids: an allowlist (letters, digits, _ . / = , + @ - [ ] and ::), no
+  # whitespace, braces, globs, quotes or other shell metacharacters.
+  _id_chars='[]A-Za-z0-9_./=,+@[-]'
+  _re_pytest="^ --deselect ('${_id_chars}+::${_id_chars}+(::${_id_chars}+)*'|${_id_chars}+::${_id_chars}+(::${_id_chars}+)*)\$"
+  if [[ ! "$_ko_suffix" =~ $_re_cargo ]] && [[ ! "$_ko_suffix" =~ $_re_go ]] && [[ ! "$_ko_suffix" =~ $_re_pytest ]]; then
+    echo "mutation-verify.sh: --knockout-cmd must be --test-cmd plus exactly one documented deselect (cargo: -- --exact --skip <path::name>; go: -skip '^Name\$' or '^Name\$/^row\$'; pytest: --deselect <path::id>), with nothing else; got the suffix:$_ko_suffix" >&2
+    exit 2
+  fi
+  # cargo: a test command that already has a "--" section would make the
+  # appended "-- --exact --skip <name>" a second "--", turning every word after
+  # it into a name FILTER (run only the hazard test). Refuse it.
+  if [[ "$_ko_suffix" =~ $_re_cargo ]]; then
+    read -r -a _tc_words <<<"$test_cmd"
+    for _w in ${_tc_words[@]+"${_tc_words[@]}"}; do
+      if [ "$_w" = "--" ]; then
+        echo "mutation-verify.sh: the cargo knock-out needs a --test-cmd without its own '--' section (e.g. no '-- --nocapture'); the appended '-- --exact --skip' would become a name filter" >&2
+        exit 2
+      fi
+    done
+  fi
+else
+  for _k in ${knockout_expect_outputs[@]+"${knockout_expect_outputs[@]}"}; do
+    echo "mutation-verify.sh: --knockout-expect-output requires --knockout-cmd" >&2
+    exit 2
+  done
+  if [ "$have_knockout_delta" -eq 1 ]; then
+    echo "mutation-verify.sh: --knockout-delta-line requires --knockout-cmd" >&2
+    exit 2
+  fi
 fi
 if [ ! -e "$file" ]; then
   echo "mutation-verify.sh: --file does not exist: $file" >&2
@@ -211,6 +486,35 @@ trap cleanup EXIT
 trap 'cleanup; trap - INT; kill -s INT $$' INT
 trap 'cleanup; trap - TERM; kill -s TERM $$' TERM
 
+# sum_count_lines <rest> <file>: the sum of every <n> in "<n><rest>" in <file>,
+# where <n> is the maximal digit run right before <rest> and no digit follows
+# <rest>. "1 filtered out" printed by two cargo test binaries sums to 2; "11
+# deselected" counts as 11, never as 1. C locale so odd bytes cannot abort awk.
+sum_count_lines() {
+  LC_ALL=C MV_COUNT_REST="$1" awk '
+    BEGIN { t = ENVIRON["MV_COUNT_REST"]; n = length(t); sum = 0 }
+    {
+      line = $0; off = 0
+      while ((i = index(line, t)) > 0) {
+        pos = off + i
+        post = substr($0, pos + n, 1)
+        k = pos - 1; digits = ""
+        while (k >= 1 && substr($0, k, 1) ~ /[0-9]/) { digits = substr($0, k, 1) digits; k-- }
+        if (digits != "" && post !~ /[0-9]/) sum += digits + 0
+        off = pos; line = substr($0, off + 1)
+      }
+    }
+    END { print sum }' "$2"
+}
+
+# count_prefix_lines <prefix> <file>: lines of <file> that start with <prefix>.
+count_prefix_lines() {
+  LC_ALL=C MV_PREFIX="$1" awk '
+    BEGIN { p = ENVIRON["MV_PREFIX"]; n = length(p); c = 0 }
+    substr($0, 1, n) == p { c++ }
+    END { print c }' "$2"
+}
+
 shell_quote() {
   printf '%q' "$1"
 }
@@ -291,15 +595,57 @@ cover_check_executed() {
 # already-broken suite) and reporting "mutation CAUGHT" later would be a
 # false green inside the false-green detector. Run in a subshell so a `cd`
 # inside test_cmd cannot leak into this script's cwd.
+have_expect_fail=0
+for _o in ${expect_fail_outputs[@]+"${expect_fail_outputs[@]}"}; do
+  have_expect_fail=1
+  break
+done
 baseline_rc=0
-( eval "$test_cmd" ) || baseline_rc=$?
+baseline_out="$snap_dir/baseline-run.out"
+baseline_cmd="$test_cmd"
+if [ "$have_expect_fail" -eq 1 ] && [ "$have_cover_check" -eq 1 ]; then
+  # The mutated run adds -coverprofile, which prints its own lines (e.g.
+  # "coverage: N% of statements"). Run the baseline the same way so text
+  # every coverprofile run prints is refused below.
+  baseline_cmd="$(test_cmd_with_coverprofile "$test_cmd" "$snap_dir/baseline-cover.out")" || {
+    echo "mutation-verify.sh: --cover-check requires --test-cmd to contain a Go package test command (go test <package>)" >&2
+    exit 2
+  }
+fi
+if [ "$have_expect_fail" -eq 1 ]; then
+  # Capture to a file, not through a pipe: a pipe would wait on any
+  # background child that inherited the test's output.
+  ( eval "$baseline_cmd" ) >"$baseline_out" 2>&1 || baseline_rc=$?
+  cat "$baseline_out"
+else
+  ( eval "$test_cmd" ) || baseline_rc=$?
+fi
 if [ "$baseline_rc" -ne 0 ]; then
-  echo "mutation-verify.sh: test-cmd does not pass before mutation (baseline exited $baseline_rc) — the instrument is invalid" >&2
+  baseline_note=""
+  [ "$baseline_cmd" = "$test_cmd" ] || baseline_note=", run with -coverprofile added for --cover-check"
+  echo "mutation-verify.sh: test-cmd does not pass before mutation (baseline exited $baseline_rc$baseline_note) — the instrument is invalid" >&2
   if [ "$baseline_rc" -eq 141 ]; then
     echo "mutation-verify.sh: hint: exit 141 is SIGPIPE under pipefail — if --test-cmd pipes a test runner into grep -q or head, the early pipe close kills the runner; pass the test runner's own exit status instead" >&2
   fi
   exit 2
 fi
+# An --expect-fail-output (or --control-expect-fail-output) string that a
+# PASSING run already prints (a test name echoed on success, say) cannot tell
+# one failure from any other.
+for _o in ${expect_fail_outputs[@]+"${expect_fail_outputs[@]}"}; do
+  if grep -F -q -- "$_o" "$baseline_out"; then
+    echo "mutation-verify.sh: --expect-fail-output text already appears in the passing baseline output, so it cannot identify the failure: $_o" >&2
+    echo "mutation-verify.sh: use text only the failing hazard assertion prints" >&2
+    exit 2
+  fi
+done
+for _c in ${control_expect_outputs[@]+"${control_expect_outputs[@]}"}; do
+  if grep -F -q -- "$_c" "$baseline_out"; then
+    echo "mutation-verify.sh: --control-expect-fail-output text already appears in the passing baseline output, so it cannot identify the control's failure: $_c" >&2
+    echo "mutation-verify.sh: use text only the control test's failing assertion prints" >&2
+    exit 2
+  fi
+done
 
 # Applied-verification, part 1 (applied-verification): assert every expected anchor is
 # present in the ORIGINAL file before mutating. The post-hoc cmp check below only
@@ -312,6 +658,66 @@ for _a in ${expect_anchors[@]+"${expect_anchors[@]}"}; do
     exit 2
   fi
 done
+
+for _a in ${control_anchors[@]+"${control_anchors[@]}"}; do
+  if ! grep -F -q -- "$_a" "$snap_file"; then
+    echo "mutation-verify.sh: CONTROL ANCHOR NOT FOUND — expected control anchor is absent from the unmutated $file: $_a" >&2
+    exit 2
+  fi
+done
+
+# Knock-out baseline: the hazard-deselected command must pass on the
+# unmutated copy (a bad flag or runner error would otherwise "confirm" by
+# printing nothing), and must not already print any expected text.
+if [ "$have_knockout" -eq 1 ]; then
+  knockout_base_rc=0
+  knockout_base_out="$snap_dir/knockout-baseline.out"
+  ( eval "$knockout_cmd" ) >"$knockout_base_out" 2>&1 || knockout_base_rc=$?
+  cat "$knockout_base_out"
+  if [ "$knockout_base_rc" -ne 0 ]; then
+    echo "mutation-verify.sh: KNOCK-OUT BROKEN — --knockout-cmd does not pass before mutation (exited $knockout_base_rc); a broken knock-out would confirm by printing nothing" >&2
+    exit 2
+  fi
+  for _o in "${expect_fail_outputs[@]}"; do
+    if grep -F -q -- "$_o" "$knockout_base_out"; then
+      echo "mutation-verify.sh: --expect-fail-output text already appears in the passing knock-out baseline output: $_o" >&2
+      exit 2
+    fi
+  done
+  if [ ! -s "$knockout_base_out" ] || cmp -s "$knockout_base_out" "$baseline_out"; then
+    echo "mutation-verify.sh: KNOCK-OUT CHANGED NOTHING — the knock-out baseline printed nothing, or exactly what the full baseline printed; it cannot show which tests it deselected" >&2
+    exit 2
+  fi
+  # Scope proof: a runner line showing exactly one test was deselected
+  # (pytest "1 deselected", cargo "1 filtered out"), matched as a whole number,
+  # and not already printed by the full run (a filter in --test-cmd).
+  # The tool sums every "<n><rest>" occurrence: the full run must show 0 and
+  # the knock-out exactly the declared number (several cargo test binaries
+  # each printing "1 filtered out" sum past 1).
+  for _k in ${knockout_expect_outputs[@]+"${knockout_expect_outputs[@]}"}; do
+    _want="${_k%%[!0-9]*}"; _rest="${_k#"$_want"}"; _want=$((10#$_want))
+    _full_sum="$(sum_count_lines "$_rest" "$baseline_out")"
+    if [ "$_full_sum" -ne 0 ]; then
+      echo "mutation-verify.sh: KNOCK-OUT SCOPE UNPROVEN — the full, unmutated run already prints the --knockout-expect-output line (its counts sum to $_full_sum), so it cannot show the knock-out's deselection: $_k" >&2
+      exit 2
+    fi
+    _ko_sum="$(sum_count_lines "$_rest" "$knockout_base_out")"
+    if [ "$_ko_sum" -ne "$_want" ]; then
+      echo "mutation-verify.sh: KNOCK-OUT SCOPE UNPROVEN — the knock-out baseline's '<n>$_rest' counts sum to $_ko_sum, not the declared --knockout-expect-output as a whole number: $_k" >&2
+      exit 2
+    fi
+  done
+  # Delta line: exactly one fewer per-test line (e.g. go -v '=== RUN ') in the
+  # knock-out than in the full run, so exactly one test (or subtest) went.
+  if [ "$have_knockout_delta" -eq 1 ]; then
+    _full_lines="$(count_prefix_lines "$knockout_delta_line" "$baseline_out")"
+    _ko_lines="$(count_prefix_lines "$knockout_delta_line" "$knockout_base_out")"
+    if [ "$((_full_lines - _ko_lines))" -ne 1 ]; then
+      echo "mutation-verify.sh: KNOCK-OUT SCOPE UNPROVEN — lines starting with --knockout-delta-line '$knockout_delta_line': full run $_full_lines, knock-out $_ko_lines; exactly one fewer is required" >&2
+      exit 2
+    fi
+  fi
+fi
 
 # Mutate.
 if [ "$have_sed" -eq 1 ]; then
@@ -369,15 +775,38 @@ fi
 # as the baseline run above — this is the path BLOCKER 1 exploited.
 test_rc=0
 cover_profile=""
+mutated_cmd="$test_cmd"
 if [ "$have_cover_check" -eq 1 ]; then
   cover_profile="$snap_dir/cover.out"
-  cover_test_cmd="$(test_cmd_with_coverprofile "$test_cmd" "$cover_profile")" || {
+  mutated_cmd="$(test_cmd_with_coverprofile "$test_cmd" "$cover_profile")" || {
     echo "mutation-verify.sh: --cover-check requires --test-cmd to contain a Go package test command (go test <package>)" >&2
     exit 2
   }
-  ( eval "$cover_test_cmd" ) || test_rc=$?
+fi
+mutated_out="$snap_dir/mutated-run.out"
+if [ "$have_expect_fail" -eq 1 ]; then
+  ( eval "$mutated_cmd" ) >"$mutated_out" 2>&1 || test_rc=$?
+  cat "$mutated_out"
 else
-  ( eval "$test_cmd" ) || test_rc=$?
+  ( eval "$mutated_cmd" ) || test_rc=$?
+fi
+
+# Knock-out: on the SAME mutated copy, run the test command with only the
+# hazard test deselected — only when the main run would be CAUGHT (RED with
+# every expected text). The verdict uses it after the exit-3 check below.
+knockout_ran=0
+if [ "$have_knockout" -eq 1 ] && [ "$test_rc" -ne 0 ]; then
+  _all_present=1
+  for _o in "${expect_fail_outputs[@]}"; do
+    grep -F -q -- "$_o" "$mutated_out" || { _all_present=0; break; }
+  done
+  if [ "$_all_present" -eq 1 ]; then
+    knockout_out="$snap_dir/knockout-run.out"
+    knockout_rc=0
+    ( eval "$knockout_cmd" ) >"$knockout_out" 2>&1 || knockout_rc=$?
+    cat "$knockout_out"
+    knockout_ran=1
+  fi
 fi
 
 # Restore now (also covered by the EXIT trap, but do it here so we can
@@ -408,8 +837,153 @@ else
   exit 1
 fi
 
+# Main expected-text check first: a RED run without the text is a survivor
+# (exit 3) whatever a control would show, so the control never runs then.
+if [ "$test_rc" -ne 0 ] && [ "$have_expect_fail" -eq 1 ]; then
+  for _o in "${expect_fail_outputs[@]}"; do
+    if ! grep -F -q -- "$_o" "$mutated_out"; then
+      skipped_control=""
+      [ "$have_control" -eq 1 ] && skipped_control="; control not run"
+      [ "$have_knockout" -eq 1 ] && skipped_control="$skipped_control; knock-out not run"
+      echo "mutation-verify.sh: ${verdict_prefix}RED FOR AN UNRELATED REASON (test-cmd exited $test_rc under mutation$reachability_suffix$skipped_control) — expected failure text absent: $_o" >&2
+      echo "mutation-verify.sh: the hazard assertion is not shown to have caught this mutant; treat it as a surviving mutant (a test gap). Change the expected text only if this output shows the hazard assertion itself failing at its own location (see docs/commands.md)" >&2
+      exit 3
+    fi
+  done
+fi
+
+# Knock-out verdict: the expected text must disappear when only the hazard
+# test is deselected; text that persists comes from another test.
+knockout_suffix=""
+if [ "$have_expect_fail" -eq 1 ] && [ "$have_knockout" -eq 0 ]; then
+  knockout_suffix="; knock-out NOT run, so the text is not attributed to the hazard test"
+fi
+if [ "$knockout_ran" -eq 1 ]; then
+  for _o in "${expect_fail_outputs[@]}"; do
+    if grep -F -q -- "$_o" "$knockout_out"; then
+      echo "mutation-verify.sh: TEXT PERSISTS WITHOUT THE HAZARD TEST — the knock-out run on the same mutant also printed: $_o" >&2
+      echo "mutation-verify.sh: another test prints it, or the knock-out did not deselect the hazard test (unknown ids are often silently ignored); record the main mutant as UNPROVEN" >&2
+      exit 2
+    fi
+  done
+  # The mutated knock-out run must still show the same scope (a crash or
+  # truncation would otherwise make the text "disappear").
+  for _k in ${knockout_expect_outputs[@]+"${knockout_expect_outputs[@]}"}; do
+    _want="${_k%%[!0-9]*}"; _rest="${_k#"$_want"}"; _want=$((10#$_want))
+    _mut_sum="$(sum_count_lines "$_rest" "$knockout_out")"
+    if [ "$_mut_sum" -ne "$_want" ]; then
+      echo "mutation-verify.sh: KNOCK-OUT SCOPE UNPROVEN ON THE MUTANT — the knock-out run on the mutant shows '<n>$_rest' summing to $_mut_sum, not $_k (truncated or crashed?)" >&2
+      exit 2
+    fi
+  done
+  if [ "$have_knockout_delta" -eq 1 ]; then
+    _main_lines="$(count_prefix_lines "$knockout_delta_line" "$mutated_out")"
+    _komut_lines="$(count_prefix_lines "$knockout_delta_line" "$knockout_out")"
+    if [ "$((_main_lines - _komut_lines))" -ne 1 ]; then
+      echo "mutation-verify.sh: KNOCK-OUT SCOPE UNPROVEN ON THE MUTANT — lines starting with '$knockout_delta_line': main run $_main_lines, knock-out run $_komut_lines on the mutant; exactly one fewer is required (truncated or crashed?)" >&2
+      exit 2
+    fi
+  fi
+  knockout_scope=""
+  for _k in ${knockout_expect_outputs[@]+"${knockout_expect_outputs[@]}"}; do
+    knockout_scope="$knockout_scope${knockout_scope:+, }'$_k'"
+  done
+  if [ "$have_knockout_delta" -eq 1 ]; then
+    knockout_scope="$knockout_scope${knockout_scope:+, }one fewer '$knockout_delta_line' line"
+  fi
+  knockout_scope=", deselection shown by $knockout_scope"
+  knockout_suffix="; knock-out \`$knockout_cmd\` (exited $knockout_rc on the mutant$knockout_scope) removed the expected text, so it is attributed to the test(s) that command deselects"
+fi
+
+# Control mutant: only when the main run would be CAUGHT. Same fresh-copy
+# mutation and applied-verification as the main mutant; same file capture.
+# It must go RED for its own seeded reason (--control-expect-fail-output
+# present) and must not print any main expected text.
+control_suffix=""
+if [ "$have_expect_fail" -eq 1 ] && [ "$have_control" -eq 0 ]; then
+  control_suffix="; control NOT run, so the text's specificity is unchecked"
+fi
+if [ "$have_control" -eq 1 ] && [ "$test_rc" -ne 0 ]; then
+  for _c in "${control_expect_outputs[@]}"; do
+    if grep -F -q -- "$_c" "$mutated_out"; then
+      echo "mutation-verify.sh: CONTROL TEXT IN THE MAIN RUN — the main mutated run already printed the control's failure text, so the two failures cannot be told apart: $_c" >&2
+      exit 2
+    fi
+  done
+  restored=0
+  control_mut_rc=0
+  if [ "$have_control_sed" -eq 1 ]; then
+    sed "$control_sed" "$snap_file" > "$file" || control_mut_rc=$?
+  else
+    ( eval "$control_cmd" ) || control_mut_rc=$?
+  fi
+  mut_sec=$(date +%s)
+  if [ "$control_mut_rc" -ne 0 ]; then
+    echo "mutation-verify.sh: control mutation command failed" >&2
+    exit 2
+  fi
+  if cmp -s "$snap_file" "$file"; then
+    echo "mutation-verify.sh: control mutation did not change $file (no-op control); refusing to emit a verdict" >&2
+    exit 2
+  fi
+  for _m in ${control_markers[@]+"${control_markers[@]}"}; do
+    if ! grep -F -q -- "$_m" "$file"; then
+      echo "mutation-verify.sh: CONTROL MARKER ABSENT — the control edit did not land as intended: $_m" >&2
+      exit 2
+    fi
+  done
+  if [ "$have_syntax" -eq 1 ]; then
+    control_syntax_rc=0
+    ( eval "$syntax_cmd" ) || control_syntax_rc=$?
+    if [ "$control_syntax_rc" -ne 0 ]; then
+      echo "mutation-verify.sh: CONTROL FILE INVALID — --syntax-cmd exited $control_syntax_rc after the control mutation; refusing to emit a verdict" >&2
+      exit 2
+    fi
+  fi
+  control_rc=0
+  control_out="$snap_dir/control-run.out"
+  ( eval "$baseline_cmd" ) >"$control_out" 2>&1 || control_rc=$?
+  cat "$control_out"
+  restore_file
+  if ! verify_restore; then
+    echo "mutation-verify.sh: RESTORE FAILED — $file is not byte-identical to its snapshot after the control run" >&2
+    exit 2
+  fi
+  if [ "$control_rc" -eq 0 ]; then
+    echo "mutation-verify.sh: CONTROL INERT — the control mutant left test-cmd green, so it proves nothing about the expected text" >&2
+    exit 2
+  fi
+  for _c in "${control_expect_outputs[@]}"; do
+    if ! grep -F -q -- "$_c" "$control_out"; then
+      echo "mutation-verify.sh: CONTROL RED FOR AN UNRELATED REASON — the control run lacks its own --control-expect-fail-output text (a build break or crash is not a control): $_c" >&2
+      echo "mutation-verify.sh: do not re-point --control-expect-fail-output at this run's output; a crash is not a control" >&2
+      exit 2
+    fi
+  done
+  for _o in "${expect_fail_outputs[@]}"; do
+    if grep -F -q -- "$_o" "$control_out"; then
+      echo "mutation-verify.sh: EXPECTED TEXT NOT SPECIFIC TO THE HAZARD — the control mutant's RED run also printed: $_o" >&2
+      echo "mutation-verify.sh: this refusal stands; record the main mutant as UNPROVEN unless this output shows the hazard test itself failing" >&2
+      exit 2
+    fi
+  done
+  control_verified=0
+  [ "$have_syntax" -eq 1 ] && control_verified=1
+  control_flag=""
+  [ "$control_verified" -eq 0 ] && control_flag="[UNVERIFIED CONTROL] "
+  control_suffix="; ${control_flag}control went RED for its own reason without the expected text"
+fi
+
 if [ "$test_rc" -ne 0 ]; then
-  echo "mutation-verify.sh: ${verdict_prefix}mutation CAUGHT (test-cmd exited $test_rc under mutation$reachability_suffix) — test genuinely isolates the fix" >&2
+  if [ "$have_expect_fail" -eq 1 ]; then
+    matched_list=""
+    for _o in "${expect_fail_outputs[@]}"; do
+      matched_list="$matched_list${matched_list:+, }'$_o'"
+    done
+    echo "mutation-verify.sh: ${verdict_prefix}mutation CAUGHT (test-cmd exited $test_rc under mutation$reachability_suffix; expected failure text present in output, matched: $matched_list$knockout_suffix$control_suffix) — the RED run printed every --expect-fail-output text" >&2
+  else
+    echo "mutation-verify.sh: ${verdict_prefix}mutation CAUGHT (test-cmd exited $test_rc under mutation$reachability_suffix; failure cause was NOT checked, pass --expect-fail-output) — test went RED" >&2
+  fi
   exit 0
 else
   echo "mutation-verify.sh: ${verdict_prefix}mutation NOT caught (test-cmd exited 0 under mutation$reachability_suffix) — false-green test" >&2

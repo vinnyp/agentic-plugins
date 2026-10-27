@@ -379,6 +379,11 @@ mutation-verify.sh --file <path> --test-cmd <cmd>
                    (--mutate-sed <expr> | --mutate-cmd <cmd>)
                    [--expect-anchor <str>]... [--expect-marker <str>]...
                    [--syntax-cmd <cmd>] [--cover-check <line-or-symbol>]
+                   [--expect-fail-output <str>]...
+                   [--knockout-cmd <cmd> (--knockout-expect-output <str>... | --knockout-delta-line <prefix>)]
+                   [(--control-sed <expr> | --control-cmd <cmd>)
+                    --control-expect-fail-output <str>...
+                    [--control-anchor <str>]... [--control-marker <str>]...]
 ```
 
 Proves a test is load-bearing: break the code, confirm the test goes red, restore. It snapshots
@@ -399,8 +404,168 @@ actually landed, `--syntax-cmd` rejects a mutation that merely broke the parse, 
 `--cover-check` asserts the mutated function was actually executed (a mutation no test reaches is
 `MUTANT-UNREACHABLE`, not a survivor).
 
+`--expect-fail-output` checks the cause of a red run: the mutated run's combined output must
+contain each given text, or the run failed for an unrelated reason, such as a changed error
+message, and it exits `3` instead of reporting a catch. Treat exit `3` as a surviving mutant (a
+test gap). Fix the text before the run. Replacing it after an exit `3` is legitimate only when
+that run's output shows the hazard test itself failing at its own call site (not a shared
+helper's line) (pytest's `>`
+marker or `<file>.py:<line>` on the hazard assertion's line; Go's `<file>_test.go:<line>` of
+that assertion), so only the rendering of the text was wrong. Then cite that location and both
+runs in the review log. Otherwise the exit `3` stands as a survivor: a text copied from a red
+run's output passes a rerun of the same deterministic mutant by construction.
+
+Choosing the text: it must identify the hazard assertion uniquely and as it fails.
+- **Unique at run time:** only the hazard test can make the text appear. A message literal that
+  appears once in the test sources (`grep -rF '<message>' <test dirs>`) is not enough when it sits
+  in a shared helper, a loop, or a parametrized test that other tests or cases reach: one literal,
+  many places that fire it. A message several assertions share ("command failed") passes every
+  other guard. Then the text must name the hazard test or its call site: pytest's short-summary
+  line `FAILED <file>::<test>[<param>] - <rendered message>` (pytest cuts it at the terminal width,
+  80 columns without a terminal, so keep the message short or set `COLUMNS`), or the caller's
+  `<file>.py:<line>:` traceback line; in Go, the helper must call `t.Helper()` so the printed
+  `<file>_test.go:<line>:` is the caller's line. A message built at run time (an f-string) has
+  no literal to grep, so the same rule applies to its rendered form.
+- **As it fails:** use the line the runner renders for a failure, not the bare literal, which is
+  also in the test source; pytest's traceback prints the failing test function's source,
+  including the message of a passing assertion above the failing one. The rendering depends on
+  the assertion type: pytest shows a bare `assert x, msg` as `AssertionError: msg`, a
+  unittest-style assert as `AssertionError: <detail> : msg`, and `pytest.fail` as `Failed: msg`.
+  Go prints `<file>_test.go:<line>: msg` for `t.Fatal`.
+- **Not:** runner-wide failure text alone (`FAILED`, `AssertionError`, `panicked`, `not ok`), the
+  product's error text, or a test name alone; a failing run prints them for any cause. It is a presence check over all output, so it cannot
+separate causes inside one snapshot or diff assertion. Empty, whitespace-only or multi-line text is
+refused, and so is text the passing baseline already prints (exit `2`; with `--cover-check`, the
+baseline runs with `-coverprofile` too). A caught verdict names the matched text, so the review
+log can quote it. With the flag, each run's stdout and stderr are captured to a file and printed
+together on stdout once the run finishes. Without the flag, a caught verdict says its cause was
+not checked.
+
+**Knock-out.** `--knockout-cmd` (only with `--expect-fail-output`) is the same test command with
+only the hazard test deselected, plus a required scope proof: `--knockout-expect-output` (the
+runner's deselection count) and/or `--knockout-delta-line` (a per-test line prefix). The deselect
+must match exactly one test, and the default forms do not (pytest `--deselect` matches a node-id
+prefix, cargo `--skip` a substring, go `-skip` an unanchored regex): a sibling with a common name
+prefix is the very test the knock-out exists to keep. The knock-out is supported for three runners
+only, in these exact forms:
+
+| Runner | `--test-cmd` | append to make `--knockout-cmd` | scope proof |
+|---|---|---|---|
+| cargo | `cargo test -q`, no positional filter and no `--` section | `-- --exact --skip <path::name>` | `--knockout-expect-output '1 filtered out'` |
+| go | `go test -v -count=1 <one package>` | `-skip '^TestName$'`, or `-skip '^TestName$/^row$'` for one table row | `--knockout-delta-line '=== RUN '` |
+| pytest | `pytest -q <path>` | `--deselect <full node id, including any [param] id>` | `--knockout-expect-output '1 deselected'` |
+
+The tool enforces these shapes: the part of `--knockout-cmd` after `--test-cmd` must be exactly
+one of `-- --exact --skip <path::name>`, `-skip '^Name$'` / `-skip '^Name$/^row$'` (names of
+letters, digits and `_`), or `--deselect <path::id>` (optionally single-quoted; the id may use only
+letters, digits, `_ . / = , + @ - [ ]` and `::`), with nothing before or after it. For the cargo
+shape, `--test-cmd` must not contain its own `--` section (such as `-- --nocapture`): the appended
+`-- --exact --skip` would become a second `--`, and libtest would read every word after it as a name
+filter that runs only the hazard test. An extra runner flag (`--lib`, `--ignore`), an
+unanchored or unquoted go pattern, a cargo `--skip` without `--exact`, or anything chained after the
+deselect is refused (exit `2`) before any test runs.
+
+How the tool checks the scope proof, on the unmutated copy and again on the mutant:
+- `--knockout-expect-output '<n><rest>'` must start with its number, and `<n>` must be `1` (the
+  knock-out removes only the hazard test; `0` would prove nothing). The tool sums the number in
+  front of every `<rest>` in the output (the whole digit run, so `11 filtered out` counts as 11, and
+  a digit right after `<rest>` disqualifies it). The full run's sum must be 0; the knock-out's sum
+  must equal `<n>`. So two cargo test binaries that each print `1 filtered out` (a lib test and an
+  integration test sharing a path, or two workspace members) sum to 2 and are refused.
+- `--knockout-delta-line` must be exactly `'=== RUN '` (the go `-v` per-test line); it counts
+  lines starting with that prefix: the knock-out must
+  have exactly one fewer than the full run. For go `-v`, every test and subtest prints one
+  `=== RUN ` line, so a name defined in both the internal and the external test package, a whole
+  table skipped by its parent name, or a skip that reaches several packages all remove more than
+  one line and are refused.
+- cargo: `--exact` applies to any positional filter as well, and the count adds to tests the
+  command already filters out, so keep `--test-cmd` free of positional filters (a full run that
+  already prints a count is refused) and of a `--` section (refused).
+- go: `-skip` applies in every package the command runs; name one package, never `./...`. To
+  isolate one table row, skip the row, not the table.
+- pytest: `-q` keeps the count to the one summary line (without it pytest prints `deselected` in
+  the header too, and the sum is refused). `--deselect` is a prefix match (`test_x[1]` also removes
+  `test_x[10]`); the summed count is what shows exactly one test went.
+
+For any other runner (node included) there is no verified exact form: record the mutant as
+UNPROVEN, never CAUGHT, until one exists.
+
+Refusals, all exit `2`: an empty command; one that does not start with `--test-cmd` (the same
+command plus a deselect) or is identical to it; a suffix that is not one documented deselect; a
+cargo `--test-cmd` with its own `--` section; no
+scope proof; a count line that does not start with its number, declares a count other than `1`, or
+is empty or multi-line; a delta line other than `'=== RUN '`; one that is red on the unmutated copy (a bad flag or
+runner error would otherwise "confirm" by printing nothing); one whose baseline prints an expected
+text, prints nothing, or prints exactly what the full baseline printed (a weak check: runners that
+print timings never trip it); a scope proof that fails on the unmutated copy or on the mutant (a
+knock-out that crashes on the mutant cannot show its scope). It runs on the same mutated copy only
+when the main run would be CAUGHT (a RED run without the expected text stays exit `3`; a GREEN one
+stays exit `1`). If its output still contains any expected text, another test prints it, or the
+deselect missed the hazard test (unknown ids are often silently ignored): the run is refused (exit
+`2`, naming the text). Only when the text disappears does CAUGHT stand; the verdict names the
+command, its exit code on the mutant and the scope proof, and attributes the text to the test(s)
+that command deselects. Without a knock-out it says "knock-out NOT run".
+
+What it shows: with that command's one test removed and everything else the same, this mutant no
+longer produces the text. What it does not show: which test was removed (a wrong but valid id that
+removes exactly one other test passes; check the id against the hazard test); that the hazard test
+failed for the reason its message names; or anything beyond one run. A sibling that prints the text
+only sometimes (flaky), or only because of state the hazard test leaves behind (order dependence),
+can vanish without the hazard test having printed it. Use a deterministic order, and prefer a
+run-all command: a fail-fast run stops at the first failure, so the knock-out can stop before a
+later test that would print the text (the verdict shows the knock-out's exit code on the mutant
+for that reason); never combine fail-fast with a randomized order (`pytest -p randomly -x`,
+`go test -shuffle=on -failfast`). The review gate requires the knock-out; a CAUGHT whose deselect
+is not one of the forms above is UNPROVEN.
+
+**Control mutant (recommended, not required).** `--control-sed` / `--control-cmd` (only with `--expect-fail-output`, and
+always with `--control-expect-fail-output`, the line the control's own test prints when it fails)
+applies a second mutation on a fresh copy of the original, with the same no-op and
+`--syntax-cmd` checks; `--control-anchor` / `--control-marker` verify it the way
+`--expect-anchor` / `--expect-marker` verify the main mutation. It must edit only `--file`
+(changes to other files are not restored). Its output is captured the same way. The control runs
+only when the main run would be CAUGHT: a RED main run without the expected text stays exit `3`
+and a GREEN one stays exit `1`, whatever the control is. Refusals, all exit `2`:
+- the control's text already appears in the main run (the two failures cannot be told apart);
+- the control leaves the test green (inert);
+- the control's red run lacks its own text (a build break, crash or import error is not a control);
+- the control's red run prints ANY expected text (with several texts, drop the generic one).
+
+Otherwise the verdict says the control "went RED for its own reason without the expected text",
+flagged `[UNVERIFIED CONTROL]` unless `--syntax-cmd` checked the control's copy (a marker proves
+the edit landed, not that the file is valid). The main mutant keeps its older rule: a marker or a
+`--syntax-cmd` clears `[UNVERIFIED APPLICATION]`, because a broken main mutant shows up as a RED
+run the expected text then has to explain, while a broken control would pass its check by
+crashing. Without a control, a caught verdict says the control did not run. Without any
+control flag, behavior is otherwise unchanged.
+
+What one passing control shows, and what it does not: it shows that this one other failure does
+not print the expected text. It does not show that the text in the main run came from the hazard
+test rather than another test that shares its helper, loop or parametrization. A control that
+breaks such a sibling, with a `--control-expect-fail-output` that names that sibling's test, rules
+out that one sibling only (its text in the main run is refused); other siblings stay unexcluded.
+The knock-out is the direct check. A control red for a value-bearing message (`6 != 5` vs `4 != 5`)
+passes by construction, so expected texts must not embed mutant-specific values. A refusal is
+evidence that the text is not specific, not a bad pick: it stands, unless the refused run's output
+shows the hazard test itself failing at its own call site. Record every control you tried, with
+its verdict, in the disposition row.
+
+Picking a control: a mutation that breaks a **different** behavior a test checks, preferably one
+whose test shares the hazard test's helper, loop or parametrization, since that is the sibling
+whose failure could otherwise print the same text. Flip a neighbouring condition, change another
+return value, or drop a different guard that the sibling test asserts. A scoped single-test
+`--test-cmd` makes every different-behavior control inert; use the whole suite or file the hazard
+test lives in. The review gate requires `--expect-fail-output` and `--knockout-cmd` for every
+mutation check it relies on and recommends a control; when the runner cannot deselect the single
+hazard test, or no hazard-specific text exists, or a refusal stands, the mutant is UNPROVEN, never
+CAUGHT. Every CAUGHT row in a review log quotes `matched:` and the knock-out and control clauses.
+
 Exit codes: `0` the test caught the mutation, `1` false green, `2` harness error (bad args,
-failing baseline, no-op mutation, failed verification, failed restore).
+failing baseline, no-op mutation, failed verification, failed restore, an
+`--expect-fail-output` or `--control-expect-fail-output` text that is empty, multi-line or printed
+by the passing baseline, a refused knock-out, or a refused control), `3` a
+red run without the `--expect-fail-output` text (the hazard assertion is not shown to have caught
+the mutant).
 
 ## `review-pin.sh`
 

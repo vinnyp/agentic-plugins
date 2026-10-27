@@ -588,3 +588,53 @@ func gitRepoWithCommits(t *testing.T) string {
 	}
 	return root
 }
+
+// TestBriefBuildCarriesMutationCheckRule pins foundry#259: every build-mode
+// brief, on both routes, requires --expect-fail-output plus a knock-out
+// and names the UNPROVEN fallback; design and requirements briefs do not.
+func TestBriefBuildCarriesMutationCheckRule(t *testing.T) {
+	_, tmpl := briefFixture(t)
+	root := gitRepoWithCommits(t)
+	for _, route := range []string{"claude", "cross-model"} {
+		rc, out := runCapt(t, "brief", "--persona", "peer-code-reviewer", "--mode", "build",
+			"--for", route, "--range", "HEAD~1..HEAD", "--repo-root", root,
+			"--closing-template", tmpl)
+		if rc != 0 {
+			t.Fatalf("%s: rc=%d", route, rc)
+		}
+		for _, want := range []string{"Mutation checks (required for any mutant you report)", "mutation-verify.sh",
+			"with BOTH", "--expect-fail-output", "AND `--knockout-cmd", "only the hazard test deselected",
+			"A control mutant", "is recommended, not required", "a control refusal stands", "isolated copy or worktree",
+			"plus its required scope proof", "supported only for cargo, go and pytest",
+			"+ -- --exact --skip <path::name> with --knockout-expect-output '1 filtered out'",
+			"+ -skip '^TestName$' (or '^TestName$/^row$' for one table row) with --knockout-delta-line '=== RUN '",
+			"+ --deselect <full node id> with --knockout-expect-output '1 deselected'",
+			"For any other runner (node included), record the mutant as UNPROVEN",
+			"record every control you tried, including refused ones",
+			"a CAUGHT whose knock-out clause says it did not run, or whose deselect is not one of these exact forms, is UNPROVEN",
+			"quotes the verdict's matched: text and its knock-out and control clauses",
+			"the runner cannot deselect the single hazard test", "If mutation-verify.sh is unavailable",
+			"UNPROVEN, never CAUGHT"} {
+			if !strings.Contains(out, want) {
+				t.Fatalf("%s build brief missing %q", route, want)
+			}
+		}
+	}
+}
+
+func TestBriefNonBuildModesOmitMutationCheckRule(t *testing.T) {
+	_, tmpl := briefFixture(t)
+	root := targetRoot(t, "spec.md")
+	for _, mode := range []string{"design", "requirements"} {
+		rc, out := runCapt(t, "brief", "--persona", "peer-code-reviewer", "--mode", mode,
+			"--for", "claude", "--spec", "spec.md", "--repo-root", root, "--closing-template", tmpl)
+		if rc != 0 {
+			t.Fatalf("%s: rc=%d", mode, rc)
+		}
+		for _, unwanted := range []string{"Mutation checks (required for any mutant you report)", "--knockout-cmd", "UNPROVEN, never CAUGHT"} {
+			if strings.Contains(out, unwanted) {
+				t.Fatalf("%s brief must not carry the build-mode mutation rule (found %q)", mode, unwanted)
+			}
+		}
+	}
+}
