@@ -15,7 +15,8 @@ rc_is() {
   [ "$rc" = "$want" ] || { echo "expected $want, got $rc: $*" >&2; exit 1; }
 }
 fixture() {
-  R=$(mktemp -d "$TMP/repo.XXXXXX")
+  R=$(mktemp -d "$TMP/${1:-repo}.XXXXXX")
+  [ -n "$R" ] || exit 1
   git -C "$R" init -q -b main
   git -C "$R" init -q --bare "$R.git"
   git -C "$R" remote add origin "$R.git"
@@ -88,13 +89,18 @@ snap "$TMP/after"
 rc_is 2 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
 grep -q '(global:' "$TMP/changes"
 for key in credential.helper remote.origin.url; do
-  fixture
-  git -C "$R" config "$key" 'https://u:p1@h/r'
+  # These paths deterministically reproduce the old short-marker false positive.
+  fixture repo-p1p2
+  git -C "$R" config "$key" 'https://u:PWONE_SECRET@h/r'
   snap "$TMP/before"
-  git -C "$R" config "$key" 'https://u:p2@h/r'
+  git -C "$R" config "$key" 'https://u:PWTWO_SECRET@h/r'
   snap "$TMP/after"
   rc_is 2 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
-  if grep -E 'p1|p2' "$TMP/before" "$TMP/after" "$TMP/changes"; then exit 1; fi
+  rc_is 0 grep -Eq 'p1|p2' "$TMP/before" "$TMP/after" "$TMP/changes"
+  if grep -E 'PWONE_SECRET|PWTWO_SECRET' "$TMP/before" "$TMP/after" "$TMP/changes"; then
+    echo "secret leaked into snapshot/changes for $key" >&2
+    exit 1
+  fi
 done
 fixture
 git -C "$R" config commit.gpgSign ''
@@ -303,17 +309,20 @@ done
 for key in credential.helper http.extraheader foo.apitoken secrets.apikey token.x; do
   fixture
   case "$key" in
-    credential.helper) value='store --file /x-SECRET1' ;;
-    http.extraheader) value='AUTHORIZATION: bearer SECRET1' ;;
-    *) value=SECRET1 ;;
+    credential.helper) value='store --file /x-PWONE_SECRET' ;;
+    http.extraheader) value='AUTHORIZATION: bearer PWONE_SECRET' ;;
+    *) value=PWONE_SECRET ;;
   esac
   git -C "$R" config "$key" "$value"
   snap "$TMP/before"
-  git -C "$R" config "$key" "${value/SECRET1/SECRET2}"
+  git -C "$R" config "$key" "${value/PWONE_SECRET/PWTWO_SECRET}"
   snap "$TMP/after"
   rc_is 2 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
   grep -q "^config $key " "$TMP/changes"
-  if grep SECRET "$TMP/before" "$TMP/after" "$TMP/changes"; then exit 1; fi
+  if grep -E 'PWONE_SECRET|PWTWO_SECRET' "$TMP/before" "$TMP/after" "$TMP/changes"; then
+    echo "secret leaked into snapshot/changes for $key" >&2
+    exit 1
+  fi
 done
 fixture
 clone="$TMP/upstream-clone"
