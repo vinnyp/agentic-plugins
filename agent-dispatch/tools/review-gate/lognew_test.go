@@ -25,6 +25,39 @@ func logNewPersonaFixture(t *testing.T) {
 	t.Setenv("REVIEW_GATE_PERSONA_DIR", personaDir)
 }
 
+func TestLogNewDesignRound(t *testing.T) {
+	logNewPersonaFixture(t)
+	for _, value := range []string{"Round 1 (design)", "none"} {
+		t.Run(value, func(t *testing.T) {
+			rc, out := runCapt(t, "log-new", "--topic", "design", "--stdout", "--design-round", value)
+			if rc != 0 {
+				t.Fatalf("rc=%d out=%s", rc, out)
+			}
+			want := "**Design round:** " + value + ".\n\n"
+			if !strings.Contains(out, want) {
+				t.Fatalf("missing design round header %q: %s", want, out)
+			}
+			modeStart := strings.Index(out, "**Mode:**")
+			modeEnd := strings.Index(out[modeStart:], "\n\n") + modeStart + 2
+			if !strings.HasPrefix(out[modeEnd:], want+"**Per-lens runtime:**") {
+				t.Fatalf("design round must immediately follow the mode header: %s", out)
+			}
+		})
+	}
+	rc, out := runCapt(t, "log-new", "--topic", "design", "--stdout")
+	if rc != 0 || strings.Contains(out, "Design round") {
+		t.Fatalf("absent flag: rc=%d out=%s", rc, out)
+	}
+	for _, value := range []string{"", " \t ", "a\nb", "a\rb"} {
+		t.Run("invalid/"+value, func(t *testing.T) {
+			rc, _ := runCapt(t, "log-new", "--topic", "design", "--stdout", "--design-round", value)
+			if rc != 1 {
+				t.Fatalf("value %q: rc=%d want 1", value, rc)
+			}
+		})
+	}
+}
+
 func TestLogNewStdoutSkeleton(t *testing.T) {
 	logNewPersonaFixture(t)
 	rc, out := runCapt(t, "log-new", "--topic", "mything", "--mode", "build",

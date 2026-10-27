@@ -126,13 +126,17 @@ Mandatory when the trigger fires; skipped only when genuinely N/A.
   `peer-staff-software-engineer-reviewer`, which owns whether the plan is the right way to build
   the spec; this lens owns the unattended-execution mechanics.
 - **A measurement-methodology lens** — REQUIRED when the change is **measurement-shaped**: it adds
-  or changes a gate, threshold, metric, scorecard, eval, or verdict (anything that decides pass/fail
+  or changes a gate, threshold, metric, scorecard, eval, or verdict, or what a check proves (anything that decides pass/fail
   or quantifies quality). The question is whether the thing actually measures its claim, and whether
   "pass" means "evaluated and passed" or merely "didn't look" — the false-green / measurement-floor
   trap. This is distinct from the Tier-1 `peer-test-reviewer`, which asks whether a suite proves
   *code* behavior; this lens asks whether a metric or verdict measures the *quality* it claims. No
   such persona ships in `peer-reviewer-agents`; use one from another plugin if you have it installed,
   otherwise run the lens yourself against the checklist below and say so in the log.
+
+  For a measurement-shaped change, before the build: write a short design note (what each verdict means, how a failure is attributed to its cause, what each check proves and does not prove, and the known false-pass and false-fail routes), then run the gate in **design** mode on that note with the measurement lens, and build only after that round resolves (no Blocker/Major remains). The note also states what the check emits when it could not evaluate its subject (never PASS), and the positive control or known-verdict set that shows it can fire.
+
+  The log header's `**Design round:**` field, written by `log-new --design-round`, records which round reviewed the design note.
 
   **Measurement-methodology checklist** (the substance of this lens when you run it by hand):
 
@@ -299,10 +303,10 @@ restores from the copy, and verifies byte-identity — immune to commit state, a
 git**. Exit codes: `0` mutation caught, `1` mutation not caught (false-green test), `2` harness
 error (bad args, a no-op mutation, a failed restore, an invalid baseline, an unusable
 `--expect-fail-output` text, a refused knock-out: empty, not the test command plus a deselect,
-without a scope proof, red on the unmutated copy, changing nothing, a scope proof that fails on
-the unmutated copy or on the mutant (summed count, full-run count, one-fewer delta line), or still
+without a scope proof, red on the unmutated file, changing nothing, a scope proof that fails on
+the unmutated file or on the mutant (summed count, full-run count, one-fewer delta line), or still
 printing the expected text on the mutant, or a refused control: its text already
-in the main run, inert, red for an unrelated reason, or printing the expected text), `3` with `--expect-fail-output`, a RED run that failed for an
+in the main run, inert, red for an unrelated reason, or printing the expected text; see [commands.md](../../../docs/commands.md#copy-mode) for copy-mode refusal reasons), `3` with `--expect-fail-output`, a RED run that failed for an
 unrelated reason (treat it as a surviving mutant). `--test-cmd` runs under `pipefail`: pass the
 test runner's own exit status, and never pipe into `grep -q` or `head` (early pipe close sends
 `SIGPIPE` / exit 141 to the upstream runner and aborts the baseline). Use it for every
@@ -313,7 +317,7 @@ rendered failure line (see the skill's mutation rules for how to choose it) AND
 cargo, go or pytest in `docs/commands.md`, plus its required scope proof, `--knockout-expect-output`
 or `--knockout-delta-line`; any other runner, node included, makes the mutant UNPROVEN):
 a caught result then shows the text was present, names it, and shows it disappears when that
-command runs. A control mutant is recommended, not required; a control refusal stands; record
+command runs. In copy mode (`--copy-root`) a control is required, which runs first as a canary; a copy-mode or parallel exit 1 or 3 is INCONCLUSIVE until a serial in-place run confirms it. In place, a control remains recommended, not required. A control refusal stands; record
 every control you tried, including refused ones. When mutation-verify.sh is
 unavailable, the runner cannot deselect the single hazard test, or no hazard-specific text exists,
 the mutant is UNPROVEN, never CAUGHT.

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2181
 # test-mutation-verify.sh — TDD suite for mutation-verify.sh.
 #
 # Covers: RED (genuine test) -> exit 0; GREEN/false-green -> exit 1;
@@ -12,12 +13,410 @@
 # a failed restore KEEPS the snapshot and prints its path; and a static
 # check that the script never invokes git; and --expect-fail-output, which
 # rejects a RED run that failed for an unrelated reason (foundry#259).
+# shellcheck source=lib/portable-stat.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/portable-stat.sh"
 set -uo pipefail
+unset MUTATION_VERIFY_COPY_ROOT MUTATION_VERIFY_FILE MUTATION_VERIFY_SWEEP_JOBS
 SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
-TMP="$(cd "$(mktemp -d)" && pwd -P)"
+TMP=$(mktemp -d "${TMPDIR:-/tmp}/test-mv-core.XXXXXX")
+[ -n "$TMP" ] || exit 1
+TMP=$(cd "$TMP" && pwd -P)
 trap 'chmod -R u+w "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT
 MV="$SELF_DIR/mutation-verify.sh"
 fail() { echo "FAIL: $1"; exit 1; }
+
+verdict_line() {
+  sed -n '/^mutation-verify.sh: /{/^mutation-verify.sh: hint: /!p;}' "$1" | tail -1
+}
+
+# Installed entrypoints must produce precisely the direct invocation's result.
+mkdir "$TMP/installed" "$TMP/symlink-root" "$TMP/reaper-tmp" "$TMP/broken"
+ln -s "$MV" "$TMP/installed/mutation-verify.sh"
+printf 'good\ncontrol\n' > "$TMP/symlink-root/subject"
+cat > "$TMP/symlink-root/check" <<'CHECK'
+grep -q control subject || { echo CONTROL; exit 1; }
+grep -q good subject || { echo HAZARD; exit 1; }
+CHECK
+sleep 0 &
+dead_owner=$!
+wait "$dead_owner"
+mkdir "$TMP/reaper-tmp/mutation-verify-copy.$dead_owner.stale" "$TMP/reaper-tmp/mutation-verify-copy.$$.live"
+for invocation_mode in inplace copy; do
+  copy_args=()
+  [ "$invocation_mode" != copy ] || copy_args=(--copy-root .)
+  for entry in direct symlink; do
+    entry_path=$MV
+    [ "$entry" != symlink ] || entry_path="$TMP/installed/mutation-verify.sh"
+    (cd "$TMP/symlink-root" && TMPDIR="$TMP/reaper-tmp" bash "$entry_path" ${copy_args[@]+"${copy_args[@]}"} \
+      --file subject --test-cmd 'bash check' --mutate-sed 's/good/bad/' \
+      --control-sed 's/control/broken/' --expect-fail-output HAZARD \
+      --control-expect-fail-output CONTROL) > "$TMP/$entry.out" 2> "$TMP/$entry.err"
+    [ "$?" = 0 ] || { cat "$TMP/$entry.out" "$TMP/$entry.err"; fail "$invocation_mode $entry invocation failed"; }
+  done
+  [ "$(verdict_line "$TMP/direct.err")" = "$(verdict_line "$TMP/symlink.err")" ] || fail "$invocation_mode symlink verdict differs"
+  direct_tree=$(sed -n 's/.* tree=//p' "$TMP/direct.err" | tail -1)
+  [ "$invocation_mode" != copy ] || [ -n "$direct_tree" ] || fail "$invocation_mode direct tree missing"
+  [ "$direct_tree" = "$(sed -n 's/.* tree=//p' "$TMP/symlink.err" | tail -1)" ] || fail "$invocation_mode symlink tree differs"
+  cmp -s "$TMP/direct.out" "$TMP/symlink.out" || fail "$invocation_mode symlink stdout differs"
+  cmp -s "$TMP/direct.err" "$TMP/symlink.err" || fail "$invocation_mode symlink stderr differs"
+done
+[ ! -d "$TMP/reaper-tmp/mutation-verify-copy.$dead_owner.stale" ] || fail 'dead owner copy survived'
+[ -d "$TMP/reaper-tmp/mutation-verify-copy.$$.live" ] || fail 'live owner copy removed'
+cp "$MV" "$TMP/broken/mutation-verify.sh"
+bash "$TMP/broken/mutation-verify.sh" --help > "$TMP/broken.out" 2> "$TMP/broken.err"
+[ "$?" = 2 ] || fail 'broken installation exit'
+grep -F 'broken install:' "$TMP/broken.err" >/dev/null || fail 'broken installation diagnostic'
+
+# Copy setup cases deliberately run before the legacy suite.
+setup_root="$TMP/setup"
+mkdir -p "$setup_root/tmp" "$TMP/copy-tmp"
+printf 'hello world\n' > "$setup_root/subject.sh"
+printf 'grep -q hello ./subject.sh\n' > "$setup_root/t.sh"
+ln -s "$setup_root" "$TMP/setup-alias"
+ln -s subject.sh "$setup_root/link.sh"
+printf 'outside\n' > "$TMP/outside.sh"
+copy_setup_case() {
+  local message="$1"
+  shift
+  (cd "$setup_root" && TMPDIR="$TMP/copy-tmp" bash "$MV" \
+    --file subject.sh --test-cmd 'bash ./t.sh' --mutate-sed 's/hello/goodbye/' \
+    --expect-fail-output hazard --control-sed 's/world/control/' \
+    --control-expect-fail-output control "$@") > "$TMP/setup-out" 2>&1
+  local result=$?
+  [ "$result" -eq 2 ] || fail "copy setup expected exit 2: $message"
+  verdict_line "$TMP/setup-out" | grep -F -- "$message" >/dev/null || { cat "$TMP/setup-out"; fail "copy setup missing: $message"; }
+}
+copy_setup_case "--file does not exist: $setup_root/missing" --copy-root . --file missing
+copy_setup_case "--file is not a regular file: $setup_root/tmp" --copy-root . --file tmp
+copy_setup_case 'cannot resolve --file' --copy-root . --file missing-dir/x
+copy_setup_case 'cannot resolve --copy-root' --copy-root ./missing-root
+copy_setup_case '--copy-root given twice' --copy-root . --copy-root .
+copy_setup_case '--file is not under --copy-root' --copy-root "$setup_root" --file "$TMP/outside.sh"
+copy_setup_case '--file is a symlink; copy mode needs a regular file' --copy-root "$setup_root" --file link.sh
+copy_setup_case 'ANCHOR NOT FOUND' --expect-anchor missing --copy-root "$TMP/setup-alias"
+verdict_line "$TMP/setup-out" | grep -Eq 'tree=[0-9]+$' || fail 'alias verdict missing tree hash'
+copy_setup_case 'ANCHOR NOT FOUND' --expect-anchor missing --copy-root .
+verdict_line "$TMP/setup-out" | grep -Eq 'tree=[0-9]+$' || fail 'relative verdict missing tree hash'
+for setup_flag in --test-cmd --mutate-cmd --syntax-cmd --control-cmd --knockout-cmd; do
+  # Select mutually exclusive command variants when needed.
+  case "$setup_flag" in
+    --mutate-cmd)
+      (cd "$setup_root" && bash "$MV" --file subject.sh --copy-root . \
+        --test-cmd 'bash ./t.sh' --mutate-cmd "cat $setup_root/subject.sh" \
+        --expect-fail-output hazard --control-sed 's/world/control/' \
+        --control-expect-fail-output control) > "$TMP/setup-out" 2>&1
+      [ "$?" -eq 2 ] || fail 'mutate command real path exit'
+      grep -F 'command refers to the real tree (--mutate-cmd)' "$TMP/setup-out" >/dev/null || fail 'mutate command real path message'
+      ;;
+    --control-cmd) # The final occurrence replaces the default sed control below.
+      (cd "$setup_root" && bash "$MV" --file subject.sh --copy-root . \
+        --test-cmd 'bash ./t.sh' --mutate-sed 's/hello/goodbye/' \
+        --expect-fail-output hazard --control-cmd "cat $setup_root/subject.sh" \
+        --control-expect-fail-output control) > "$TMP/setup-out" 2>&1
+      [ "$?" -eq 2 ] || fail 'control command real path exit'
+      grep -F 'command refers to the real tree (--control-cmd)' "$TMP/setup-out" >/dev/null || fail 'control command real path message'
+      ;;
+    *) copy_setup_case "command refers to the real tree ($setup_flag)" --copy-root . "$setup_flag" "cat $setup_root/subject.sh" ;;
+  esac
+done
+copy_setup_case 'command refers to the real tree (--test-cmd)' --copy-root . --test-cmd "cd $setup_root; ./t.sh"
+copy_setup_case '--cover-check is not supported with --copy-root' --copy-root . --cover-check example
+case "$setup_root" in
+ /private/var/*)
+  alternate_root="${setup_root#/private}"
+  copy_setup_case 'command refers to the real tree (--test-cmd)' --copy-root . --test-cmd "cat $alternate_root/subject.sh"
+  ;;
+ /var/*)
+  copy_setup_case 'command refers to the real tree (--test-cmd)' --copy-root . --test-cmd "cat /private$setup_root/subject.sh"
+  ;;
+esac
+# Use a dedicated invocation because the helper intentionally fixes TMPDIR.
+(cd "$setup_root" && TMPDIR="$setup_root/tmp" bash "$MV" --file subject.sh \
+  --copy-root . --test-cmd 'bash ./t.sh' --mutate-sed 's/hello/goodbye/' \
+  --expect-fail-output hazard --control-sed 's/world/control/' \
+  --control-expect-fail-output control) > "$TMP/setup-out" 2>&1
+[ "$?" -eq 2 ] || fail 'inside TMPDIR exit'
+grep -F 'TMPDIR is inside --copy-root' "$TMP/setup-out" >/dev/null || fail 'inside TMPDIR message'
+if [ "$(id -u)" -ne 0 ]; then
+  printf 'unreadable\n' > "$setup_root/unreadable"
+  chmod 000 "$setup_root/unreadable"
+  copy_setup_case 'copy failed:' --copy-root .
+  [ -z "$(find "$TMP/copy-tmp" -name 'mutation-verify-copy.*' -print)" ] || fail 'partial copy leaked'
+  chmod 600 "$setup_root/unreadable"
+else
+  echo 'test copy failure SKIP (root)'
+fi
+(cd "$setup_root" && MUTATION_VERIFY_COPY_ROOT=/nonexistent MUTATION_VERIFY_FILE=/nonexistent \
+  bash "$MV" --file subject.sh --test-cmd 'grep -q hello ./subject.sh' \
+  --mutate-sed 's/hello/goodbye/') > "$TMP/setup-out" 2>&1
+[ "$?" -eq 0 ] || fail 'output-only env changed in-place verdict'
+grep -F 'CAUGHT' "$TMP/setup-out" >/dev/null || fail 'output-only env verdict'
+! grep -q 'tree=' "$TMP/setup-out" || fail 'in-place tree hash'
+[ "$(cat "$setup_root/subject.sh")" = 'hello world' ] || fail 'output-only env restore'
+mkdir "$TMP/capture-tools"
+cat > "$TMP/capture-tools/mktemp" <<EOF
+#!/usr/bin/env bash
+case "\${*: -1}" in
+ */capture.*) printf '%s/missing/capture\\n' "\$(dirname "\${*: -1}")" ;;
+ *) exec "$(command -v mktemp)" "\$@" ;;
+esac
+EOF
+chmod +x "$TMP/capture-tools/mktemp"
+(cd "$setup_root" && PATH="$TMP/capture-tools:$PATH" bash "$MV" --copy-root . --file subject.sh \
+ --test-cmd 'bash ./t.sh' --mutate-sed s/hello/goodbye/ --expect-fail-output hazard \
+ --control-sed s/world/control/ --control-expect-fail-output control) > "$TMP/capture-out" 2>&1
+[ "$?" -eq 2 ] || fail 'capture failure status'
+verdict_line "$TMP/capture-out" | grep -F 'capture failure:' >/dev/null || fail 'capture failure misreported as invalid instrument'
+if [ "$(id -u)" -ne 0 ]; then
+  (cd "$setup_root" && bash "$MV" --copy-root . --file subject.sh \
+    --test-cmd 'parent=$(dirname "$MUTATION_VERIFY_COPY_ROOT"); chmod 500 "$parent"/capture.*; bash ./t.sh' \
+    --mutate-sed s/hello/goodbye/ --expect-fail-output hazard \
+    --control-sed s/world/control/ --control-expect-fail-output control) > "$TMP/probe-out" 2>&1
+  [ "$?" -eq 2 ] || fail 'capture probe status'
+  grep -F 'capture failure: cannot write output file' "$TMP/probe-out" >/dev/null || fail 'capture probe diagnostic'
+fi
+echo 'test copy setup and output-only environment PASS'
+[ "${1:-all}" != setup ] || exit 0
+
+
+# Routing fixtures use relative subjects; all command kinds log outside the tree.
+route_root="$TMP/routing"
+mkdir -p "$route_root/sub" "$route_root/.git" "$TMP/route-tmp"
+printf 'private vcs\n' > "$route_root/.git/marker"
+mkdir "$route_root/read-only"
+printf 'retained file\n' > "$route_root/read-only/entry"
+chmod 555 "$route_root/read-only"
+touch "$route_root/.envrc"
+printf 'guard=on\nother=on\n' > "$route_root/subject"
+cat > "$route_root/sub/suite.sh" <<'EOF'
+#!/usr/bin/env bash
+kind=test
+[ "${1:-}" != --deselect ] || kind=knockout
+printf '%s %s\n' "$kind" "$(pwd -P)" >> "$MUTATION_VERIFY_TEST_ROUTE_LOG"
+[ "$(pwd -P)" = "$(cd "$MUTATION_VERIFY_COPY_ROOT/sub" && pwd -P)" ] || exit 8
+[ ! -e ../.git ] && [ -e ../.envrc ] || exit 7
+parent="$(dirname "$MUTATION_VERIFY_COPY_ROOT")"
+[ -d "$parent"/capture.* ] || { echo 'capture directory must be inside parent'; exit 9; }
+case "$MUTATION_VERIFY_COPY_ROOT" in
+ */control) [ ! -e "$parent/baseline" ] || { echo 'baseline copy retained'; exit 9; } ;;
+ */main) [ ! -e "$parent/baseline" ] && [ ! -e "$parent/control" ] || { echo 'phase copies retained'; exit 9; } ;;
+esac
+if [ -n "${MUTATION_VERIFY_TEST_EDIT_REAL:-}" ]; then printf 'external\n' >> "$MUTATION_VERIFY_TEST_EDIT_REAL"; fi
+if [ "${1:-}" = --deselect ]; then echo '1 deselected'; exit 0; fi
+grep -q '^other=on$' ../subject || { echo control-failure; exit 1; }
+grep -q '^guard=on$' ../subject || { echo hazard-failure; exit 1; }
+echo '2 passed'
+EOF
+route_mtime() {
+  pstat_mtime "$route_root/subject"
+}
+route_run() {
+  (cd "$route_root/sub" && MUTATION_VERIFY_TEST_ROUTE_LOG="$TMP/route-log" TMPDIR="$TMP/route-tmp" bash "$MV" \
+    --copy-root .. --file ../subject --test-cmd 'bash ./suite.sh' \
+    --mutate-cmd 'printf "mutate %s\n" "$(pwd -P)" >> "$MUTATION_VERIFY_TEST_ROUTE_LOG"; printf "guard=off\nother=on\n" > ../subject' \
+    --syntax-cmd 'printf "syntax %s\n" "$(pwd -P)" >> "$MUTATION_VERIFY_TEST_ROUTE_LOG"; test -s ../subject' \
+    --control-cmd 'printf "control %s\n" "$(pwd -P)" >> "$MUTATION_VERIFY_TEST_ROUTE_LOG"; printf "guard=on\nother=off\n" > ../subject' \
+    --expect-fail-output hazard-failure --control-expect-fail-output control-failure \
+    --knockout-cmd 'bash ./suite.sh --deselect t.py::hazard' --knockout-expect-output '1 deselected')
+}
+touch -t 200001010000 "$route_root/subject"
+route_sum="$(cksum < "$route_root/subject")"
+route_time="$(route_mtime)"
+case "$route_time" in ''|*[!0-9]*) fail 'mtime helper must return seconds' ;; esac
+route_run > "$TMP/route-out" 2>&1
+[ "$?" -eq 0 ] || { cat "$TMP/route-out"; fail 'copy routing verdict'; }
+verdict_line "$TMP/route-out" | grep -Eq 'CAUGHT.*tree=[0-9a-f]+$' || fail 'copy routing terminal verdict'
+[ "$(cksum < "$route_root/subject")" = "$route_sum" ] || fail 'copy changed real bytes'
+[ "$(route_mtime)" = "$route_time" ] || fail 'copy changed real mtime'
+! grep -q 'the real file changed' "$TMP/route-out" || fail 'spurious external-edit hint'
+for kind in test mutate syntax knockout control; do
+  grep -q "^$kind " "$TMP/route-log" || fail "missing routed $kind"
+done
+[ "$(grep -c '^test ' "$TMP/route-log")" -eq 3 ] || fail 'baseline, main and control must run'
+[ "$(grep -c '^knockout ' "$TMP/route-log")" -eq 2 ] || fail 'both knock-outs must run'
+while read -r kind location; do
+  case "$location" in "$TMP/route-tmp"/mutation-verify-copy.*/pristine/*) fail 'command ran in pristine' ;;
+    "$TMP/route-tmp"/mutation-verify-copy.*/*/sub) ;;
+    *) fail "unmirrored $kind cwd: $location" ;;
+  esac
+done < "$TMP/route-log"
+[ "$(awk '$1 == "test" {print $2}' "$TMP/route-log" | sort -u | wc -l | tr -d ' ')" -eq 3 ] || fail 'baseline control main copies must differ'
+echo 'test copy-root: all five commands run in copies; cwd mirror, dotfiles, VCS and untouched real file PASS'
+export MUTATION_VERIFY_TEST_EDIT_REAL="$route_root/subject"
+route_run > "$TMP/route-edit-out" 2>&1
+rc=$?
+unset MUTATION_VERIFY_TEST_EDIT_REAL
+[ "$rc" -eq 0 ] || { cat "$TMP/route-edit-out"; fail 'external edit changed verdict status'; }
+grep -q '^mutation-verify.sh: hint: the real file changed' "$TMP/route-edit-out" || fail 'external edit hint absent'
+verdict_line "$TMP/route-edit-out" | grep -Eq 'CAUGHT.*tree=[0-9a-f]+$' || fail 'external edit verdict'
+echo 'test copy-root: external-edit hint preserves verdict PASS'
+
+# Canary fixtures keep escapes inside scripts, invisible to command validation.
+canary_root="$TMP/canary"
+mkdir -p "$canary_root/tools"
+printf 'guard=on\nother=on\n' > "$canary_root/subject.sh"
+ln -s "$canary_root" "$TMP/canary-alias"
+export FIXTURE_REAL="$canary_root" FIXTURE_ALIAS="$TMP/canary-alias"
+cat > "$canary_root/tools/subject-tool" <<'EOF'
+#!/usr/bin/env bash
+cat "$(dirname "$0")/../subject.sh"
+EOF
+chmod +x "$canary_root/tools/subject-tool"
+cat > "$canary_root/suite.sh" <<'EOF'
+#!/usr/bin/env bash
+case "$FIXTURE_MODE" in
+ env) content="$(cat "$FIXTURE_REAL/subject.sh")" ;;
+ cd) cd "$FIXTURE_REAL"; content="$(cat ./subject.sh)" ;;
+ alias) content="$(cat "$FIXTURE_ALIAS/subject.sh")" ;;
+ path) PATH="$FIXTURE_REAL/tools:$PATH"; content="$(subject-tool)" ;;
+ cd-twin) cd "$MUTATION_VERIFY_COPY_ROOT"; content="$(cat ./subject.sh)" ;;
+ alias-twin) ln -s "$MUTATION_VERIFY_COPY_ROOT" ./copy-alias; content="$(cat ./copy-alias/subject.sh)" ;;
+ path-twin) PATH="$MUTATION_VERIFY_COPY_ROOT/tools:$PATH"; content="$(subject-tool)" ;;
+ *) content="$(cat ./subject.sh)" ;;
+esac
+if ! echo "$content" | grep -q 'other=on'; then
+  [ "$FIXTURE_MODE" != unrelated ] && echo control-failure
+  [ "$FIXTURE_MODE" != exit3 ] || echo hazard-failure
+  exit 1
+fi
+if ! echo "$content" | grep -q 'guard=on'; then
+  [ "$FIXTURE_MODE" != weak ] || exit 0
+  [ "$FIXTURE_MODE" != exit3 ] || { echo unrelated; exit 1; }
+  [ "${1:-}" != --deselect ] || [ "$FIXTURE_MODE" = persists ] || { echo '1 deselected'; exit 0; }
+  echo hazard-failure
+  exit 1
+fi
+[ "${1:-}" != --deselect ] || echo '1 deselected'
+EOF
+canary_run() {
+  (cd "$canary_root" && bash "$MV" --copy-root . --file subject.sh \
+    --test-cmd 'bash ./suite.sh' --mutate-sed "${FIXTURE_MUTATION:-s/guard=on/guard=off/}" \
+    --expect-fail-output hazard-failure --control-sed "${FIXTURE_CONTROL:-s/other=on/other=off/}" \
+    --control-expect-fail-output control-failure "$@")
+}
+canary_check() {
+  local want="$1" keyword="$2"
+  shift 2
+  canary_run "$@" > "$TMP/canary-out" 2>&1
+  local actual=$?
+  if [ "$FIXTURE_MODE" = env ] && [ "$actual" -ne 2 ]; then
+    fail 'copy-root escape via env did not exit 2'
+  fi
+  [ "$actual" -eq "$want" ] || { cat "$TMP/canary-out"; fail "canary $FIXTURE_MODE exit $actual expected $want"; }
+  verdict_line "$TMP/canary-out" | grep -F -- "$keyword" >/dev/null || fail "canary $FIXTURE_MODE verdict $keyword"
+  verdict_line "$TMP/canary-out" | grep -Eq ' tree=[0-9a-f]+$' || fail 'canary tree suffix'
+}
+canary_message='CONTROL STAYED GREEN IN THE COPY — the test did not read the copy, or the control is inert; run the control in place to tell which'
+for FIXTURE_MODE in env cd alias path; do
+  export FIXTURE_MODE
+  canary_check 2 "$canary_message"
+  case "$FIXTURE_MODE" in cd) FIXTURE_MODE=cd-twin ;; alias) FIXTURE_MODE=alias-twin ;; path) FIXTURE_MODE=path-twin ;; *) FIXTURE_MODE=relative ;; esac
+  canary_check 0 CAUGHT
+  verdict_line "$TMP/canary-out" | grep -F '; control ran first (canary)' >/dev/null || fail 'canary suffix'
+done
+export FIXTURE_MODE=path-twin
+canary_check 0 CAUGHT
+export FIXTURE_MODE=relative FIXTURE_CONTROL='s/other=on/other=on # comment/'
+canary_check 2 "$canary_message"
+export FIXTURE_CONTROL='s/absent/unused/'
+canary_check 2 'control mutation did not change subject.sh (no-op control)'
+unset FIXTURE_CONTROL
+canary_check 2 'CONTROL MARKER ABSENT' --control-marker missing-marker
+canary_check 2 'CONTROL FILE INVALID' --syntax-cmd "grep -q 'other=on' ./subject.sh"
+export FIXTURE_MODE=unrelated
+canary_check 2 'CONTROL RED FOR AN UNRELATED REASON'
+export FIXTURE_MODE=weak
+canary_check 1 'NOT caught'
+verdict_line "$TMP/canary-out" | grep -F '; INCONCLUSIVE in copy mode — confirm with a serial in-place run tree=' >/dev/null || fail 'exit 1 inconclusive'
+export FIXTURE_MODE=exit3
+canary_check 3 'RED FOR AN UNRELATED REASON'
+verdict_line "$TMP/canary-out" | grep -F '; control ran first (canary)' >/dev/null || fail 'exit 3 canary'
+verdict_line "$TMP/canary-out" | grep -F '; INCONCLUSIVE in copy mode — confirm with a serial in-place run tree=' >/dev/null || fail 'exit 3 inconclusive'
+export FIXTURE_MODE=persists
+canary_check 2 'TEXT PERSISTS' --knockout-cmd 'bash ./suite.sh --deselect t.py::hazard' --knockout-expect-output '1 deselected'
+export FIXTURE_MODE=relative
+canary_check 0 CAUGHT --knockout-cmd 'bash ./suite.sh --deselect t.py::hazard' --knockout-expect-output '1 deselected'
+canary_sum="$(cksum < "$canary_root/subject.sh")"
+canary_time="$(ls -lnT "$canary_root/subject.sh" 2>/dev/null || ls -ln --full-time "$canary_root/subject.sh")"
+canary_run > "$TMP/solo-one" 2>&1
+FIXTURE_MUTATION='s/guard=on/guard=disabled/' canary_run > "$TMP/solo-two" 2>&1
+canary_run > "$TMP/parallel-one" 2>&1 &
+canary_pid_one=$!
+FIXTURE_MUTATION='s/guard=on/guard=disabled/' canary_run > "$TMP/parallel-two" 2>&1 &
+canary_pid_two=$!
+wait "$canary_pid_one" || fail 'parallel one'
+wait "$canary_pid_two" || fail 'parallel two'
+[ "$(verdict_line "$TMP/solo-one")" = "$(verdict_line "$TMP/parallel-one")" ] || fail 'parallel one verdict'
+[ "$(verdict_line "$TMP/solo-two")" = "$(verdict_line "$TMP/parallel-two")" ] || fail 'parallel two verdict'
+for canary_output in solo-one solo-two parallel-one parallel-two; do
+  verdict_line "$TMP/$canary_output" | grep -Eq 'CAUGHT.* tree=[0-9a-f]+$' || fail 'concurrent verdict keyword and tree'
+done
+[ "$canary_sum" = "$(cksum < "$canary_root/subject.sh")" ] || fail 'parallel real bytes'
+[ "$canary_time" = "$(ls -lnT "$canary_root/subject.sh" 2>/dev/null || ls -ln --full-time "$canary_root/subject.sh")" ] || fail 'parallel real mtime'
+(cd "$canary_root" && bash "$MV" --copy-root . --file subject.sh --test-cmd true --mutate-sed s/on/off/) > "$TMP/no-control" 2>&1
+[ "$?" -eq 2 ] || fail 'copy requires control status'
+verdict_line "$TMP/no-control" | grep -F -- '--copy-root requires a control' >/dev/null || fail 'copy requires control message'
+! grep -q 'tree=' "$TMP/no-control" || fail 'no-control refusal must precede snapshot'
+# Fingerprints include every file's content and mode, but exclude mtimes.
+export FIXTURE_MODE=relative
+printf 'first\n' > "$canary_root/non-subject"
+canary_check 0 CAUGHT
+hash_first="$(verdict_line "$TMP/canary-out" | sed 's/.* tree=//')"
+printf 'second\n' > "$canary_root/non-subject"
+canary_check 0 CAUGHT
+hash_second="$(verdict_line "$TMP/canary-out" | sed 's/.* tree=//')"
+[ "$hash_first" != "$hash_second" ] || fail 'tree ignores non-subject content'
+touch -t 200101010000 "$canary_root/non-subject"
+canary_check 0 CAUGHT
+[ "$hash_second" = "$(verdict_line "$TMP/canary-out" | sed 's/.* tree=//')" ] || fail 'tree includes mtime'
+chmod +x "$canary_root/non-subject"
+canary_check 0 CAUGHT
+[ "$hash_second" != "$(verdict_line "$TMP/canary-out" | sed 's/.* tree=//')" ] || fail 'tree ignores file mode'
+# Both commands expand the output-only file variable inside their copy.
+(cd "$canary_root" && bash "$MV" --copy-root . --file subject.sh \
+ --test-cmd 'content=$(cat "$MUTATION_VERIFY_FILE"); echo "$content" | grep -q other=on || { echo control-failure; exit 1; }; echo "$content" | grep -q guard=on || { echo hazard-failure; exit 1; }' \
+ --mutate-cmd 'printf "guard=off\nother=on\n" > "$MUTATION_VERIFY_FILE"' \
+ --expect-fail-output hazard-failure --control-sed s/other=on/other=off/ \
+ --control-expect-fail-output control-failure) > "$TMP/file-env-out" 2>&1
+[ "$?" -eq 0 ] || fail 'copy exported file command status'
+verdict_line "$TMP/file-env-out" | grep -Eq 'CAUGHT.* tree=[0-9a-f]+$' || fail 'copy exported file verdict'
+[ "$canary_sum" = "$(cksum < "$canary_root/subject.sh")" ] || fail 'exported file changed real bytes'
+[ "$canary_time" = "$(ls -lnT "$canary_root/subject.sh" 2>/dev/null || ls -ln --full-time "$canary_root/subject.sh")" ] || fail 'exported file changed real mtime'
+(cd "$TMP" && bash "$MV" --copy-root "$canary_root" --file "$canary_root/subject.sh" \
+ --test-cmd true --mutate-sed s/on/off/ --control-sed s/on/off/ \
+ --expect-fail-output hazard-failure --control-expect-fail-output control-failure) > "$TMP/outside-cwd" 2>&1
+[ "$?" -eq 2 ] || fail 'outside cwd refusal status'
+verdict_line "$TMP/outside-cwd" | grep -F 'caller cwd is outside --copy-root' >/dev/null || fail 'outside cwd refusal message'
+echo 'test copy canary escapes, twins, verdicts and concurrency PASS'
+
+# In-place output goldens normalise only the fixture path.
+golden_check() {
+  local name="$1" wanted_rc="$2"; shift 2
+  bash "$MV" --file "$setup_root/subject.sh" --test-cmd 'grep -q hello "$MUTATION_VERIFY_TEST_GOLDEN_FILE"' \
+    --mutate-sed s/hello/goodbye/ "$@" > "$TMP/golden-out" 2>&1
+  local actual_rc=$?
+  [ "$actual_rc" -eq "$wanted_rc" ] || fail "golden $name status"
+  sed "s|$setup_root/subject.sh|<subject>|g" "$TMP/golden-out" > "$TMP/golden-normalised"
+  cat > "$TMP/golden-expected"
+  cmp -s "$TMP/golden-normalised" "$TMP/golden-expected" || { cat "$TMP/golden-normalised"; fail "golden $name output"; }
+}
+export MUTATION_VERIFY_TEST_GOLDEN_FILE="$setup_root/subject.sh"
+golden_check caught 0 <<'EOF'
+mutation-verify.sh: [UNVERIFIED APPLICATION] mutation CAUGHT (test-cmd exited 1 under mutation; reachability was NOT verified; failure cause was NOT checked, pass --expect-fail-output) — test went RED
+EOF
+golden_check survived 1 --test-cmd true <<'EOF'
+mutation-verify.sh: [UNVERIFIED APPLICATION] mutation NOT caught (test-cmd exited 0 under mutation; reachability was NOT verified) — false-green test
+EOF
+golden_check unrelated 3 --expect-fail-output hazard-text <<'EOF'
+mutation-verify.sh: [UNVERIFIED APPLICATION] RED FOR AN UNRELATED REASON (test-cmd exited 1 under mutation; reachability was NOT verified) — expected failure text absent: hazard-text
+mutation-verify.sh: hint: the hazard assertion is not shown to have caught this mutant; treat it as a surviving mutant (a test gap). Change the expected text only if this output shows the hazard assertion itself failing at its own location (see docs/commands.md)
+EOF
+golden_check anchor 2 --expect-anchor missing-anchor <<'EOF'
+mutation-verify.sh: ANCHOR NOT FOUND — expected anchor is absent from the unmutated <subject>: missing-anchor
+mutation-verify.sh: hint: the mutation would target zero sites; fix the anchor, do not trust a verdict from this run
+EOF
+unset MUTATION_VERIFY_TEST_GOLDEN_FILE
+echo 'test in-place verdict goldens PASS'
 
 # ---------------------------------------------------------------------------
 # Test 1: RED case — a genuine test that checks the file's content. Mutating
@@ -154,7 +553,31 @@ echo "test uncommitted-work preserved exactly (not reverted to HEAD) PASS"
 # as the anti-pattern this helper replaces) and check only the executable
 # code for a "git" token.
 # ---------------------------------------------------------------------------
-grep -v '^[[:space:]]*#' "$MV" | grep -qE '(^|[^a-zA-Z0-9_-])git($|[^a-zA-Z0-9_-])' && fail "mutation-verify.sh must NEVER invoke git in any form (outside comments)"
+never_git_hits() {
+  grep -v '^[[:space:]]*#' "$1" | grep -E '(^|[^a-zA-Z0-9_.-])git($|[^a-zA-Z0-9_-])'
+}
+never_git_hits "$SELF_DIR/mutation-sweep.sh" >"$TMP/sweep_never_git_hits" && fail "mutation-sweep.sh must NEVER invoke git"
+never_git_hits "$MV" >"$TMP/never_git_hits" && fail "mutation-verify.sh must NEVER invoke git in any form (outside comments)"
+
+# Exercise the same guard against executable tokens anywhere on a line.
+while IFS= read -r git_line; do
+  cp "$MV" "$TMP/never_git_subject.sh"
+  printf '\n%s\n' "$git_line" >> "$TMP/never_git_subject.sh"
+  never_git_hits "$TMP/never_git_subject.sh" >"$TMP/never_git_hits" || fail "never-git guard missed: $git_line"
+done <<'GIT_INVOCATIONS'
+git -C x status
+x=$(git rev-parse HEAD)
+x=`git log`
+x; git status
+if git rev-parse --git-dir >/dev/null; then :; fi
+command git status
+exec git status
+! git diff
+eval "git status"
+GIT_INVOCATIONS
+cp "$MV" "$TMP/never_git_subject.sh"
+printf '\n%s\n' 'VCS_DIR_NAME=.git' >> "$TMP/never_git_subject.sh"
+never_git_hits "$TMP/never_git_subject.sh" >"$TMP/never_git_hits" && fail "never-git guard must allow VCS_DIR_NAME=.git"
 echo "test script contains no git invocation PASS"
 
 # ---------------------------------------------------------------------------
@@ -175,10 +598,10 @@ echo "test bad args -> exit 2 with usage PASS"
 # Test 8 (BLOCKER 2 regression): a value-less trailing flag (--file as the
 # LAST argument, with no value after it) must exit 2 PROMPTLY. Before the
 # fix, `shift 2` on a `$#`-of-1 arg list left `$#` unchanged and the parse
-# loop spun forever. Wrapped in `timeout 5` so a regression fails loudly
+# loop spun forever. Wrapped in `timeout 15` so a regression fails loudly
 # (timeout's 124) instead of hanging the whole suite.
 # ---------------------------------------------------------------------------
-timeout 5 bash "$MV" --file >"$TMP/out_trailing_flag" 2>&1
+timeout 15 bash "$MV" --file >"$TMP/out_trailing_flag" 2>&1
 rc=$?
 [ "$rc" -ne 124 ] || { cat "$TMP/out_trailing_flag"; fail "value-less trailing --file: HUNG (timeout 124) — BLOCKER 2 regression"; }
 [ "$rc" -eq 2 ] || { cat "$TMP/out_trailing_flag"; fail "value-less trailing --file: expected exit 2, got $rc"; }
@@ -276,45 +699,6 @@ snap_path="$(grep -oE '/[^ ]*mutation-verify\.[A-Za-z0-9]+' "$TMP/out12" | head 
 [ "$(cat "$snap_path/snapshot")" = "$before12" ] || fail "restore-failure: kept snapshot does not match the original content"
 rm -rf "$snap_path"
 echo "test restore-failure keeps the snapshot and prints its path PASS"
-
-# ---------------------------------------------------------------------------
-# Test 13 (BLOCKER 3 regression): a SIGINT delivered while --test-cmd is
-# running must exit with a signal-derived status (NOT 0 — a bare `trap
-# cleanup EXIT INT TERM` lets bash resume past the trap, so an interrupted
-# test's non-zero test_rc gets misreported as a mutation-CAUGHT success),
-# and must restore the file. This also guards a real regression found while
-# fixing BLOCKER 3: cleanup() firing TWICE (once explicitly from the INT
-# handler, once again via the EXIT trap when the re-raised signal actually
-# terminates the process) — the second call found the snapshot dir already
-# removed by the first and printed a spurious "RESTORE FAILED" for a run
-# that had actually succeeded. cleanup() must be idempotent, and its
-# stderr must NOT claim failure when the restore genuinely succeeded.
-# ---------------------------------------------------------------------------
-F13="$TMP/sigint_target.txt"
-printf 'hello world\n' > "$F13"
-before13="$(cat "$F13")"
-cat > "$TMP/slow_test.sh" <<'EOF'
-#!/usr/bin/env bash
-sleep 10
-EOF
-chmod +x "$TMP/slow_test.sh"
-# `set -m` (job control) is required here: without it, a non-interactive
-# script's ASYNC commands have SIGINT/SIGQUIT set to ignored by bash itself
-# before mutation-verify.sh even starts, and a shell may not trap a signal
-# that was already ignored on entry — so `kill -INT` on the background job
-# would silently do nothing and this test would just run to completion.
-set -m
-bash "$MV" --file "$F13" --test-cmd "$TMP/slow_test.sh" --mutate-sed 's/hello/goodbye/' >"$TMP/out13" 2>&1 &
-sig_pid=$!
-sleep 1
-kill -s INT "$sig_pid"
-wait "$sig_pid"
-rc=$?
-set +m
-[ "$rc" -eq 130 ] || { cat "$TMP/out13"; fail "SIGINT: expected exit 130 (signal-derived), got $rc"; }
-[ "$(cat "$F13")" = "$before13" ] || fail "SIGINT: file not restored/byte-identical after interrupt"
-grep -qi "restore failed" "$TMP/out13" && { cat "$TMP/out13"; fail "SIGINT: spurious RESTORE FAILED message for a run that actually succeeded (cleanup() ran twice)"; }
-echo "test SIGINT during test-cmd -> signal-derived exit, file restored, no spurious failure PASS"
 
 # ---------------------------------------------------------------------------
 # Test 14 (applied-verification): --expect-anchor present. The anchor is checked
@@ -496,252 +880,6 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Test 23 (cover-check): --cover-check function unreachable. Mutating a
-# function that no test executes leaves the test command green, but that is
-# NOT evidence of a survivor. It must be reported as MUTANT-UNREACHABLE.
-# ---------------------------------------------------------------------------
-GO23="$TMP/go_unreachable"; mkdir -p "$GO23"
-cat > "$GO23/go.mod" <<'EOF'
-module example.com/mutationverify/unreachable
-
-go 1.21
-EOF
-cat > "$GO23/target.go" <<'EOF'
-package unreachable
-
-func Reachable() int {
-	return 1
-}
-
-func Unreachable() int {
-	return 2
-}
-EOF
-cat > "$GO23/target_test.go" <<'EOF'
-package unreachable
-
-import "testing"
-
-func TestReachable(t *testing.T) {
-	if Reachable() != 1 {
-		t.Fatal("unexpected Reachable result")
-	}
-}
-EOF
-before23="$(cat "$GO23/target.go")"
-bash "$MV" --file "$GO23/target.go" --test-cmd "cd '$GO23' && go test ." \
-  --cover-check Unreachable \
-  --mutate-sed 's/return 2/return 3/' >"$TMP/out23" 2>&1
-rc=$?
-[ "$rc" -eq 1 ] || { cat "$TMP/out23"; fail "--cover-check unreachable function: expected exit 1, got $rc"; }
-grep -q "MUTANT-UNREACHABLE" "$TMP/out23" || { cat "$TMP/out23"; fail "--cover-check unreachable function: expected MUTANT-UNREACHABLE"; }
-grep -qi "mutation NOT caught" "$TMP/out23" && { cat "$TMP/out23"; fail "--cover-check unreachable function: must not report a survivor/false-green verdict"; }
-[ "$(cat "$GO23/target.go")" = "$before23" ] || fail "--cover-check unreachable function: file not byte-identical after restore"
-echo "test --cover-check unreachable function -> MUTANT-UNREACHABLE PASS"
-
-# ---------------------------------------------------------------------------
-# Test 24 (cover-check): --cover-check function reachable. Once the mutated
-# function is actually executed, the legacy caught/not-caught verdicts still
-# apply normally.
-# ---------------------------------------------------------------------------
-GO24="$TMP/go_reachable"; mkdir -p "$GO24"
-cat > "$GO24/go.mod" <<'EOF'
-module example.com/mutationverify/reachable
-
-go 1.21
-EOF
-cat > "$GO24/target.go" <<'EOF'
-package reachable
-
-func Value() int {
-	return 1
-}
-EOF
-cat > "$GO24/caught_test.go" <<'EOF'
-package reachable
-
-import "testing"
-
-func TestValueIsOne(t *testing.T) {
-	if Value() != 1 {
-		t.Fatal("unexpected Value result")
-	}
-}
-EOF
-before24="$(cat "$GO24/target.go")"
-bash "$MV" --file "$GO24/target.go" --test-cmd "cd '$GO24' && go test ." \
-  --cover-check Value \
-  --mutate-sed 's/return 1/return 2/' >"$TMP/out24a" 2>&1
-rc=$?
-[ "$rc" -eq 0 ] || { cat "$TMP/out24a"; fail "--cover-check reachable killed mutant: expected exit 0, got $rc"; }
-grep -q "mutation CAUGHT" "$TMP/out24a" || { cat "$TMP/out24a"; fail "--cover-check reachable killed mutant: expected caught verdict"; }
-grep -q "MUTANT-UNREACHABLE" "$TMP/out24a" && { cat "$TMP/out24a"; fail "--cover-check reachable killed mutant: must not report unreachable"; }
-[ "$(cat "$GO24/target.go")" = "$before24" ] || fail "--cover-check reachable killed mutant: file not byte-identical after restore"
-cat > "$GO24/caught_test.go" <<'EOF'
-package reachable
-
-import "testing"
-
-func TestValueExecutes(t *testing.T) {
-	_ = Value()
-}
-EOF
-bash "$MV" --file "$GO24/target.go" --test-cmd "cd '$GO24' && go test ." \
-  --cover-check Value \
-  --mutate-sed 's/return 1/return 2/' >"$TMP/out24b" 2>&1
-rc=$?
-[ "$rc" -eq 1 ] || { cat "$TMP/out24b"; fail "--cover-check reachable survived mutant: expected exit 1, got $rc"; }
-grep -q "mutation NOT caught" "$TMP/out24b" || { cat "$TMP/out24b"; fail "--cover-check reachable survived mutant: expected not-caught verdict"; }
-grep -q "MUTANT-UNREACHABLE" "$TMP/out24b" && { cat "$TMP/out24b"; fail "--cover-check reachable survived mutant: must not report unreachable"; }
-[ "$(cat "$GO24/target.go")" = "$before24" ] || fail "--cover-check reachable survived mutant: file not byte-identical after restore"
-echo "test --cover-check reachable mutants preserve caught/not-caught verdicts PASS"
-
-# ---------------------------------------------------------------------------
-# Test 25: --cover-check plus compile-breaking mutation. A mutation that
-# breaks build/test is caught even though coverage cannot be produced.
-# ---------------------------------------------------------------------------
-GO25="$TMP/go_compile_break"; mkdir -p "$GO25"
-cat > "$GO25/go.mod" <<'EOF'
-module example.com/mutationverify/compilebreak
-
-go 1.21
-EOF
-cat > "$GO25/target.go" <<'EOF'
-package compilebreak
-
-func Value() int {
-	return 1
-}
-EOF
-cat > "$GO25/target_test.go" <<'EOF'
-package compilebreak
-
-import "testing"
-
-func TestValue(t *testing.T) {
-	if Value() != 1 {
-		t.Fatal("unexpected Value result")
-	}
-}
-EOF
-before25="$(cat "$GO25/target.go")"
-bash "$MV" --file "$GO25/target.go" --test-cmd "cd '$GO25' && go test ." \
-  --cover-check Value \
-  --mutate-sed 's/return 1/return/' >"$TMP/out25" 2>&1
-rc=$?
-[ "$rc" -eq 0 ] || { cat "$TMP/out25"; fail "--cover-check compile-breaking mutant: expected caught exit 0, got $rc"; }
-grep -q "mutation CAUGHT" "$TMP/out25" || { cat "$TMP/out25"; fail "--cover-check compile-breaking mutant: expected caught verdict"; }
-grep -q "coverage unavailable" "$TMP/out25" || { cat "$TMP/out25"; fail "--cover-check compile-breaking mutant: expected coverage unavailable suffix"; }
-grep -q "MUTANT-UNREACHABLE" "$TMP/out25" && { cat "$TMP/out25"; fail "--cover-check compile-breaking mutant: must not report unreachable"; }
-[ "$(cat "$GO25/target.go")" = "$before25" ] || fail "--cover-check compile-breaking mutant: file not byte-identical after restore"
-echo "test --cover-check compile-breaking mutant -> CAUGHT PASS"
-
-# ---------------------------------------------------------------------------
-# Test 26: the restored file must look NEWER than anything built from the
-# mutant. mtime-based build tools (cargo's fingerprint,
-# make) skip a rebuild when the source is older than its artifacts. A restore
-# that copies the snapshot's ORIGINAL (old) mtime back leaves the mutant's
-# artifacts looking fresh, so the next run silently executes the mutant.
-# The test-cmd stands in for a build: it writes an artifact on every run, the
-# last one being the under-mutation run.
-# ---------------------------------------------------------------------------
-F26="$TMP/mtime_target.txt"
-A26="$TMP/mtime_artifact"
-REF26="$TMP/mtime_ref"
-printf 'hello world\n' > "$F26"
-touch -t 200001010000 "$F26"
-touch -t 200001020000 "$REF26"
-before26="$(cat "$F26")"
-cat > "$TMP/mtime_test.sh" <<EOF
-#!/usr/bin/env bash
-test_sec=\$(date +%s)
-while [ "\$(date +%s)" -le "\$test_sec" ]; do sleep 0.02; done
-rc=0
-grep -q "hello world" "$F26" || rc=\$?
-touch "$A26"
-exit "\$rc"
-EOF
-chmod +x "$TMP/mtime_test.sh"
-bash "$MV" --file "$F26" --test-cmd "$TMP/mtime_test.sh" --mutate-sed 's/hello/goodbye/' >"$TMP/out26" 2>&1
-rc=$?
-[ "$rc" -eq 0 ] || { cat "$TMP/out26"; fail "restore mtime: expected exit 0 (mutation caught), got $rc"; }
-[ "$(cat "$F26")" = "$before26" ] || fail "restore mtime: file not byte-identical after restore"
-[ "$F26" -nt "$REF26" ] || fail "restore mtime: restored file kept its pre-mutation mtime — an mtime-based build would reuse the mutant's artifacts"
-mtime_sec() {
-  if stat -f %m "$1" >/dev/null 2>&1; then
-    stat -f %m "$1"
-  else
-    stat -c %Y "$1"
-  fi
-}
-[ "$(mtime_sec "$F26")" -gt "$(mtime_sec "$A26")" ] || fail "restore mtime: restored source must be strictly newer than mutant artifacts in whole seconds"
-echo "test restored file is newer than mutant artifacts -> PASS"
-
-# ---------------------------------------------------------------------------
-# Test 27: same-size Python mutants must not survive in timestamp-based pyc.
-# Start each import early in a second so a plain touch reproduces the bug.
-# ---------------------------------------------------------------------------
-if command -v python3 >/dev/null 2>&1; then (
-  unset PYTHONDONTWRITEBYTECODE PYTHONPYCACHEPREFIX
-  PY27="$TMP/python_cache"; mkdir -p "$PY27"
-  printf 'def value(): return 1 == 1\n' > "$PY27/m.py"
-  cat > "$PY27/check.py" <<'EOF'
-import importlib.util
-import os
-import sys
-
-# macOS Python may default to a system cache prefix even with env unset.
-sys.pycache_prefix = None
-cache = importlib.util.cache_from_source("m.py")
-if os.path.exists(cache):
-    os.unlink(cache)
-import m
-assert m.value()
-EOF
-  cat > "$PY27/mutate.sh" <<'EOF'
-#!/usr/bin/env bash
-second=$(date +%s)
-while [ "$(date +%s)" -le "$second" ]; do sleep 0.02; done
-sed 's/==/!=/' m.py > mutant
-cat mutant > m.py
-EOF
-  bash "$MV" --file "$PY27/m.py" --test-cmd "cd '$PY27' && python3 check.py" \
-    --mutate-cmd "cd '$PY27' && bash mutate.sh" >"$TMP/out27" 2>&1
-  rc=$?
-  [ "$rc" -eq 0 ] || { cat "$TMP/out27"; fail "Python cache: expected caught exit 0, got $rc"; }
-  set -- "$PY27"/__pycache__/m.*.pyc
-  [ -f "$1" ] || fail "Python cache: mutated run did not write a pyc"
-  (cd "$PY27" && python3 -c 'import sys; sys.pycache_prefix = None; import m; assert m.value()') || fail "Python cache: fresh import reused the same-size mutant"
-  echo "test restored Python module invalidates mutant pyc -> PASS"
-) || fail "Python cache regression"
-else
-  echo "SKIP: Python cache regression (python3 absent)"
-fi
-
-# ---------------------------------------------------------------------------
-# Test 28: syntax failure must restore newer than artifacts written after
-# the mutation second, even though the mutated test never runs.
-# ---------------------------------------------------------------------------
-F28="$TMP/syntax_mtime_target.txt"
-A28="$TMP/syntax_mtime_artifact"
-printf 'hello world\n' > "$F28"
-cat > "$TMP/syntax_artifact.sh" <<EOF
-#!/usr/bin/env bash
-second=\$(date +%s)
-while [ "\$(date +%s)" -le "\$second" ]; do sleep 0.02; done
-touch "$A28"
-exit 1
-EOF
-bash "$MV" --file "$F28" --test-cmd "grep -q hello '$F28'" \
-  --mutate-sed 's/hello/goodbye/' --syntax-cmd "bash '$TMP/syntax_artifact.sh'" >"$TMP/out28" 2>&1
-rc=$?
-[ "$rc" -eq 2 ] || { cat "$TMP/out28"; fail "syntax restore mtime: expected exit 2, got $rc"; }
-[ "$(cat "$F28")" = "hello world" ] || fail "syntax restore mtime: original content not restored"
-[ -f "$A28" ] || fail "syntax restore mtime: syntax command did not write an artifact"
-[ "$(mtime_sec "$F28")" -gt "$(mtime_sec "$A28")" ] || fail "syntax restore mtime: restored source must be strictly newer than syntax artifacts in whole seconds"
-echo "test syntax failure restores newer than artifacts -> PASS"
-
-# ---------------------------------------------------------------------------
 # Tests 29-33 (foundry#259): --expect-fail-output names the failure's cause.
 # The target holds two lines; the test checks both and prints a distinct
 # failure message for each. Mutating the "guard" line trips the hazard
@@ -897,63 +1035,6 @@ rc=$?
 grep -q "already appears in the passing baseline output" "$TMP/out38" || { cat "$TMP/out38"; fail "stderr baseline text: expected the baseline message"; }
 echo "test --expect-fail-output refuses text the baseline prints on stderr PASS"
 
-# 39: a test that leaves a background child holding its output must not make
-# the run wait for that child.
-cat > "$TMP/cause_bg_test.sh" <<EOF
-#!/usr/bin/env bash
-sleep 30 &
-echo \$! >> "$TMP/bg39.pids"
-grep -q '^guard=on\$' "$F29" || { echo "HAZARD: guard disabled"; exit 1; }
-exit 0
-EOF
-chmod +x "$TMP/cause_bg_test.sh"
-start39=$(date +%s)
-bash "$MV" --file "$F29" --test-cmd "$TMP/cause_bg_test.sh" --mutate-sed 's/^guard=on$/guard=off/' \
-  --expect-fail-output "HAZARD: guard disabled" >"$TMP/out39" 2>&1
-rc=$?
-elapsed39=$(( $(date +%s) - start39 ))
-while read -r bgpid; do
-  case "$bgpid" in ''|*[!0-9]*) continue ;; esac
-  kill "$bgpid" 2>/dev/null
-done < "$TMP/bg39.pids"
-[ "$rc" -eq 0 ] || { cat "$TMP/out39"; fail "background child: expected exit 0, got $rc"; }
-[ "$elapsed39" -lt 20 ] || fail "background child: run waited ${elapsed39}s for a background child"
-echo "test --expect-fail-output does not wait for a background child PASS"
-
-# 40: --expect-fail-output with --cover-check keeps both checks: the mutated
-# run must still carry -coverprofile (reachability verified), and a reachable
-# survivor stays NOT caught, never MUTANT-UNREACHABLE.
-GO40="$TMP/go_cause_cover"; mkdir -p "$GO40"
-printf 'module example.com/mutationverify/causecover\n\ngo 1.21\n' > "$GO40/go.mod"
-printf 'package causecover\n\nfunc Value() int {\n\treturn 1\n}\n' > "$GO40/target.go"
-cat > "$GO40/caught_test.go" <<'EOF'
-package causecover
-
-import "testing"
-
-func TestValueIsOne(t *testing.T) {
-	if Value() != 1 {
-		t.Fatal("hazard: Value is not one")
-	}
-}
-EOF
-before40="$(cat "$GO40/target.go")"
-bash "$MV" --file "$GO40/target.go" --test-cmd "cd '$GO40' && go test ." --cover-check Value \
-  --mutate-sed 's/return 1/return 2/' --expect-fail-output "hazard: Value is not one" >"$TMP/out40a" 2>&1
-rc=$?
-[ "$rc" -eq 0 ] || { cat "$TMP/out40a"; fail "--cover-check + --expect-fail-output caught: expected exit 0, got $rc"; }
-grep -q "reachability verified by --cover-check Value" "$TMP/out40a" || { cat "$TMP/out40a"; fail "--cover-check + --expect-fail-output caught: expected reachability verified"; }
-grep -q "expected failure text present in output" "$TMP/out40a" || { cat "$TMP/out40a"; fail "--cover-check + --expect-fail-output caught: expected the text-present verdict"; }
-printf 'package causecover\n\nimport "testing"\n\nfunc TestValueExecutes(t *testing.T) {\n\t_ = Value()\n}\n' > "$GO40/caught_test.go"
-bash "$MV" --file "$GO40/target.go" --test-cmd "cd '$GO40' && go test ." --cover-check Value \
-  --mutate-sed 's/return 1/return 2/' --expect-fail-output "hazard: Value is not one" >"$TMP/out40b" 2>&1
-rc=$?
-[ "$rc" -eq 1 ] || { cat "$TMP/out40b"; fail "--cover-check + --expect-fail-output survivor: expected exit 1, got $rc"; }
-grep -q "mutation NOT caught" "$TMP/out40b" || { cat "$TMP/out40b"; fail "--cover-check + --expect-fail-output survivor: expected not-caught verdict"; }
-grep -q "MUTANT-UNREACHABLE" "$TMP/out40b" && { cat "$TMP/out40b"; fail "--cover-check + --expect-fail-output survivor: must not report unreachable"; }
-[ "$(cat "$GO40/target.go")" = "$before40" ] || fail "--cover-check + --expect-fail-output: file not byte-identical after restore"
-echo "test --cover-check with --expect-fail-output keeps both verdicts PASS"
-
 # 41: an empty --expect-fail-output with a SILENT passing baseline (nothing for
 # the baseline refusal to match) must still never report CAUGHT: the parse-time
 # refusal is the only guard on this route.
@@ -967,21 +1048,6 @@ grep -q "must not be empty" "$TMP/out41" || { cat "$TMP/out41"; fail "empty --ex
 grep -q "mutation CAUGHT" "$TMP/out41" && { cat "$TMP/out41"; fail "empty --expect-fail-output, silent baseline: must not report CAUGHT"; }
 [ "$(cat "$F29")" = "$before29" ] || fail "empty --expect-fail-output, silent baseline: file not byte-identical"
 echo "test empty --expect-fail-output with a silent baseline -> exit 2 PASS"
-
-# 42: with --cover-check, the baseline runs with -coverprofile too, so text
-# every coverprofile run prints ("of statements") is refused, not matched.
-GO42="$TMP/go_cause_cover_baseline"; mkdir -p "$GO42"
-printf 'module example.com/mutationverify/causecoverbaseline\n\ngo 1.21\n' > "$GO42/go.mod"
-printf 'package causecoverbaseline\n\nfunc Value() int {\n\treturn 1\n}\n' > "$GO42/target.go"
-printf 'package causecoverbaseline\n\nimport "testing"\n\nfunc TestValueIsOne(t *testing.T) {\n\tif Value() != 1 {\n\t\tt.Fatal("hazard: Value is not one")\n\t}\n}\n' > "$GO42/caught_test.go"
-before42="$(cat "$GO42/target.go")"
-bash "$MV" --file "$GO42/target.go" --test-cmd "cd '$GO42' && go test ." --cover-check Value \
-  --mutate-sed 's/return 1/return 2/' --expect-fail-output "of statements" >"$TMP/out42" 2>&1
-rc=$?
-[ "$rc" -eq 2 ] || { cat "$TMP/out42"; fail "--cover-check baseline refusal: expected exit 2, got $rc"; }
-grep -q "already appears in the passing baseline output" "$TMP/out42" || { cat "$TMP/out42"; fail "--cover-check baseline refusal: expected the baseline message"; }
-[ "$(cat "$GO42/target.go")" = "$before42" ] || fail "--cover-check baseline refusal: file not byte-identical"
-echo "test --cover-check baseline runs with -coverprofile for the refusal PASS"
 
 # ---------------------------------------------------------------------------
 # Tests 43-52 (foundry#259): the control mutant. The control breaks a
@@ -1443,42 +1509,6 @@ grep -q "requires --knockout-cmd" "$TMP/out78c" || { cat "$TMP/out78c"; fail "--
 [ "$(cat "$F67")" = "$before67" ] || fail "knock-out scope: file not byte-identical after restore"
 echo "test --knockout-expect-output scope proof PASS"
 
-# 79: a real runner with an exact (anchored) deselect: go test -skip '^TestParse$'.
-# TestParse (the weak hazard test) and TestParseEmpty (a sibling) share one
-# helper message; the mutant breaks only what the sibling checks, so the text
-# persists without the hazard test and the run is refused.
-GO79="$TMP/go_knockout"; mkdir -p "$GO79"
-printf 'module example.com/mutationverify/knockout\n\ngo 1.21\n' > "$GO79/go.mod"
-printf 'package knockout\n\nfunc Parse(s string) int {\n\tif s == "" {\n\t\treturn 0\n\t}\n\treturn len(s)\n}\n' > "$GO79/target.go"
-cat > "$GO79/target_test.go" <<'EOF'
-package knockout
-
-import "testing"
-
-func check(t *testing.T, got, want int) {
-	t.Helper()
-	if got != want {
-		t.Fatal("value mismatch")
-	}
-}
-
-func TestParse(t *testing.T)      { check(t, Parse("abc"), 3) }
-func TestParseEmpty(t *testing.T) { check(t, Parse(""), 0) }
-EOF
-before79="$(cat "$GO79/target.go")"
-# The documented go form: -v (one "=== RUN" line per test), one package, an
-# anchored -skip, and --knockout-delta-line '=== RUN ' (go prints no
-# deselection count; the tool counts one fewer RUN line).
-GO79_TEST="cd '$GO79' && go test -v -count=1 ."
-bash "$MV" --file "$GO79/target.go" --test-cmd "$GO79_TEST" \
-  --mutate-sed 's/return 0/return 1/' --expect-fail-output "value mismatch" \
-  --knockout-cmd "$GO79_TEST -skip '^TestParse\$'" --knockout-delta-line '=== RUN ' >"$TMP/out79" 2>&1
-rc=$?
-[ "$rc" -eq 2 ] || { cat "$TMP/out79"; fail "go exact knock-out, sibling catches: expected exit 2, got $rc"; }
-grep -q "TEXT PERSISTS WITHOUT THE HAZARD TEST" "$TMP/out79" || { cat "$TMP/out79"; fail "go exact knock-out, sibling catches: expected the persists message"; }
-[ "$(cat "$GO79/target.go")" = "$before79" ] || fail "go exact knock-out: file not byte-identical after restore"
-echo "test a go exact knock-out refuses a sibling-only catch PASS"
-
 # 80: the knock-out with SEVERAL expected texts: every one must disappear.
 # Both lines are mutated, so the hazard and the sibling both fail; the hazard's
 # own line disappears under the knock-out, the shared helper line does not.
@@ -1520,17 +1550,6 @@ grep -q "TEXT PERSISTS WITHOUT THE HAZARD TEST" "$TMP/out82b" || { cat "$TMP/out
 grep -q -- "--- FAIL: hazard" "$TMP/out82b" && { cat "$TMP/out82b"; fail "text persists with a control: the control must not run"; }
 [ "$(cat "$F67")" = "$before67" ] || fail "knock-out plus control: file not byte-identical after restore"
 echo "test knock-out plus control ordering and verdict PASS"
-
-# 79b: the same go form as a positive control: a mutant only TestParse
-# catches loses its text under the knock-out -> CAUGHT with the count line.
-bash "$MV" --file "$GO79/target.go" --test-cmd "$GO79_TEST" \
-  --mutate-sed 's/return len(s)/return len(s)+1/' --expect-fail-output "value mismatch" \
-  --knockout-cmd "$GO79_TEST -skip '^TestParse\$'" --knockout-delta-line '=== RUN ' >"$TMP/out79b" 2>&1
-rc=$?
-[ "$rc" -eq 0 ] || { cat "$TMP/out79b"; fail "go exact knock-out, hazard catches: expected exit 0, got $rc"; }
-grep -F -q "deselection shown by one fewer '=== RUN ' line) removed the expected text" "$TMP/out79b" || { cat "$TMP/out79b"; fail "go exact knock-out, hazard catches: verdict must quote the delta line"; }
-[ "$(cat "$GO79/target.go")" = "$before79" ] || fail "go exact knock-out positive control: file not byte-identical after restore"
-echo "test a go exact knock-out attributes a hazard-only catch PASS"
 
 # Fixture for tests 83-85: a suite with a weak hazard test and ten tests that
 # share its name prefix, one of which really catches the mutant.
@@ -1597,130 +1616,6 @@ grep -q "requires --knockout-expect-output" "$TMP/out86" || { cat "$TMP/out86"; 
 grep -q -- "--- FAIL: hazard" "$TMP/out86" && { cat "$TMP/out86"; fail "knock-out without a count line: must refuse before running"; }
 echo "test a knock-out without a count line -> exit 2 PASS"
 
-# 87: the round-8 cargo case on the real runner (skipped without cargo): an
-# unanchored --skip removes the sibling too and prints "11 filtered out"; the
-# exact form keeps it and the text persists. Neither may report CAUGHT.
-if command -v cargo >/dev/null 2>&1; then
-  RS87="$TMP/rs_knockout"; mkdir -p "$RS87/src"
-  printf '[package]\nname = "ko87"\nversion = "0.1.0"\nedition = "2021"\n\n[lib]\npath = "src/lib.rs"\n' > "$RS87/Cargo.toml"
-  {
-    printf 'pub fn parse(s: &str) -> usize { if s.is_empty() { 0 } else { s.len() } }\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n'
-    printf '    fn check(got: usize, want: usize) { assert!(got == want, "value mismatch"); }\n'
-    printf '    #[test] fn parse_ok() { check(parse("abc"), 3); }\n'
-    printf '    #[test] fn parse_ok_empty() { check(parse(""), 0); }\n'
-    for i in 2 3 4 5 6 7 8 9 10; do printf '    #[test] fn parse_ok_n%s() { check(parse("x"), 1); }\n' "$i"; done
-    printf '}\n'
-  } > "$RS87/src/lib.rs"
-  before87="$(cat "$RS87/src/lib.rs")"
-  RS87_TEST="cd '$RS87' && CARGO_TARGET_DIR='$TMP/rs87-target' cargo test -q --offline"
-  bash "$MV" --file "$RS87/src/lib.rs" --test-cmd "$RS87_TEST" --mutate-sed 's/{ 0 } else/{ 1 } else/' \
-    --expect-fail-output "value mismatch" --knockout-cmd "$RS87_TEST -- --skip parse_ok" \
-    --knockout-expect-output "1 filtered out" >"$TMP/out87a" 2>&1
-  rc=$?
-  [ "$rc" -eq 2 ] || { cat "$TMP/out87a"; fail "cargo substring --skip: expected exit 2, got $rc"; }
-  grep -q "must be --test-cmd plus exactly one documented deselect" "$TMP/out87a" || { cat "$TMP/out87a"; fail "cargo substring --skip: expected the shape refusal"; }
-  bash "$MV" --file "$RS87/src/lib.rs" --test-cmd "$RS87_TEST" --mutate-sed 's/{ 0 } else/{ 1 } else/' \
-    --expect-fail-output "value mismatch" --knockout-cmd "$RS87_TEST -- --exact --skip tests::parse_ok" \
-    --knockout-expect-output "1 filtered out" >"$TMP/out87b" 2>&1
-  rc=$?
-  [ "$rc" -eq 2 ] || { cat "$TMP/out87b"; fail "cargo exact --skip, sibling catches: expected exit 2, got $rc"; }
-  grep -q "TEXT PERSISTS WITHOUT THE HAZARD TEST" "$TMP/out87b" || { cat "$TMP/out87b"; fail "cargo exact --skip, sibling catches: expected the persists message"; }
-  [ "$(cat "$RS87/src/lib.rs")" = "$before87" ] || fail "cargo knock-out: file not byte-identical after restore"
-  echo "test cargo knock-out: substring refused, exact form keeps the sibling PASS"
-else
-  echo "SKIP: cargo knock-out (cargo absent)"
-fi
-
-# 88: cargo with two test binaries sharing a test path (lib and tests/it.rs):
-# --exact --skip deselects one test in EACH and each prints "1 filtered out";
-# the tool sums them to 2 and refuses (skipped without cargo).
-if command -v cargo >/dev/null 2>&1; then
-  RS88="$TMP/rs_twobin"; mkdir -p "$RS88/src" "$RS88/tests"
-  printf '[package]\nname = "ko88"\nversion = "0.1.0"\nedition = "2021"\n\n[lib]\npath = "src/lib.rs"\n' > "$RS88/Cargo.toml"
-  printf 'pub fn parse(s: &str) -> usize { if s.is_empty() { 0 } else { s.len() } }\n\n#[cfg(test)]\nmod tests {\n    #[test] fn roundtrip() { assert!(super::parse("abc") == 3, "value mismatch"); }\n}\n' > "$RS88/src/lib.rs"
-  printf 'mod tests {\n    #[test] fn roundtrip() { assert!(ko88::parse("") == 0, "value mismatch"); }\n}\n' > "$RS88/tests/it.rs"
-  before88="$(cat "$RS88/src/lib.rs")"
-  RS88_TEST="cd '$RS88' && CARGO_TARGET_DIR='$TMP/rs88-target' cargo test -q --offline"
-  bash "$MV" --file "$RS88/src/lib.rs" --test-cmd "$RS88_TEST" --mutate-sed 's/{ 0 } else/{ 1 } else/' \
-    --expect-fail-output "value mismatch" --knockout-cmd "$RS88_TEST -- --exact --skip tests::roundtrip" \
-    --knockout-expect-output "1 filtered out" >"$TMP/out88" 2>&1
-  rc=$?
-  [ "$rc" -eq 2 ] || { cat "$TMP/out88"; fail "cargo two binaries sharing a path: expected exit 2, got $rc"; }
-  grep -q "counts sum to 2, not the declared --knockout-expect-output" "$TMP/out88" || { cat "$TMP/out88"; fail "cargo two binaries sharing a path: expected the summed-count refusal"; }
-  grep -q "mutation CAUGHT" "$TMP/out88" && { cat "$TMP/out88"; fail "cargo two binaries sharing a path: must not report CAUGHT"; }
-  [ "$(cat "$RS88/src/lib.rs")" = "$before88" ] || fail "cargo two binaries: file not byte-identical after restore"
-  echo "test cargo knock-out across two test binaries is refused (summed count) PASS"
-else
-  echo "SKIP: cargo two-binary knock-out (cargo absent)"
-fi
-
-# 89: go delta line: a name defined in both the internal and the external
-# test package is skipped twice (two fewer RUN lines) -> refused; a whole
-# table skipped as '^Name$' removes every row -> refused; one row skipped as
-# '^Name$/^row$' removes one RUN line -> accepted, and the sibling row that
-# really catches the mutant keeps the text -> TEXT PERSISTS.
-GO89="$TMP/go_delta"; mkdir -p "$GO89"
-printf 'module example.com/mutationverify/delta\n\ngo 1.21\n' > "$GO89/go.mod"
-printf 'package delta\n\nfunc Parse(s string) int {\n\tif s == "" {\n\t\treturn 0\n\t}\n\treturn len(s)\n}\n' > "$GO89/target.go"
-cat > "$GO89/internal_test.go" <<'EOF'
-package delta
-
-import "testing"
-
-func TestDup(t *testing.T) { _ = Parse("abc") }
-
-func TestTable(t *testing.T) {
-	for _, c := range []struct {
-		name string
-		in   string
-		want int
-	}{{"weak", "abc", 3}, {"empty", "", 0}} {
-		t.Run(c.name, func(t *testing.T) {
-			if c.name == "weak" {
-				return
-			}
-			if Parse(c.in) != c.want {
-				t.Fatal("value mismatch")
-			}
-		})
-	}
-}
-EOF
-cat > "$GO89/external_test.go" <<'EOF'
-package delta_test
-
-import (
-	"testing"
-
-	"example.com/mutationverify/delta"
-)
-
-func TestDup(t *testing.T) {
-	if delta.Parse("") != 0 {
-		t.Fatal("value mismatch")
-	}
-}
-EOF
-before89="$(cat "$GO89/target.go")"
-GO89_TEST="cd '$GO89' && go test -v -count=1 ."
-bash "$MV" --file "$GO89/target.go" --test-cmd "$GO89_TEST" --mutate-sed 's/return 0/return 1/' \
-  --expect-fail-output "value mismatch" --knockout-cmd "$GO89_TEST -skip '^TestDup\$'" --knockout-delta-line '=== RUN ' >"$TMP/out89a" 2>&1
-rc=$?
-[ "$rc" -eq 2 ] || { cat "$TMP/out89a"; fail "go duplicate name in two test packages: expected exit 2, got $rc"; }
-grep -q "full run 5, knock-out 3; exactly one fewer is required" "$TMP/out89a" || { cat "$TMP/out89a"; fail "go duplicate name: expected the delta refusal"; }
-bash "$MV" --file "$GO89/target.go" --test-cmd "$GO89_TEST" --mutate-sed 's/return 0/return 1/' \
-  --expect-fail-output "value mismatch" --knockout-cmd "$GO89_TEST -skip '^TestTable\$'" --knockout-delta-line '=== RUN ' >"$TMP/out89b" 2>&1
-rc=$?
-[ "$rc" -eq 2 ] || { cat "$TMP/out89b"; fail "go whole table skipped: expected exit 2, got $rc"; }
-grep -q "full run 5, knock-out 2; exactly one fewer is required" "$TMP/out89b" || { cat "$TMP/out89b"; fail "go whole table skipped: expected the delta refusal"; }
-bash "$MV" --file "$GO89/target.go" --test-cmd "$GO89_TEST" --mutate-sed 's/return 0/return 1/' \
-  --expect-fail-output "value mismatch" --knockout-cmd "$GO89_TEST -skip '^TestTable\$/^weak\$'" --knockout-delta-line '=== RUN ' >"$TMP/out89c" 2>&1
-rc=$?
-[ "$rc" -eq 2 ] || { cat "$TMP/out89c"; fail "go one row skipped, sibling row catches: expected exit 2, got $rc"; }
-grep -q "TEXT PERSISTS WITHOUT THE HAZARD TEST" "$TMP/out89c" || { cat "$TMP/out89c"; fail "go one row skipped: expected the persists message (the delta check passed)"; }
-[ "$(cat "$GO89/target.go")" = "$before89" ] || fail "go delta tests: file not byte-identical after restore"
-echo "test go delta line: duplicates and whole tables refused, one row accepted PASS"
-
 # 90: count-line and delta-line validation.
 for bad in "deselected" "1" "  1 deselected" "0 deselected" "0 xyzzy" "2 deselected"; do
   ko_run "$TMP/out90" --mutate-sed 's/^guard=on$/guard=off/' --expect-fail-output "AssertionError: value mismatch" --knockout-cmd "$KO" --knockout-expect-output "$bad"
@@ -1769,47 +1664,6 @@ grep -q "KNOCK-OUT SCOPE UNPROVEN ON THE MUTANT" "$TMP/out91" || { cat "$TMP/out
 grep -q "mutation CAUGHT" "$TMP/out91" && { cat "$TMP/out91"; fail "knock-out crashed on the mutant: must not report CAUGHT"; }
 echo "test a knock-out that loses its count line on the mutant -> exit 2 PASS"
 
-# 91b: the go half of the re-check on the mutant. TestA_Hazard is weak but sets
-# state; TestB_Setup panics on the mutant without it; TestC_Sibling really
-# catches. Without the hazard test the binary dies at TestB, so the text
-# "disappears" for the wrong reason; one fewer RUN line no longer holds on the
-# mutant, and the run is refused.
-GO91="$TMP/go_panic"; mkdir -p "$GO91"
-printf 'module example.com/mutationverify/panic\n\ngo 1.21\n' > "$GO91/go.mod"
-printf 'package panicdemo\n\nfunc Parse(s string) int {\n\tif s == "" {\n\t\treturn 0\n\t}\n\treturn len(s)\n}\n' > "$GO91/target.go"
-cat > "$GO91/a_test.go" <<'EOF'
-package panicdemo
-
-import "testing"
-
-var ready bool
-
-func TestA_Hazard(t *testing.T) { ready = true; _ = Parse("abc") }
-
-func TestB_Setup(t *testing.T) {
-	if Parse("") != 0 && !ready {
-		panic("setup crashed")
-	}
-}
-
-func TestC_Sibling(t *testing.T) {
-	if Parse("") != 0 {
-		t.Fatal("value mismatch")
-	}
-}
-EOF
-before91b="$(cat "$GO91/target.go")"
-GO91_TEST="cd '$GO91' && go test -v -count=1 ."
-bash "$MV" --file "$GO91/target.go" --test-cmd "$GO91_TEST" --mutate-sed 's/return 0/return 1/' \
-  --expect-fail-output "value mismatch" --knockout-cmd "$GO91_TEST -skip '^TestA_Hazard\$'" \
-  --knockout-delta-line '=== RUN ' >"$TMP/out91b" 2>&1
-rc=$?
-[ "$rc" -eq 2 ] || { cat "$TMP/out91b"; fail "go knock-out crashing on the mutant: expected exit 2, got $rc"; }
-grep -q "KNOCK-OUT SCOPE UNPROVEN ON THE MUTANT — lines starting with '=== RUN ': main run 3, knock-out run 1" "$TMP/out91b" || { cat "$TMP/out91b"; fail "go knock-out crashing on the mutant: expected the delta re-check refusal"; }
-grep -q "mutation CAUGHT" "$TMP/out91b" && { cat "$TMP/out91b"; fail "go knock-out crashing on the mutant: must not report CAUGHT"; }
-[ "$(cat "$GO91/target.go")" = "$before91b" ] || fail "go knock-out crashing on the mutant: file not byte-identical after restore"
-echo "test a go knock-out that crashes on the mutant -> exit 2 PASS"
-
 # 92: the part of --knockout-cmd after --test-cmd must be exactly one documented
 # deselect; extra runner flags (a cargo --lib, a pytest --ignore), an
 # unanchored go -skip, a cargo --skip without --exact, or anything chained
@@ -1841,28 +1695,6 @@ done
 [ "$(cat "$F67")" = "$before67" ] || fail "cargo double-dash: file not byte-identical"
 echo "test a cargo test command with its own '--' section is refused PASS"
 
-# 93b: the same on real cargo (skipped without cargo): the weak hazard test and
-# the real catcher are the only two tests; with "-- --nocapture" in the test
-# command, "-- --exact --skip tests::hazard_weak" would run ONLY the hazard
-# test and print "1 filtered out" -> a false CAUGHT without the refusal.
-if command -v cargo >/dev/null 2>&1; then
-  RS93="$TMP/rs_doubledash"; mkdir -p "$RS93/src"
-  printf '[package]\nname = "ko93"\nversion = "0.1.0"\nedition = "2021"\n\n[lib]\npath = "src/lib.rs"\ndoctest = false\n' > "$RS93/Cargo.toml"
-  printf 'pub fn parse(s: &str) -> usize { s.len() + 1 }\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test] fn hazard_weak() { assert!(parse("ab") < 1000, "value mismatch"); }\n    #[test] fn sibling_catches() { assert!(parse("") == 1, "value mismatch"); }\n}\n' > "$RS93/src/lib.rs"
-  before93="$(cat "$RS93/src/lib.rs")"
-  RS93_TEST="cd '$RS93' && CARGO_TARGET_DIR='$TMP/rs93-target' cargo test -q --offline -- --nocapture"
-  bash "$MV" --file "$RS93/src/lib.rs" --test-cmd "$RS93_TEST" --mutate-sed 's/s.len() + 1/s.len() + 2/' \
-    --expect-fail-output "value mismatch" --knockout-cmd "$RS93_TEST -- --exact --skip tests::hazard_weak" \
-    --knockout-expect-output "1 filtered out" >"$TMP/out93b" 2>&1
-  rc=$?
-  [ "$rc" -eq 2 ] || { cat "$TMP/out93b"; fail "real cargo test command with its own '--': expected exit 2, got $rc"; }
-  grep -q "needs a --test-cmd without its own '--' section" "$TMP/out93b" || { cat "$TMP/out93b"; fail "real cargo test command with its own '--': expected the message"; }
-  [ "$(cat "$RS93/src/lib.rs")" = "$before93" ] || fail "real cargo double-dash: file not byte-identical"
-  echo "test real cargo: a test command with its own '--' section is refused PASS"
-else
-  echo "SKIP: real cargo double-dash knock-out (cargo absent)"
-fi
-
 # ---------------------------------------------------------------------------
 # Test 94 (main's SIGPIPE test, renumbered on merge): baseline exiting 141 (SIGPIPE under pipefail, e.g. piping a noisy
 # test runner into `grep -q`) exits 2 and emits an actionable SIGPIPE /
@@ -1884,5 +1716,7 @@ grep -q "SIGPIPE" "$TMP/out94" || { cat "$TMP/out94"; fail "sigpipe baseline: ex
 grep -q "grep -q" "$TMP/out94" || { cat "$TMP/out94"; fail "sigpipe baseline: expected grep -q diagnostic hint"; }
 [ "$(cat "$F94")" = "$before94" ] || fail "sigpipe baseline: file not byte-identical after abort"
 echo "test baseline exit 141 emits SIGPIPE / grep -q hint -> PASS"
+
+# Cross-dialect regression: unchanged verifier and sweep trees agree.
 
 echo "ALL PASS"

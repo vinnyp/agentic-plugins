@@ -257,7 +257,7 @@ const mutationCheckRule = "\nMutation checks (required for any mutant you report
 	"sums every count line and counts the RUN lines itself. For any other runner (node included), record the mutant " +
 	"as UNPROVEN until a verified exact form exists. A control mutant (`--control-sed` or `--control-cmd` with " +
 	"`--control-expect-fail-output`) is recommended, not required; a control refusal stands; record every control " +
-	"you tried, including refused ones. Every CAUGHT you report quotes the verdict's matched: text and its knock-out " +
+	"you tried, including refused ones. Copy mode (--copy-root) requires a control, which runs first as a canary; a copy-mode or parallel exit 1 or 3 is INCONCLUSIVE until a serial in-place run confirms it. Every CAUGHT you report quotes the verdict's matched: text and its knock-out " +
 	"and control clauses; a CAUGHT whose knock-out clause says it did not run, or whose deselect is not one of these " +
 	"exact forms, is UNPROVEN. If mutation-verify.sh is unavailable, the runner cannot deselect the single hazard " +
 	"test, or no hazard-specific text exists, record that mutant as UNPROVEN, never CAUGHT.\n"

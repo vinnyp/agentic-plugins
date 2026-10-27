@@ -1,16 +1,21 @@
 #!/usr/bin/env bash
-# mutation-verify.sh — copy-based mutation-verify pass for a single file.
+# shellcheck disable=SC2329
+# mutation-verify.sh — snapshot-backed mutation-verify pass for a single file.
 #
 # Why this exists (issue #115): a mutation-verify pass (revert the fix ->
 # confirm the test goes RED -> restore) has THREE times been done with
 # `git checkout -- <file>` on an UNCOMMITTED diff. That restores the last
 # COMMITTED baseline — discarding the in-flight fix AND yielding a false
-# "mutation-proof" pass. This helper is copy-based (mktemp snapshot, not
-# git) so it is immune to commit state and does NOT need a clean tree.
+# "mutation-proof" pass. This helper is snapshot-backed: mutates the real file in place and restores
+# it from a mktemp snapshot; never run two in-place mutants concurrently in
+# one tree — use --copy-root / mutation-sweep.sh for parallel mutants. It never
+# invokes git, so it is immune to commit state and does NOT need a clean tree.
 #
 # Usage:
 #   mutation-verify.sh --file <path> --test-cmd <shell-command> \
 #     (--mutate-sed <sed-expr> | --mutate-cmd <shell-command>)
+#
+# --copy-root <dir> runs each phase in an isolated copy.
 #
 # Exactly one of --mutate-sed / --mutate-cmd is required.
 #
@@ -62,9 +67,9 @@
 #     knock-out to 1) and/or --knockout-delta-line '=== RUN ' (exactly one
 #     fewer such line than the full run). The knock-out must
 #     start with --test-cmd and differ from it, pass green on the unmutated
-#     copy, print something different from the full baseline, not print any
+#     file, print something different from the full baseline, not print any
 #     expected text there, and pass its scope proof, also on the mutant
-#     (exit 2 otherwise). On the same mutated copy, and only when the main run would
+#     (exit 2 otherwise). On the same mutated file, and only when the main run would
 #     be CAUGHT, the expected text must disappear; if it persists, another test
 #     prints it (or the deselect missed) and the run exits 2. The verdict names
 #     the command, its exit code on the mutant and the count line. Without it,
@@ -73,26 +78,37 @@
 # Control mutant (issue foundry#259; requires --expect-fail-output; recommended):
 #   --control-sed <expr> | --control-cmd <cmd> (with --control-expect-fail-output,
 #     the control test's own failure line) applies a second mutation that
-#     breaks a DIFFERENT behavior, on a fresh copy of the original, with the
-#     same no-op, --control-anchor / --control-marker and --syntax-cmd checks.
+#     breaks a DIFFERENT behavior: the real file restored from the snapshot, then the
+#     control mutation, with the same no-op, --control-anchor / --control-marker
+#     and --syntax-cmd checks.
 #     It must edit only --file. It runs only when the main run would be CAUGHT
 #     (a RED run without the expected text stays exit 3). Exit 2 when the
 #     control's text is already in the main run, the control is inert, its RED
 #     run lacks its own text, or it prints any expected text. One passing
 #     control shows only that that one other failure does not print the text.
 #     Without a control, a CAUGHT verdict says the control did not run. The
-#     control counts as verified only when --syntax-cmd checked its copy.
+#     control counts as verified only when --syntax-cmd checked the control-mutated file.
 #
 # --file is resolved to an ABSOLUTE path before snapshotting, and both
 # --test-cmd and --mutate-cmd run inside a subshell, so a --test-cmd that
 # does `cd` elsewhere cannot cause a restore to write to the wrong path.
 #
 # ABSOLUTE PROHIBITION: this script must NEVER invoke git in any form.
+_src="${BASH_SOURCE[0]}"
+while [ -L "$_src" ]; do
+  _dir="$(cd -P "$(dirname "$_src")" && pwd)"
+  _src="$(readlink "$_src")"
+  case "$_src" in /*) ;; *) _src="$_dir/$_src" ;; esac
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
+[ -r "$SCRIPT_DIR/lib/portable-stat.sh" ] || { echo "mutation-verify.sh: broken install: $SCRIPT_DIR/lib/portable-stat.sh not readable" >&2; exit 2; }
+# shellcheck source=lib/portable-stat.sh
+. "$SCRIPT_DIR/lib/portable-stat.sh"
 set -uo pipefail
 
 usage() {
   cat >&2 <<'EOF'
-usage: mutation-verify.sh --file <path> --test-cmd <shell-command> \
+usage: mutation-verify.sh --file <path> --test-cmd <shell-command> [--copy-root <dir>] \
          [--expect-anchor <str>] [--expect-marker <str>] \
          [--syntax-cmd <shell-command>] [--cover-check <line-or-symbol>] \
          [--expect-fail-output <str>] \
@@ -101,6 +117,9 @@ usage: mutation-verify.sh --file <path> --test-cmd <shell-command> \
           --control-expect-fail-output <str> \
           [--control-anchor <str>] [--control-marker <str>]] \
          (--mutate-sed <sed-expr> | --mutate-cmd <shell-command>)
+
+--copy-root <dir> runs each phase in an isolated copy; requires --control-*;
+--cover-check unsupported. Caller cwd must be inside the root.
 
 Exactly one of --mutate-sed or --mutate-cmd is required.
 
@@ -125,12 +144,13 @@ multi-line text, or text the passing baseline prints, exits 2.
 --test-cmd plus exactly one documented deselect of only the hazard test (cargo
 -- --exact --skip <path::name>, go -skip '^Name$' or '^Name$/^row$', pytest
 --deselect <path::id>; anything else exits 2); it must pass on the unmutated
-copy and print something different from the full baseline; on the mutant the
+file and print something different from the full baseline; on the mutant the
 expected text must disappear and the scope proof must still hold, or the run
 exits 2.
 --control-sed / --control-cmd (requires --expect-fail-output and
 --control-expect-fail-output) applies a control mutation that breaks a
-different behavior, on a fresh copy, when the main run would be CAUGHT. It must
+different behavior: the real file restored from the snapshot, then the control
+mutation, when the main run would be CAUGHT. It must
 edit only --file. An inert control, a control RED without its own text, a
 control text already in the main run, or a control output holding an expected
 text exits 2; --control-anchor / --control-marker verify it the way
@@ -139,6 +159,9 @@ Missing anchors, missing markers, and failing syntax commands exit 2.
 EOF
 }
 
+copy_mode=0
+real_root=""
+VCS_DIR_NAME=".git"
 file=""
 test_cmd=""
 mutate_sed=""
@@ -176,6 +199,7 @@ require_value() {
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    --copy-root) require_value "--copy-root" "$#"; [ "$copy_mode" -eq 0 ] || { echo "mutation-verify.sh: --copy-root given twice" >&2; exit 2; }; real_root="$2"; copy_mode=1; shift 2 ;;
     --file) require_value "--file" "$#"; file="$2"; shift 2 ;;
     --test-cmd) require_value "--test-cmd" "$#"; test_cmd="$2"; shift 2 ;;
     --mutate-sed) require_value "--mutate-sed" "$#"; mutate_sed="$2"; have_sed=1; shift 2 ;;
@@ -268,6 +292,53 @@ while [ $# -gt 0 ]; do
     *) echo "mutation-verify.sh: unknown argument: $1" >&2; usage; exit 2 ;;
   esac
 done
+
+# Retained for copy-mode routing and caller-facing diagnostics in the next task.
+# shellcheck disable=SC2034
+file_given="$file"
+if [ "$copy_mode" -eq 1 ]; then
+  if [ "$have_control_sed" -eq 0 ] && [ "$have_control_cmd" -eq 0 ]; then
+    echo "mutation-verify.sh: --copy-root requires a control" >&2
+    exit 2
+  fi
+  if [ "$have_cover_check" -eq 1 ]; then
+    echo 'mutation-verify.sh: --cover-check is not supported with --copy-root' >&2
+    exit 2
+  fi
+  root_given="$real_root"
+  real_root="$(cd -P "$real_root" && pwd -P)" || { echo "mutation-verify.sh: cannot resolve --copy-root" >&2; exit 2; }
+  # Match literal roots with a boundary, never relative spellings such as '.'.
+  real_path_command() {
+    local value="$1" root tail root_alias
+    root_alias="$real_root"
+    case "$real_root" in /private/var/*) root_alias="${real_root#/private}" ;; /var/*) root_alias="/private$real_root" ;; esac
+    for root in "$root_given" "$real_root" "$root_alias"; do
+      case "$root" in /*) ;; *) continue ;; esac
+      while [[ "$value" == *"$root"* ]]; do
+        tail="${value#*"$root"}"
+        case "$tail" in
+          ''|[!A-Za-z0-9._-]*) return 0 ;;
+        esac
+        value="$tail"
+      done
+      value="$1"
+    done
+    return 1
+  }
+  for command_flag in --test-cmd --mutate-cmd --syntax-cmd --control-cmd --knockout-cmd; do
+    case "$command_flag" in
+      --test-cmd) command_value="$test_cmd" ;;
+      --mutate-cmd) command_value="$mutate_cmd" ;;
+      --syntax-cmd) command_value="$syntax_cmd" ;;
+      --control-cmd) command_value="$control_cmd" ;;
+      --knockout-cmd) command_value="$knockout_cmd" ;;
+    esac
+    if real_path_command "$command_value"; then
+      echo "mutation-verify.sh: command refers to the real tree ($command_flag): use paths relative to the copy or \$MUTATION_VERIFY_COPY_ROOT" >&2
+      exit 2
+    fi
+  done
+fi
 
 if [ -z "$file" ] || [ -z "$test_cmd" ]; then
   echo "mutation-verify.sh: --file and --test-cmd are required" >&2
@@ -393,11 +464,11 @@ else
     exit 2
   fi
 fi
-if [ ! -e "$file" ]; then
+if [ "$copy_mode" -eq 0 ] && [ ! -e "$file" ]; then
   echo "mutation-verify.sh: --file does not exist: $file" >&2
   exit 2
 fi
-if [ ! -f "$file" ]; then
+if [ "$copy_mode" -eq 0 ] && [ ! -f "$file" ]; then
   echo "mutation-verify.sh: --file is not a regular file: $file" >&2
   exit 2
 fi
@@ -412,6 +483,92 @@ case "$file" in
   *) file="$(pwd)/$file" ;;
 esac
 
+# Copy setup owns its cleanup independently of the in-place restore path.
+if [ "$copy_mode" -eq 1 ]; then
+  file="$(cd -P "$(dirname "$file")" && printf '%s/%s' "$(pwd -P)" "$(basename "$file")")" || { echo "mutation-verify.sh: cannot resolve --file" >&2; exit 2; }
+  [ -e "$file" ] || { echo "mutation-verify.sh: --file does not exist: $file" >&2; exit 2; }
+  [ -f "$file" ] || { echo "mutation-verify.sh: --file is not a regular file: $file" >&2; exit 2; }
+  case "$file" in
+    "$real_root"/*) file_rel="${file#"$real_root"/}" ;;
+    *) echo 'mutation-verify.sh: --file is not under --copy-root' >&2; exit 2 ;;
+  esac
+  if [ -L "$real_root/$file_rel" ]; then
+    echo 'mutation-verify.sh: --file is a symlink; copy mode needs a regular file' >&2
+    exit 2
+  fi
+  caller_cwd="$(pwd -P)"
+  cwd_rel=""
+  case "$caller_cwd" in "$real_root") ;; "$real_root"/*) cwd_rel="${caller_cwd#"$real_root"/}" ;; *) echo "mutation-verify.sh: caller cwd is outside --copy-root" >&2; exit 2 ;; esac
+  real_file="$file"
+  real_checksum="$(cksum < "$file")"
+  file_mtime() {
+    pstat_mtime "$real_file"
+  }
+  real_mtime="$(file_mtime)"
+  # Reap only our uid's dead-owner copies; never signal a former owner.
+  for stale in "${TMPDIR:-/tmp}"/mutation-verify-copy.[0-9]*.*; do
+    [ -d "$stale" ] && [ ! -L "$stale" ] || continue
+    stale_uid=$(pstat_uid "$stale") || continue
+    [ "$stale_uid" = "$(id -u)" ] || continue
+    stale_owner=${stale##*/}; stale_owner=${stale_owner#mutation-verify-copy.}; stale_owner=${stale_owner%%.*}
+    [[ "$stale_owner" =~ ^[0-9]+$ ]] || continue
+    kill -0 "$stale_owner" 2>/dev/null && continue
+    chmod -R u+w "$stale" 2>/dev/null || :
+    rm -rf "$stale" 2>/dev/null || :
+  done
+  copy_parent="$(mktemp -d "${TMPDIR:-/tmp}/mutation-verify-copy.$$.XXXXXX")" || {
+    echo 'mutation-verify.sh: copy failed: cannot create temporary directory' >&2; exit 2;
+  }
+  copy_parent="$(cd -P "$copy_parent" && pwd -P)" || { echo "mutation-verify.sh: cannot resolve copy directory" >&2; exit 2; }
+  cleanup_done=0
+  snap_dir=""
+  cleanup() {
+    [ "$cleanup_done" -eq 1 ] && return 0
+    cleanup_done=1
+    if [ "$(cksum < "$real_file")" != "$real_checksum" ] || [ "$(file_mtime)" != "$real_mtime" ]; then
+      echo 'mutation-verify.sh: hint: the real file changed during the run (edited externally?); the verdict applies to the snapshot' >&2
+    fi
+    if [ -n "$copy_parent" ]; then
+      chmod -R u+w "$copy_parent" 2>/dev/null
+      rm -rf "$copy_parent"
+    fi
+    [ -z "$snap_dir" ] || rm -rf "$snap_dir"
+    return 0
+  }
+  trap cleanup EXIT
+  trap 'cleanup; trap - INT; kill -s INT $$' INT
+  trap 'cleanup; trap - TERM; kill -s TERM $$' TERM
+  case "$copy_parent" in
+    "$real_root"|"$real_root"/*) echo 'mutation-verify.sh: TMPDIR is inside --copy-root' >&2; exit 2 ;;
+  esac
+  pristine="$copy_parent/pristine"
+  mkdir "$pristine" || { echo 'mutation-verify.sh: copy failed: mkdir pristine' >&2; exit 2; }
+  copy_entry() {
+    local source="$1" destination="$2"
+    cp -c -pR "$source" "$destination" 2>/dev/null && return 0
+    [ -n "$destination" ] && rm -rf "$destination"
+    cp -pR "$source" "$destination"
+  }
+  shopt -s nullglob
+  for entry in "$real_root"/* "$real_root"/.[!.]* "$real_root"/..?*; do
+    [ "$(basename "$entry")" = "$VCS_DIR_NAME" ] && continue
+    copy_entry "$entry" "$pristine/$(basename "$entry")" || {
+      echo "mutation-verify.sh: copy failed: $(basename "$entry")" >&2; exit 2;
+    }
+  done
+  shopt -u nullglob
+  tree_hash="$( (cd "$pristine" && find . \( -type f -o -type l \) -print | LC_ALL=C sort | while IFS= read -r f; do if [ -L "$f" ]; then printf 'L %s %s\n' "$f" "$(readlink "$f")"; else mode="$(pstat_mode "$f")"; printf 'F %s %s %s\n' "$f" "$mode" "$(cksum < "$f")"; fi; done) | cksum | cut -d' ' -f1)"
+  make_copy() { copy_entry "$pristine" "$1"; }
+  copy_cwd() {
+    if [ -n "$cwd_rel" ]; then printf '%s/%s\n' "$1" "$cwd_rel"; else printf '%s\n' "$1"; fi
+  }
+  run_in_copy() {
+    ( cd "$(copy_cwd "$1")" && MUTATION_VERIFY_COPY_ROOT="$1" MUTATION_VERIFY_FILE="$1/$file_rel" eval "$2" )
+  }
+  file="$file_given"
+fi
+
+if [ "$copy_mode" -eq 0 ]; then
 # Snapshot by COPY into a mktemp dir OUTSIDE the repo — immune to commit state.
 snap_dir="$(mktemp -d "${TMPDIR:-/tmp}/mutation-verify.XXXXXX")" || {
   echo "mutation-verify.sh: failed to create snapshot dir" >&2
@@ -485,6 +642,62 @@ cleanup() {
 trap cleanup EXIT
 trap 'cleanup; trap - INT; kill -s INT $$' INT
 trap 'cleanup; trap - TERM; kill -s TERM $$' TERM
+
+fi
+
+# Capture files remain outside phase trees in both modes.
+if [ "$copy_mode" -eq 1 ]; then
+  snap_dir="$(mktemp -d "$copy_parent/capture.XXXXXX")" || { echo "mutation-verify.sh: capture failure: cannot create capture directory tree=$tree_hash" >&2; exit 2; }
+  snap_file="$pristine/$file_rel"
+fi
+cur_file="$file"
+run_command() {
+  local command_text="$1"
+  shift
+  if [ "$copy_mode" -eq 1 ]; then
+    run_in_copy "$active_copy" "$command_text"
+  else
+    ( eval "$command_text" )
+  fi
+}
+select_copy() {
+  active_copy="$copy_parent/$1"
+  make_copy "$active_copy" || {
+    echo "mutation-verify.sh: copy failed: $1 tree=$tree_hash" >&2
+    exit 2
+  }
+  cur_file="$active_copy/$file_rel"
+}
+report() {
+  if [ "$copy_mode" -eq 1 ]; then
+    echo "$* tree=$tree_hash"
+  else
+    echo "$*"
+  fi
+}
+
+capture_command() {
+  local capture_cmd="$1" capture_path="$2" capture_rc=0
+  if ! ( : > "$capture_path" ); then
+    report "mutation-verify.sh: capture failure: cannot open output file" >&2
+    exit 2
+  fi
+  # Keep the capture open before running the command. A redirect failure is
+  # distinguishable from the command's own exit status.
+  if ! exec 9>"$capture_path"; then
+    report "mutation-verify.sh: capture failure: cannot open output file" >&2
+    exit 2
+  fi
+  run_command "$capture_cmd" >&9 2>&1 || capture_rc=$?
+  exec 9>&-
+  # ENOSPC can happen after opening. Verify capture storage independently.
+  if ! printf '.' > "$snap_dir/capture-probe"; then
+    report "mutation-verify.sh: capture failure: cannot write output file" >&2
+    exit 2
+  fi
+  rm -f "$snap_dir/capture-probe"
+  return "$capture_rc"
+}
 
 # sum_count_lines <rest> <file>: the sum of every <n> in "<n><rest>" in <file>,
 # where <n> is the maximal digit run right before <rest> and no digit follows
@@ -600,6 +813,7 @@ for _o in ${expect_fail_outputs[@]+"${expect_fail_outputs[@]}"}; do
   have_expect_fail=1
   break
 done
+[ "$copy_mode" -eq 0 ] || select_copy baseline
 baseline_rc=0
 baseline_out="$snap_dir/baseline-run.out"
 baseline_cmd="$test_cmd"
@@ -608,24 +822,24 @@ if [ "$have_expect_fail" -eq 1 ] && [ "$have_cover_check" -eq 1 ]; then
   # "coverage: N% of statements"). Run the baseline the same way so text
   # every coverprofile run prints is refused below.
   baseline_cmd="$(test_cmd_with_coverprofile "$test_cmd" "$snap_dir/baseline-cover.out")" || {
-    echo "mutation-verify.sh: --cover-check requires --test-cmd to contain a Go package test command (go test <package>)" >&2
+    report "mutation-verify.sh: --cover-check requires --test-cmd to contain a Go package test command (go test <package>)" >&2
     exit 2
   }
 fi
 if [ "$have_expect_fail" -eq 1 ]; then
   # Capture to a file, not through a pipe: a pipe would wait on any
   # background child that inherited the test's output.
-  ( eval "$baseline_cmd" ) >"$baseline_out" 2>&1 || baseline_rc=$?
+  capture_command "$baseline_cmd" "$baseline_out" || baseline_rc=$?
   cat "$baseline_out"
 else
-  ( eval "$test_cmd" ) || baseline_rc=$?
+  run_command "$test_cmd" || baseline_rc=$?
 fi
 if [ "$baseline_rc" -ne 0 ]; then
   baseline_note=""
   [ "$baseline_cmd" = "$test_cmd" ] || baseline_note=", run with -coverprofile added for --cover-check"
-  echo "mutation-verify.sh: test-cmd does not pass before mutation (baseline exited $baseline_rc$baseline_note) — the instrument is invalid" >&2
+  report "mutation-verify.sh: test-cmd does not pass before mutation (baseline exited $baseline_rc$baseline_note) — the instrument is invalid" >&2
   if [ "$baseline_rc" -eq 141 ]; then
-    echo "mutation-verify.sh: hint: exit 141 is SIGPIPE under pipefail — if --test-cmd pipes a test runner into grep -q or head, the early pipe close kills the runner; pass the test runner's own exit status instead" >&2
+    report "mutation-verify.sh: hint: exit 141 is SIGPIPE under pipefail — if --test-cmd pipes a test runner into grep -q or head, the early pipe close kills the runner; pass the test runner's own exit status instead" >&2
   fi
   exit 2
 fi
@@ -634,15 +848,15 @@ fi
 # one failure from any other.
 for _o in ${expect_fail_outputs[@]+"${expect_fail_outputs[@]}"}; do
   if grep -F -q -- "$_o" "$baseline_out"; then
-    echo "mutation-verify.sh: --expect-fail-output text already appears in the passing baseline output, so it cannot identify the failure: $_o" >&2
-    echo "mutation-verify.sh: use text only the failing hazard assertion prints" >&2
+    report "mutation-verify.sh: --expect-fail-output text already appears in the passing baseline output, so it cannot identify the failure: $_o" >&2
+    report "mutation-verify.sh: hint: use text only the failing hazard assertion prints" >&2
     exit 2
   fi
 done
 for _c in ${control_expect_outputs[@]+"${control_expect_outputs[@]}"}; do
   if grep -F -q -- "$_c" "$baseline_out"; then
-    echo "mutation-verify.sh: --control-expect-fail-output text already appears in the passing baseline output, so it cannot identify the control's failure: $_c" >&2
-    echo "mutation-verify.sh: use text only the control test's failing assertion prints" >&2
+    report "mutation-verify.sh: --control-expect-fail-output text already appears in the passing baseline output, so it cannot identify the control's failure: $_c" >&2
+    report "mutation-verify.sh: hint: use text only the control test's failing assertion prints" >&2
     exit 2
   fi
 done
@@ -653,39 +867,39 @@ done
 # something ELSE can slip past. Checking up front names the real defect.
 for _a in ${expect_anchors[@]+"${expect_anchors[@]}"}; do
   if ! grep -F -q -- "$_a" "$snap_file"; then
-    echo "mutation-verify.sh: ANCHOR NOT FOUND — expected anchor is absent from the unmutated $file: $_a" >&2
-    echo "mutation-verify.sh: the mutation would target zero sites; fix the anchor, do not trust a verdict from this run" >&2
+    report "mutation-verify.sh: ANCHOR NOT FOUND — expected anchor is absent from the unmutated $file: $_a" >&2
+    report "mutation-verify.sh: hint: the mutation would target zero sites; fix the anchor, do not trust a verdict from this run" >&2
     exit 2
   fi
 done
 
 for _a in ${control_anchors[@]+"${control_anchors[@]}"}; do
   if ! grep -F -q -- "$_a" "$snap_file"; then
-    echo "mutation-verify.sh: CONTROL ANCHOR NOT FOUND — expected control anchor is absent from the unmutated $file: $_a" >&2
+    report "mutation-verify.sh: CONTROL ANCHOR NOT FOUND — expected control anchor is absent from the unmutated $file: $_a" >&2
     exit 2
   fi
 done
 
 # Knock-out baseline: the hazard-deselected command must pass on the
-# unmutated copy (a bad flag or runner error would otherwise "confirm" by
+# unmutated file (a bad flag or runner error would otherwise "confirm" by
 # printing nothing), and must not already print any expected text.
 if [ "$have_knockout" -eq 1 ]; then
   knockout_base_rc=0
   knockout_base_out="$snap_dir/knockout-baseline.out"
-  ( eval "$knockout_cmd" ) >"$knockout_base_out" 2>&1 || knockout_base_rc=$?
+  capture_command "$knockout_cmd" "$knockout_base_out" || knockout_base_rc=$?
   cat "$knockout_base_out"
   if [ "$knockout_base_rc" -ne 0 ]; then
-    echo "mutation-verify.sh: KNOCK-OUT BROKEN — --knockout-cmd does not pass before mutation (exited $knockout_base_rc); a broken knock-out would confirm by printing nothing" >&2
+    report "mutation-verify.sh: KNOCK-OUT BROKEN — --knockout-cmd does not pass before mutation (exited $knockout_base_rc); a broken knock-out would confirm by printing nothing" >&2
     exit 2
   fi
   for _o in "${expect_fail_outputs[@]}"; do
     if grep -F -q -- "$_o" "$knockout_base_out"; then
-      echo "mutation-verify.sh: --expect-fail-output text already appears in the passing knock-out baseline output: $_o" >&2
+      report "mutation-verify.sh: --expect-fail-output text already appears in the passing knock-out baseline output: $_o" >&2
       exit 2
     fi
   done
   if [ ! -s "$knockout_base_out" ] || cmp -s "$knockout_base_out" "$baseline_out"; then
-    echo "mutation-verify.sh: KNOCK-OUT CHANGED NOTHING — the knock-out baseline printed nothing, or exactly what the full baseline printed; it cannot show which tests it deselected" >&2
+    report "mutation-verify.sh: KNOCK-OUT CHANGED NOTHING — the knock-out baseline printed nothing, or exactly what the full baseline printed; it cannot show which tests it deselected" >&2
     exit 2
   fi
   # Scope proof: a runner line showing exactly one test was deselected
@@ -698,12 +912,12 @@ if [ "$have_knockout" -eq 1 ]; then
     _want="${_k%%[!0-9]*}"; _rest="${_k#"$_want"}"; _want=$((10#$_want))
     _full_sum="$(sum_count_lines "$_rest" "$baseline_out")"
     if [ "$_full_sum" -ne 0 ]; then
-      echo "mutation-verify.sh: KNOCK-OUT SCOPE UNPROVEN — the full, unmutated run already prints the --knockout-expect-output line (its counts sum to $_full_sum), so it cannot show the knock-out's deselection: $_k" >&2
+      report "mutation-verify.sh: KNOCK-OUT SCOPE UNPROVEN — the full, unmutated run already prints the --knockout-expect-output line (its counts sum to $_full_sum), so it cannot show the knock-out's deselection: $_k" >&2
       exit 2
     fi
     _ko_sum="$(sum_count_lines "$_rest" "$knockout_base_out")"
     if [ "$_ko_sum" -ne "$_want" ]; then
-      echo "mutation-verify.sh: KNOCK-OUT SCOPE UNPROVEN — the knock-out baseline's '<n>$_rest' counts sum to $_ko_sum, not the declared --knockout-expect-output as a whole number: $_k" >&2
+      report "mutation-verify.sh: KNOCK-OUT SCOPE UNPROVEN — the knock-out baseline's '<n>$_rest' counts sum to $_ko_sum, not the declared --knockout-expect-output as a whole number: $_k" >&2
       exit 2
     fi
   done
@@ -713,38 +927,114 @@ if [ "$have_knockout" -eq 1 ]; then
     _full_lines="$(count_prefix_lines "$knockout_delta_line" "$baseline_out")"
     _ko_lines="$(count_prefix_lines "$knockout_delta_line" "$knockout_base_out")"
     if [ "$((_full_lines - _ko_lines))" -ne 1 ]; then
-      echo "mutation-verify.sh: KNOCK-OUT SCOPE UNPROVEN — lines starting with --knockout-delta-line '$knockout_delta_line': full run $_full_lines, knock-out $_ko_lines; exactly one fewer is required" >&2
+      report "mutation-verify.sh: KNOCK-OUT SCOPE UNPROVEN — lines starting with --knockout-delta-line '$knockout_delta_line': full run $_full_lines, knock-out $_ko_lines; exactly one fewer is required" >&2
       exit 2
     fi
   fi
 fi
 
+# Apply and validate a fresh control; copy mode saves its output for later.
+run_control() {
+  restored=0
+  [ "$copy_mode" -eq 0 ] || select_copy control
+  control_mut_rc=0
+  if [ "$have_control_sed" -eq 1 ]; then
+    sed "$control_sed" "$snap_file" > "$cur_file" || control_mut_rc=$?
+  else
+    run_command "$control_cmd" || control_mut_rc=$?
+  fi
+  mut_sec=$(date +%s)
+  if [ "$control_mut_rc" -ne 0 ]; then
+    report "mutation-verify.sh: control mutation command failed" >&2
+    exit 2
+  fi
+  if cmp -s "$snap_file" "$cur_file"; then
+    report "mutation-verify.sh: control mutation did not change $file (no-op control); refusing to emit a verdict" >&2
+    exit 2
+  fi
+  for _m in ${control_markers[@]+"${control_markers[@]}"}; do
+    if ! grep -F -q -- "$_m" "$cur_file"; then
+      report "mutation-verify.sh: CONTROL MARKER ABSENT — the control edit did not land as intended: $_m" >&2
+      exit 2
+    fi
+  done
+  if [ "$have_syntax" -eq 1 ]; then
+    control_syntax_rc=0
+    run_command "$syntax_cmd" || control_syntax_rc=$?
+    if [ "$control_syntax_rc" -ne 0 ]; then
+      report "mutation-verify.sh: CONTROL FILE INVALID — --syntax-cmd exited $control_syntax_rc after the control mutation; refusing to emit a verdict" >&2
+      exit 2
+    fi
+  fi
+  control_rc=0
+  control_out="$snap_dir/control-run.out"
+  capture_command "$baseline_cmd" "$control_out" || control_rc=$?
+  cat "$control_out"
+  if [ "$copy_mode" -eq 0 ]; then
+    restore_file
+    if ! verify_restore; then
+      report "mutation-verify.sh: RESTORE FAILED — $file is not byte-identical to its snapshot after the control run" >&2
+      exit 2
+    fi
+  fi
+  if [ "$control_rc" -eq 0 ]; then
+    if [ "$copy_mode" -eq 1 ]; then
+      report "mutation-verify.sh: CONTROL STAYED GREEN IN THE COPY — the test did not read the copy, or the control is inert; run the control in place to tell which" >&2
+      exit 2 # copy-mode canary stayed green
+    else
+      report "mutation-verify.sh: CONTROL INERT — the control mutant left test-cmd green, so it proves nothing about the expected text" >&2
+      exit 2
+    fi
+  else
+  for _c in "${control_expect_outputs[@]}"; do
+    if ! grep -F -q -- "$_c" "$control_out"; then
+      report "mutation-verify.sh: CONTROL RED FOR AN UNRELATED REASON — the control run lacks its own --control-expect-fail-output text (a build break or crash is not a control): $_c" >&2
+      report "mutation-verify.sh: hint: do not re-point --control-expect-fail-output at this run's output; a crash is not a control" >&2
+      exit 2
+    fi
+  done
+  fi
+}
+
+if [ "$copy_mode" -eq 1 ]; then
+  if [ -n "$copy_parent" ]; then
+    chmod -R u+w "$copy_parent/baseline" 2>/dev/null
+    rm -rf "$copy_parent/baseline"
+  fi
+  run_control
+  if [ -n "$copy_parent" ]; then
+    chmod -R u+w "$copy_parent/control" 2>/dev/null
+    rm -rf "$copy_parent/control"
+  fi
+fi
+
 # Mutate.
+[ "$copy_mode" -eq 0 ] || select_copy main
 if [ "$have_sed" -eq 1 ]; then
   # Read FROM the snapshot, write TO the file — sidesteps GNU-vs-BSD `sed -i`
   # portability entirely.
   mutation_rc=0
-  sed "$mutate_sed" "$snap_file" > "$file" || mutation_rc=$?
+  sed "$mutate_sed" "$snap_file" > "$cur_file" || mutation_rc=$?
   mut_sec=$(date +%s)
   if [ "$mutation_rc" -ne 0 ]; then
-    echo "mutation-verify.sh: sed mutation command failed" >&2
+    report "mutation-verify.sh: sed mutation command failed" >&2
     exit 2
   fi
 else
   # Subshell: a --mutate-cmd that `cd`s must not change this script's cwd.
   mutation_rc=0
-  ( eval "$mutate_cmd" ) || mutation_rc=$?
+  run_command "$mutate_cmd" || mutation_rc=$?
   mut_sec=$(date +%s)
   if [ "$mutation_rc" -ne 0 ]; then
-    echo "mutation-verify.sh: --mutate-cmd exited non-zero" >&2
+    report "mutation-verify.sh: --mutate-cmd exited non-zero" >&2
     exit 2
   fi
 fi
 
 # Assert the mutation actually changed the file — a no-op mutation (sed
 # matched nothing) must never be allowed to produce a bogus verdict.
-if cmp -s "$snap_file" "$file"; then
-  echo "mutation-verify.sh: mutation did not change $file (no-op mutation — the expression matched nothing); aborting before running the test" >&2
+if cmp -s "$snap_file" "$cur_file"; then
+  report "mutation-verify.sh: mutation did not change $file (no-op mutation — the expression matched nothing); aborting before running the test" >&2
   exit 2
 fi
 
@@ -753,19 +1043,19 @@ fi
 # for an unrelated reason, and would be reported CAUGHT — a false pass inside the
 # false-green detector.
 for _m in ${expect_markers[@]+"${expect_markers[@]}"}; do
-  if ! grep -F -q -- "$_m" "$file"; then
-    echo "mutation-verify.sh: MARKER ABSENT — the file changed but the expected marker is not present after mutation: $_m" >&2
-    echo "mutation-verify.sh: the edit did not land as intended; refusing to emit a caught/survived verdict" >&2
+  if ! grep -F -q -- "$_m" "$cur_file"; then
+    report "mutation-verify.sh: MARKER ABSENT — the file changed but the expected marker is not present after mutation: $_m" >&2
+    report "mutation-verify.sh: hint: the edit did not land as intended; refusing to emit a caught/survived verdict" >&2
     exit 2
   fi
 done
 
 if [ "$have_syntax" -eq 1 ]; then
   syntax_rc=0
-  ( eval "$syntax_cmd" ) || syntax_rc=$?
+  run_command "$syntax_cmd" || syntax_rc=$?
   if [ "$syntax_rc" -ne 0 ]; then
-    echo "mutation-verify.sh: MUTATED FILE INVALID — --syntax-cmd exited $syntax_rc after mutation" >&2
-    echo "mutation-verify.sh: a test failure here would be the wrong RED; refusing to emit a verdict" >&2
+    report "mutation-verify.sh: MUTATED FILE INVALID — --syntax-cmd exited $syntax_rc after mutation" >&2
+    report "mutation-verify.sh: hint: a test failure here would be the wrong RED; refusing to emit a verdict" >&2
     exit 2
   fi
 fi
@@ -779,19 +1069,19 @@ mutated_cmd="$test_cmd"
 if [ "$have_cover_check" -eq 1 ]; then
   cover_profile="$snap_dir/cover.out"
   mutated_cmd="$(test_cmd_with_coverprofile "$test_cmd" "$cover_profile")" || {
-    echo "mutation-verify.sh: --cover-check requires --test-cmd to contain a Go package test command (go test <package>)" >&2
+    report "mutation-verify.sh: --cover-check requires --test-cmd to contain a Go package test command (go test <package>)" >&2
     exit 2
   }
 fi
 mutated_out="$snap_dir/mutated-run.out"
 if [ "$have_expect_fail" -eq 1 ]; then
-  ( eval "$mutated_cmd" ) >"$mutated_out" 2>&1 || test_rc=$?
+  capture_command "$mutated_cmd" "$mutated_out" || test_rc=$?
   cat "$mutated_out"
 else
-  ( eval "$mutated_cmd" ) || test_rc=$?
+  run_command "$mutated_cmd" || test_rc=$?
 fi
 
-# Knock-out: on the SAME mutated copy, run the test command with only the
+# Knock-out: on the SAME mutated file, run the test command with only the
 # hazard test deselected — only when the main run would be CAUGHT (RED with
 # every expected text). The verdict uses it after the exit-3 check below.
 knockout_ran=0
@@ -803,7 +1093,7 @@ if [ "$have_knockout" -eq 1 ] && [ "$test_rc" -ne 0 ]; then
   if [ "$_all_present" -eq 1 ]; then
     knockout_out="$snap_dir/knockout-run.out"
     knockout_rc=0
-    ( eval "$knockout_cmd" ) >"$knockout_out" 2>&1 || knockout_rc=$?
+    capture_command "$knockout_cmd" "$knockout_out" || knockout_rc=$?
     cat "$knockout_out"
     knockout_ran=1
   fi
@@ -811,10 +1101,12 @@ fi
 
 # Restore now (also covered by the EXIT trap, but do it here so we can
 # verify byte-identity before deciding the verdict).
-restore_file
-if ! verify_restore; then
-  echo "mutation-verify.sh: RESTORE FAILED — $file is not byte-identical to its snapshot after restore" >&2
-  exit 2
+if [ "$copy_mode" -eq 0 ]; then
+  restore_file
+  if ! verify_restore; then
+    report "mutation-verify.sh: RESTORE FAILED — $file is not byte-identical to its snapshot after restore" >&2
+    exit 2
+  fi
 fi
 
 verdict_prefix=""
@@ -833,7 +1125,7 @@ elif cover_check_executed "$cover_profile" "$file" "$cover_check"; then
 elif [ "$test_rc" -ne 0 ]; then
   reachability_suffix="; coverage unavailable — build/test failed before --cover-check $cover_check could prove reachability"
 else
-  echo "mutation-verify.sh: MUTANT-UNREACHABLE (--cover-check $cover_check had zero coverage in $file) — unreachable mutants prove neither killed nor survived" >&2
+  report "mutation-verify.sh: MUTANT-UNREACHABLE (--cover-check $cover_check had zero coverage in $file) — unreachable mutants prove neither killed nor survived" >&2
   exit 1
 fi
 
@@ -844,9 +1136,12 @@ if [ "$test_rc" -ne 0 ] && [ "$have_expect_fail" -eq 1 ]; then
     if ! grep -F -q -- "$_o" "$mutated_out"; then
       skipped_control=""
       [ "$have_control" -eq 1 ] && skipped_control="; control not run"
+      [ "$copy_mode" -eq 0 ] || skipped_control="; control ran first (canary)"
       [ "$have_knockout" -eq 1 ] && skipped_control="$skipped_control; knock-out not run"
-      echo "mutation-verify.sh: ${verdict_prefix}RED FOR AN UNRELATED REASON (test-cmd exited $test_rc under mutation$reachability_suffix$skipped_control) — expected failure text absent: $_o" >&2
-      echo "mutation-verify.sh: the hazard assertion is not shown to have caught this mutant; treat it as a surviving mutant (a test gap). Change the expected text only if this output shows the hazard assertion itself failing at its own location (see docs/commands.md)" >&2
+      inconclusive=""
+      [ "$copy_mode" -eq 0 ] || inconclusive="; INCONCLUSIVE in copy mode — confirm with a serial in-place run"
+      report "mutation-verify.sh: ${verdict_prefix}RED FOR AN UNRELATED REASON (test-cmd exited $test_rc under mutation$reachability_suffix$skipped_control) — expected failure text absent: $_o$inconclusive" >&2
+      report "mutation-verify.sh: hint: the hazard assertion is not shown to have caught this mutant; treat it as a surviving mutant (a test gap). Change the expected text only if this output shows the hazard assertion itself failing at its own location (see docs/commands.md)" >&2
       exit 3
     fi
   done
@@ -861,8 +1156,8 @@ fi
 if [ "$knockout_ran" -eq 1 ]; then
   for _o in "${expect_fail_outputs[@]}"; do
     if grep -F -q -- "$_o" "$knockout_out"; then
-      echo "mutation-verify.sh: TEXT PERSISTS WITHOUT THE HAZARD TEST — the knock-out run on the same mutant also printed: $_o" >&2
-      echo "mutation-verify.sh: another test prints it, or the knock-out did not deselect the hazard test (unknown ids are often silently ignored); record the main mutant as UNPROVEN" >&2
+      report "mutation-verify.sh: TEXT PERSISTS WITHOUT THE HAZARD TEST — the knock-out run on the same mutant also printed: $_o" >&2
+      report "mutation-verify.sh: hint: another test prints it, or the knock-out did not deselect the hazard test (unknown ids are often silently ignored); record the main mutant as UNPROVEN" >&2
       exit 2
     fi
   done
@@ -872,7 +1167,7 @@ if [ "$knockout_ran" -eq 1 ]; then
     _want="${_k%%[!0-9]*}"; _rest="${_k#"$_want"}"; _want=$((10#$_want))
     _mut_sum="$(sum_count_lines "$_rest" "$knockout_out")"
     if [ "$_mut_sum" -ne "$_want" ]; then
-      echo "mutation-verify.sh: KNOCK-OUT SCOPE UNPROVEN ON THE MUTANT — the knock-out run on the mutant shows '<n>$_rest' summing to $_mut_sum, not $_k (truncated or crashed?)" >&2
+      report "mutation-verify.sh: KNOCK-OUT SCOPE UNPROVEN ON THE MUTANT — the knock-out run on the mutant shows '<n>$_rest' summing to $_mut_sum, not $_k (truncated or crashed?)" >&2
       exit 2
     fi
   done
@@ -880,7 +1175,7 @@ if [ "$knockout_ran" -eq 1 ]; then
     _main_lines="$(count_prefix_lines "$knockout_delta_line" "$mutated_out")"
     _komut_lines="$(count_prefix_lines "$knockout_delta_line" "$knockout_out")"
     if [ "$((_main_lines - _komut_lines))" -ne 1 ]; then
-      echo "mutation-verify.sh: KNOCK-OUT SCOPE UNPROVEN ON THE MUTANT — lines starting with '$knockout_delta_line': main run $_main_lines, knock-out run $_komut_lines on the mutant; exactly one fewer is required (truncated or crashed?)" >&2
+      report "mutation-verify.sh: KNOCK-OUT SCOPE UNPROVEN ON THE MUTANT — lines starting with '$knockout_delta_line': main run $_main_lines, knock-out run $_komut_lines on the mutant; exactly one fewer is required (truncated or crashed?)" >&2
       exit 2
     fi
   fi
@@ -895,8 +1190,9 @@ if [ "$knockout_ran" -eq 1 ]; then
   knockout_suffix="; knock-out \`$knockout_cmd\` (exited $knockout_rc on the mutant$knockout_scope) removed the expected text, so it is attributed to the test(s) that command deselects"
 fi
 
-# Control mutant: only when the main run would be CAUGHT. Same fresh-copy
-# mutation and applied-verification as the main mutant; same file capture.
+# Control mutant: only when the main run would be CAUGHT. The real file is restored
+# from the snapshot, then the control mutation is applied; same applied-verification
+# as the main mutant and same file capture.
 # It must go RED for its own seeded reason (--control-expect-fail-output
 # present) and must not print any main expected text.
 control_suffix=""
@@ -906,64 +1202,17 @@ fi
 if [ "$have_control" -eq 1 ] && [ "$test_rc" -ne 0 ]; then
   for _c in "${control_expect_outputs[@]}"; do
     if grep -F -q -- "$_c" "$mutated_out"; then
-      echo "mutation-verify.sh: CONTROL TEXT IN THE MAIN RUN — the main mutated run already printed the control's failure text, so the two failures cannot be told apart: $_c" >&2
+      report "mutation-verify.sh: CONTROL TEXT IN THE MAIN RUN — the main mutated run already printed the control's failure text, so the two failures cannot be told apart: $_c" >&2
       exit 2
     fi
   done
-  restored=0
-  control_mut_rc=0
-  if [ "$have_control_sed" -eq 1 ]; then
-    sed "$control_sed" "$snap_file" > "$file" || control_mut_rc=$?
-  else
-    ( eval "$control_cmd" ) || control_mut_rc=$?
+  if [ "$copy_mode" -eq 0 ]; then
+    run_control
   fi
-  mut_sec=$(date +%s)
-  if [ "$control_mut_rc" -ne 0 ]; then
-    echo "mutation-verify.sh: control mutation command failed" >&2
-    exit 2
-  fi
-  if cmp -s "$snap_file" "$file"; then
-    echo "mutation-verify.sh: control mutation did not change $file (no-op control); refusing to emit a verdict" >&2
-    exit 2
-  fi
-  for _m in ${control_markers[@]+"${control_markers[@]}"}; do
-    if ! grep -F -q -- "$_m" "$file"; then
-      echo "mutation-verify.sh: CONTROL MARKER ABSENT — the control edit did not land as intended: $_m" >&2
-      exit 2
-    fi
-  done
-  if [ "$have_syntax" -eq 1 ]; then
-    control_syntax_rc=0
-    ( eval "$syntax_cmd" ) || control_syntax_rc=$?
-    if [ "$control_syntax_rc" -ne 0 ]; then
-      echo "mutation-verify.sh: CONTROL FILE INVALID — --syntax-cmd exited $control_syntax_rc after the control mutation; refusing to emit a verdict" >&2
-      exit 2
-    fi
-  fi
-  control_rc=0
-  control_out="$snap_dir/control-run.out"
-  ( eval "$baseline_cmd" ) >"$control_out" 2>&1 || control_rc=$?
-  cat "$control_out"
-  restore_file
-  if ! verify_restore; then
-    echo "mutation-verify.sh: RESTORE FAILED — $file is not byte-identical to its snapshot after the control run" >&2
-    exit 2
-  fi
-  if [ "$control_rc" -eq 0 ]; then
-    echo "mutation-verify.sh: CONTROL INERT — the control mutant left test-cmd green, so it proves nothing about the expected text" >&2
-    exit 2
-  fi
-  for _c in "${control_expect_outputs[@]}"; do
-    if ! grep -F -q -- "$_c" "$control_out"; then
-      echo "mutation-verify.sh: CONTROL RED FOR AN UNRELATED REASON — the control run lacks its own --control-expect-fail-output text (a build break or crash is not a control): $_c" >&2
-      echo "mutation-verify.sh: do not re-point --control-expect-fail-output at this run's output; a crash is not a control" >&2
-      exit 2
-    fi
-  done
   for _o in "${expect_fail_outputs[@]}"; do
     if grep -F -q -- "$_o" "$control_out"; then
-      echo "mutation-verify.sh: EXPECTED TEXT NOT SPECIFIC TO THE HAZARD — the control mutant's RED run also printed: $_o" >&2
-      echo "mutation-verify.sh: this refusal stands; record the main mutant as UNPROVEN unless this output shows the hazard test itself failing" >&2
+      report "mutation-verify.sh: EXPECTED TEXT NOT SPECIFIC TO THE HAZARD — the control mutant's RED run also printed: $_o" >&2
+      report "mutation-verify.sh: hint: this refusal stands; record the main mutant as UNPROVEN unless this output shows the hazard test itself failing" >&2
       exit 2
     fi
   done
@@ -974,18 +1223,25 @@ if [ "$have_control" -eq 1 ] && [ "$test_rc" -ne 0 ]; then
   control_suffix="; ${control_flag}control went RED for its own reason without the expected text"
 fi
 
+canary_suffix=""
+inconclusive=""
+if [ "$copy_mode" -eq 1 ]; then
+  canary_suffix="; control ran first (canary)"
+  inconclusive="; INCONCLUSIVE in copy mode — confirm with a serial in-place run"
+fi
+
 if [ "$test_rc" -ne 0 ]; then
   if [ "$have_expect_fail" -eq 1 ]; then
     matched_list=""
     for _o in "${expect_fail_outputs[@]}"; do
       matched_list="$matched_list${matched_list:+, }'$_o'"
     done
-    echo "mutation-verify.sh: ${verdict_prefix}mutation CAUGHT (test-cmd exited $test_rc under mutation$reachability_suffix; expected failure text present in output, matched: $matched_list$knockout_suffix$control_suffix) — the RED run printed every --expect-fail-output text" >&2
+    report "mutation-verify.sh: ${verdict_prefix}mutation CAUGHT (test-cmd exited $test_rc under mutation$reachability_suffix; expected failure text present in output, matched: $matched_list$knockout_suffix$control_suffix) — the RED run printed every --expect-fail-output text$canary_suffix" >&2
   else
-    echo "mutation-verify.sh: ${verdict_prefix}mutation CAUGHT (test-cmd exited $test_rc under mutation$reachability_suffix; failure cause was NOT checked, pass --expect-fail-output) — test went RED" >&2
+    report "mutation-verify.sh: ${verdict_prefix}mutation CAUGHT (test-cmd exited $test_rc under mutation$reachability_suffix; failure cause was NOT checked, pass --expect-fail-output) — test went RED" >&2
   fi
   exit 0
 else
-  echo "mutation-verify.sh: ${verdict_prefix}mutation NOT caught (test-cmd exited 0 under mutation$reachability_suffix) — false-green test" >&2
+  report "mutation-verify.sh: ${verdict_prefix}mutation NOT caught (test-cmd exited 0 under mutation$reachability_suffix) — false-green test$canary_suffix$inconclusive" >&2
   exit 1
 fi

@@ -604,6 +604,7 @@ func TestBriefBuildCarriesMutationCheckRule(t *testing.T) {
 		}
 		for _, want := range []string{"Mutation checks (required for any mutant you report)", "mutation-verify.sh",
 			"with BOTH", "--expect-fail-output", "AND `--knockout-cmd", "only the hazard test deselected",
+			"requires a control, which runs first as a canary",
 			"A control mutant", "is recommended, not required", "a control refusal stands", "isolated copy or worktree",
 			"plus its required scope proof", "supported only for cargo, go and pytest",
 			"+ -- --exact --skip <path::name> with --knockout-expect-output '1 filtered out'",

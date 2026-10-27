@@ -107,7 +107,11 @@ local-only and put the gate summary in the PR body. Never claim the log was ship
 `committed` result from `review-log-status`. The briefs are reproducible from the persona and target,
 but the outputs and dispositions need an explicit record.
 
-## Multi-round logs (requirements mode)
+## Multi-round logs (requirements and design modes)
+
+Multi-round logs also cover design → build: each `## Round N` names its own mode, and the header `**Mode:**` records round 1's mode.
+
+The note lives as the `## Round 1 (design)` section of the change's single review log; later build rounds append `## Round N` and never re-run `log-new`. Create the log with `log-new --design-round "Round 1 (design)"`; a measurement-shaped change logged with `--design-round none` is a recorded deviation and must state its reason in the log.
 
 A multi-round caller creates the log once (round 1) and appends one `## Round N` section per
 round. Round 1's findings and dispositions are written under `## Round 1` (the header's

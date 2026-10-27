@@ -88,6 +88,7 @@ func cmdLogNew(args []string) int {
 	fs := flag.NewFlagSet("log-new", flag.ContinueOnError)
 	topic := fs.String("topic", "", "log topic slug")
 	mode := fs.String("mode", "", "design|build|requirements (informational)")
+	designRound := fs.String("design-round", "", "design round label (optional)")
 	toStdout := fs.Bool("stdout", false, "emit to stdout instead of writing in place")
 	force := fs.Bool("force", false, "overwrite an existing log")
 	project := fs.String("project", "", "vault project slug (only used when the target repo is an Obsidian vault; adds a project: frontmatter key)")
@@ -95,6 +96,16 @@ func cmdLogNew(args []string) int {
 	fs.Var(&personas, "persona", "reviewer persona (repeatable)")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+	designRoundSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "design-round" {
+			designRoundSet = true
+		}
+	})
+	if designRoundSet && (strings.TrimSpace(*designRound) == "" || strings.ContainsAny(*designRound, "\n\r")) {
+		fmt.Fprintln(os.Stderr, "log-new: --design-round must be non-empty, non-whitespace, and single-line")
+		return 1
 	}
 	if *topic == "" {
 		fmt.Fprintln(os.Stderr, "log-new: --topic required")
@@ -111,7 +122,7 @@ func cmdLogNew(args []string) int {
 		return 1
 	}
 	date := time.Now().Format("2006-01-02")
-	rendered := renderLogSkeleton(date, *topic, *mode, personas)
+	rendered := renderLogSkeleton(date, *topic, *mode, *designRound, personas)
 	skeleton := rendered.body
 
 	cwd, err := os.Getwd()
@@ -167,7 +178,7 @@ type logSkeleton struct {
 	personaUnresolved bool
 }
 
-func renderLogSkeleton(date, topic, mode string, personas []string) logSkeleton {
+func renderLogSkeleton(date, topic, mode, designRound string, personas []string) logSkeleton {
 	_, version, err := resolvePersonaDir()
 	personaUnresolved := false
 	if err != nil {
@@ -179,6 +190,9 @@ func renderLogSkeleton(date, topic, mode string, personas []string) logSkeleton 
 	fmt.Fprintf(&b, "# Peer-review gate — %s (%s)\n\n", topic, date)
 	fmt.Fprintf(&b, "**Mode:** %s. **Reviewers:** %s. **persona-version:** %s.\n\n",
 		modeOr(mode), strings.Join(personas, ", "), version)
+	if designRound != "" {
+		fmt.Fprintf(&b, "**Design round:** %s.\n\n", designRound)
+	}
 	b.WriteString("**Per-lens runtime:**\n\n")
 	for _, p := range personas {
 		fmt.Fprintf(&b, "- %s: runtime=__ (agy | codex | claude; if substituted: from <runtime>, rc <N>, reason)\n", p)
