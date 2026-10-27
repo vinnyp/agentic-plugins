@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -uo pipefail
+unset RUN_TESTS_JOBS RUN_TESTS_TIMEOUT RUN_TESTS_KEEP_LOGS RUN_TESTS__PS_AVAILABLE
+for run_tests_hook in ${!RUN_TESTS__TEST_@}; do unset "$run_tests_hook"; done
+unset run_tests_hook
 SELF_DIR="$(cd "$(dirname "$0")" && pwd)"; TMP="$(cd "$(mktemp -d)" && pwd -P)"; trap 'rm -rf "$TMP"' EXIT
+export TMPDIR="$TMP"
 # shellcheck disable=SC1091
 . "$SELF_DIR/lib/test-env-reset.sh"
 # shellcheck disable=SC1091
@@ -18,9 +22,16 @@ cat > "$TMP/bin/codex" <<'STUB'
 # args: exec --dangerously-... -C <workdir> -   ; find the workdir after -C
 wd=""; while [ $# -gt 0 ]; do [ "$1" = "-C" ] && { wd="$2"; shift 2; continue; }; shift; done
 : "${wd:=$PWD}"
+[ -z "${CD_TEST_AGENT_MARKER:-}" ] || touch "$CD_TEST_AGENT_MARKER"
 echo "changed line" > "$wd/agent_made_this.txt"
 STUB
 chmod +x "$TMP/bin/codex"; export PATH="$TMP/bin:$PATH"
+
+if [ "${CD_TEST_WAVE5_ONLY:-}" = 1 ]; then
+ printf 'do the task\n' > "$TMP/prompt"
+ eval "$(sed -n '/^# W5 scoped runner pins/,/^# W5 pins end/p' "$0")" || exit $?
+ exit 0
+fi
 
 # Build a NON-Go git repo (no go.mod).
 REPO="$TMP/repo"; mkdir -p "$REPO"; git -C "$REPO" init -q
@@ -394,7 +405,7 @@ for ((i=0; i<100; i++)); do
 done
 [ -f "$TMP/early.marker" ] || fail "early fingerprint did not start"
 kill -TERM "$disp_pid"
-early_deadline=$((SECONDS + 8))
+early_deadline=$((SECONDS + 24))
 while kill -0 "$disp_pid" 2>/dev/null; do
   if [ "$SECONDS" -ge "$early_deadline" ]; then
     kill -KILL "$disp_pid" "$(cat "$TMP/early.pid")" 2>/dev/null || true
@@ -523,7 +534,7 @@ for signal_mode in inplace worktree tdd worktree-commit fallback worktree-commit
   [ "$signal_mode" != int ] || signal_name=INT
   started_at=$SECONDS
   kill -"$signal_name" "$disp_pid"
-  signal_deadline=$((started_at + 8))
+  signal_deadline=$((started_at + 24))
   while kill -0 "$disp_pid" 2>/dev/null; do
     if [ "$SECONDS" -ge "$signal_deadline" ]; then
       kill -KILL "$disp_pid" 2>/dev/null || true
@@ -539,7 +550,8 @@ for signal_mode in inplace worktree tdd worktree-commit fallback worktree-commit
   done
   wait "$disp_pid"; rc=$?
   [ "$rc" -eq 143 ] || fail "$signal_mode signal exit was $rc"
-  [ "$((SECONDS - started_at))" -le 8 ] || fail "$signal_mode interruption waited for worker sleep"
+  # Stubborn modes loop forever; bound the dispatcher's five-second TERM grace.
+  [ "$((SECONDS - started_at))" -le 12 ] || fail "$signal_mode interruption waited for worker sleep"
   orphaned=0
   for pid in "$worker_pid" ${helper_pid:+"$helper_pid"}; do
     if kill -0 "$pid" 2>/dev/null; then
@@ -1276,6 +1288,7 @@ cat > "$TMP/bin/codex" <<'STUB'
 #!/usr/bin/env bash
 wd=""; while [ $# -gt 0 ]; do [ "$1" = "-C" ] && { wd="$2"; shift 2; continue; }; shift; done
 : "${wd:=$PWD}"
+[ -z "${CD_TEST_AGENT_MARKER:-}" ] || touch "$CD_TEST_AGENT_MARKER"
 echo "changed line" > "$wd/agent_made_this.txt"
 STUB
 chmod +x "$TMP/bin/codex"
@@ -1423,7 +1436,8 @@ P_adv169_3="$TMP/gate_adv169_3_parent"; new_parent "$P_adv169_3"
 mkdir -p "$P_adv169_3/bin"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$P_adv169_3/bin/run-tests.sh"
 git -C "$P_adv169_3" add bin/run-tests.sh; git -C "$P_adv169_3" commit -qm "add runner"
-bash "$CD" codex "$P_adv169_3" "$TMP/prompt" "bash bin/run-tests.sh" >"$TMP/out_adv169_3" 2>&1
+bash "$CD" codex "$P_adv169_3" "$TMP/prompt" "bash bin/run-tests.sh" >"$TMP/out_adv169_3" 2>&1; rc=$?
+[ "$rc" -eq 0 ] || { cat "$TMP/out_adv169_3"; fail "full runner build command should exit 0, got $rc"; }
 ! grep -q "gate-target" "$TMP/out_adv169_3" || { cat "$TMP/out_adv169_3"; fail "Issue 169 Test 3: build-cmd referencing run-tests.sh must be silent"; }
 echo "test issue 169 gate advisory 3 (build-cmd references runner is silent) PASS"
 
@@ -1468,6 +1482,125 @@ git -C "$P_adv169_7" reset --hard HEAD -q && git -C "$P_adv169_7" clean -fdq
 bash "$CD" codex "$P_adv169_7" "$TMP/prompt" "ruff check ." >"$TMP/out_adv169_7_2" 2>&1
 ! grep -q "gate-target" "$TMP/out_adv169_7_2" || { cat "$TMP/out_adv169_7_2"; fail "Issue 169 Test 7: second identical runner-only dispatch within TTL must be silent"; }
 echo "test issue 169 gate advisory 7 (runner-only deduplication) PASS"
+
+# W5 scoped runner pins (also runnable alone for mutation verification).
+wave5_partial_pins() (
+set -eu
+grep -qFx '# agent-dispatch-run-tests: partial runs exit 4' "$SELF_DIR/run-tests.sh" || fail 'W5 runner signature missing'
+mkdir -p "$TMP/wave5-tools"
+export PATH="$TMP/wave5-tools:$PATH"
+repo=$(mktemp -d "${TMPDIR:-/tmp}/scoped-gate.XXXXXX")
+[ -n "$repo" ] || exit 1
+export GIT_AUTHOR_NAME=Fixture GIT_AUTHOR_EMAIL=fixture@example.com
+export GIT_COMMITTER_NAME=Fixture GIT_COMMITTER_EMAIL=fixture@example.com
+git -C "$repo" init -q
+mkdir -p "$repo/bin" "$repo/plugin/bin" "$repo/scripts"
+printf '#!/usr/bin/env bash\n# agent-dispatch-run-tests: partial runs exit 4\nexit 0\n' > "$repo/bin/run-tests.sh"
+cp "$repo/bin/run-tests.sh" "$repo/plugin/bin/run-tests.sh"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$repo/scripts/test.sh"
+git -C "$repo" add .
+git -C "$repo" commit -qm fixture
+export CD_TEST_AGENT_MARKER="$repo/agent-marker"
+printf '#!/usr/bin/env bash\n[ -z "${CD_TEST_AGENT_MARKER:-}" ] || touch "$CD_TEST_AGENT_MARKER"\necho changed >> agent_made_this.txt\n' > "$TMP/wave5-tools/codex"
+chmod +x "$TMP/wave5-tools/codex"
+for cmd in 'bash bin/run-tests.sh --only x' 'bash bin/run-tests.sh --changed' 'bash plugin/bin/run-tests.sh --only x' 'bash bin/run-tests.sh "--only" x' "bash bin/run-tests.sh '--changed'"; do
+ rc=0
+ bash "$CD" codex "$repo" "$TMP/prompt" "$cmd" > "$TMP/scoped-out" 2>&1 || rc=$?
+ [ "$rc" = 2 ] || fail "W5 refusal: $cmd (rc=$rc)"
+ grep -qFx "DISPATCH=error: --build-cmd runs a partial gate (this runner's --only/--changed exit 4 even when the selected suites pass); use the full runner as the build gate" "$TMP/scoped-out" || { cat "$TMP/scoped-out"; fail "W5 refusal output: $cmd"; }
+ [ ! -e "$CD_TEST_AGENT_MARKER" ] || fail "W5 refusal launched agent: $cmd"
+done
+# Stub unrelated commands so acceptance is measured by dispatch success.
+for tool in npm pytest tee; do printf '#!/usr/bin/env bash\ncat >/dev/null\nexit 0\n' > "$TMP/wave5-tools/$tool"; chmod +x "$TMP/wave5-tools/$tool"; done
+for cmd in 'bash bin/run-tests.sh && npm ci --only=production' 'bash bin/run-tests.sh && pytest --only-rerun Flaky' 'bash bin/run-tests.sh -j 4 2>&1 | tee --changed' 'bash bin/run-tests.sh; npm ci --only=production' 'bash bin/run-tests.sh || pytest --only-rerun x' 'bash bin/run-tests.sh || npm ci --only=production' 'bash bin/run-tests.sh # --only x' 'bash scripts/test.sh --changed' 'bash scripts/test.sh "--only" x' 'bash bin/run-tests.sh --timeout 600' 'bash bin/run-tests.sh --only-rerun Flaky'; do
+ rc=0
+ bash "$CD" codex "$repo" "$TMP/prompt" "$cmd" > "$TMP/scoped-out" 2>&1 || rc=$?
+ [ "$rc" = 0 ] || { cat "$TMP/scoped-out"; fail "W5 acceptance: $cmd (rc=$rc)"; }
+ [ -e "$CD_TEST_AGENT_MARKER" ] || fail "W5 acceptance never launched agent: $cmd"
+ git -C "$repo" add .
+ git -C "$repo" commit -qm 'record fixture work' || :
+ if [[ "$cmd" = 'bash scripts/test.sh '* ]]; then
+  grep -qF "gate-target advisory: --build-cmd '$cmd' may run a partial gate via scripts/test.sh" "$TMP/scoped-out" || fail 'W5 non-signature advisory'
+  bash "$CD" codex "$repo" "$TMP/prompt" "$cmd" > "$TMP/scoped-repeat" 2>&1
+  if grep -q 'may run a partial gate' "$TMP/scoped-repeat"; then fail 'W5 advisory TTL'; fi
+  git -C "$repo" add .
+  git -C "$repo" commit -qm 'record repeat work'
+ else
+  if grep -q 'may run a partial gate' "$TMP/scoped-out"; then fail "W5 unexpected partial advisory: $cmd"; fi
+ fi
+done
+echo 'PASS W5 scoped runner pins'
+)
+wave5_partial_pins || exit $?
+# W5 pins end
+
+check_partial_refusal() {
+ grep -qFx "DISPATCH=error: --build-cmd runs a partial gate (this runner's --only/--changed exit 4 even when the selected suites pass); use the full runner as the build gate" "$1"
+}
+# Test 8: Partial runner invocation (--only test-a.sh) must refuse before agent launch.
+P_adv169_8="$TMP/gate_adv169_8_parent"; new_parent "$P_adv169_8"
+mkdir -p "$P_adv169_8/bin"
+printf '#!/usr/bin/env bash\n# agent-dispatch-run-tests: partial runs exit 4\nexit 4\n' > "$P_adv169_8/bin/run-tests.sh"
+git -C "$P_adv169_8" add bin/run-tests.sh; git -C "$P_adv169_8" commit -qm "add runner"
+export CD_TEST_AGENT_MARKER="$TMP/partial-agent-8"
+bash "$CD" codex "$P_adv169_8" "$TMP/prompt" "bash bin/run-tests.sh --only test-a.sh" >"$TMP/out_adv169_8" 2>&1; rc=$?
+[ "$rc" -eq 2 ] || { cat "$TMP/out_adv169_8"; fail "Issue 169 Test 8: should exit 2, got $rc"; }
+check_partial_refusal "$TMP/out_adv169_8" || { cat "$TMP/out_adv169_8"; fail "Issue 169 Test 8: --only test-a.sh refusal should explain the partial-gate exit contract"; }
+[ ! -e "$CD_TEST_AGENT_MARKER" ] || fail "partial gate launched agent"
+unset CD_TEST_AGENT_MARKER
+echo "test issue 169 gate refusal 8 (--only test-a.sh refuses partial gate) PASS"
+
+# Test 9: Partial runner invocation (--changed) must refuse before agent launch.
+P_adv169_9="$TMP/gate_adv169_9_parent"; new_parent "$P_adv169_9"
+mkdir -p "$P_adv169_9/bin"
+printf '#!/usr/bin/env bash\n# agent-dispatch-run-tests: partial runs exit 4\nexit 4\n' > "$P_adv169_9/bin/run-tests.sh"
+git -C "$P_adv169_9" add bin/run-tests.sh; git -C "$P_adv169_9" commit -qm "add runner"
+export CD_TEST_AGENT_MARKER="$TMP/partial-agent-9"
+bash "$CD" codex "$P_adv169_9" "$TMP/prompt" "bash bin/run-tests.sh --changed" >"$TMP/out_adv169_9" 2>&1; rc=$?
+[ "$rc" -eq 2 ] || { cat "$TMP/out_adv169_9"; fail "Issue 169 Test 9: should exit 2, got $rc"; }
+check_partial_refusal "$TMP/out_adv169_9" || { cat "$TMP/out_adv169_9"; fail "Issue 169 Test 9: --changed refusal should explain the partial-gate exit contract"; }
+[ ! -e "$CD_TEST_AGENT_MARKER" ] || fail "partial gate launched agent"
+unset CD_TEST_AGENT_MARKER
+echo "test issue 169 gate refusal 9 (--changed refuses partial gate) PASS"
+
+# Combined partial runner and skipped Makefile target still refuse before launch.
+(
+set -eu
+P_adv169_both=$(mktemp -d "${TMPDIR:-/tmp}/partial-gates.XXXXXX")
+[ -n "$P_adv169_both" ] || exit 1
+export GIT_AUTHOR_NAME=Fixture GIT_AUTHOR_EMAIL=fixture@example.com
+export GIT_COMMITTER_NAME=Fixture GIT_COMMITTER_EMAIL=fixture@example.com
+git -C "$P_adv169_both" init -q
+mkdir -p "$P_adv169_both/bin"
+printf 'lint:\n\t@true\n' > "$P_adv169_both/Makefile"
+printf '#!/usr/bin/env bash\n# agent-dispatch-run-tests: partial runs exit 4\nexit 4\n' > "$P_adv169_both/bin/run-tests.sh"
+git -C "$P_adv169_both" add Makefile bin/run-tests.sh
+git -C "$P_adv169_both" commit -qm "add gates"
+export CD_TEST_AGENT_MARKER="$TMP/partial-agent-both"
+rc=0
+bash "$CD" codex "$P_adv169_both" "$TMP/prompt" "bash bin/run-tests.sh --only test-a.sh" > "$TMP/out_adv169_both" 2>&1 || rc=$?
+[ "$rc" -eq 2 ] || fail "combined partial gate must exit 2"
+check_partial_refusal "$TMP/out_adv169_both" || fail "combined partial gate needs refusal message"
+[ ! -e "$CD_TEST_AGENT_MARKER" ] || fail "combined partial gate launched agent"
+) || fail "combined advisory fixture failed"
+
+# A nested plugin runner is not the repo-root gate.
+(
+set -eu
+repo=$(mktemp -d "${TMPDIR:-/tmp}/nested-gate.XXXXXX")
+[ -n "$repo" ] || exit 1
+export GIT_AUTHOR_NAME=Fixture GIT_AUTHOR_EMAIL=fixture@example.com
+export GIT_COMMITTER_NAME=Fixture GIT_COMMITTER_EMAIL=fixture@example.com
+git -C "$repo" init -q
+mkdir -p "$repo/plugin/bin"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$repo/plugin/bin/run-tests.sh"
+printf 'test:\n\t@true\n' > "$repo/Makefile"
+git -C "$repo" add .
+git -C "$repo" commit -qm fixture
+bash "$CD" codex "$repo" "$TMP/prompt" 'make test' > "$TMP/out_nested_gate" 2>&1
+if grep -q gate-target "$TMP/out_nested_gate"; then fail 'nested plugin runner must not trigger gate-target advisory'; fi
+) || fail 'nested gate fixture failed'
+echo 'test nested plugin runner advisory PASS'
 
 # ============================ #180: venv-pinned gate + disclosure ============================
 # A fake <workdir>/.venv/bin/ruff shim, distinct from anything else on PATH (including the

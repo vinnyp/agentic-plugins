@@ -37,7 +37,19 @@ for you to review — you will see a `stray commit` note when that happens.
 **Set the full ship gate.** `--build-cmd` should be what the repo enforces at ship: lint *and*
 tests. `coding-dispatch.sh` prints an advisory when your build command skips a `Makefile` target
 named `pr-ready`/`check`/`ci`/`gate`/`lint`/`test`, or a `bin/run-tests.sh`-style runner it finds
-in the repo. It will not pick one for you.
+at `bin/run-tests.sh`, `run-tests.sh`, or `scripts/test.sh` in the workdir.
+Refusal applies only to runner files containing the exact signature line
+`# agent-dispatch-run-tests: partial runs exit 4`. A simple command (split on
+`&&`, `||`, `;`, or `|`) must invoke that runner and contain a whole `--only`
+or `--changed` token (including `--only=…`). Nested paths such as
+`agent-dispatch/bin/run-tests.sh` are checked relative to the workdir too.
+The refusal exits 2 before agent launch and is never deduplicated. Other
+runners receive a non-blocking, TTL-deduped `gate-target advisory` when their
+command selects a partial gate. Quoted flag tokens are also recognized.
+Whitespace-preceded shell comments are ignored. Flags on other commands do not
+trigger refusal or a partial-gate advisory.
+Use the full runner as the build gate.
+It will not pick a gate for you.
 
 **Respect the review pin.** While a review is pinned, dispatches into that repo refuse with exit
 9. That is the point — the reviewer is reading a specific HEAD. If a pin is left behind by a
