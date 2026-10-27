@@ -22,7 +22,8 @@ reset_dispatch_env  # neutralize any operator-exported dispatch vars before the 
 . "$(cd "$(dirname "$0")" && pwd)/lib/agy-models.sh"
 export AGY_TEST_CODING_PIN="$AGY_MODEL_CODING_DEFAULT" AGY_TEST_REVIEW_PIN="$AGY_MODEL_REVIEW_DEFAULT"
 DW="$SELF_DIR/dispatch-worker"
-TMP="$(mktemp -d)"
+TMP="$(set -eu; scratch=$(mktemp -d "${TMPDIR:-/tmp}/dispatch-worker-test.XXXXXX"); [ -n "$scratch" ]; printf '%s\n' "$scratch")" || exit 1
+TMP="$(cd "$TMP" && pwd -P)" || exit 1
 cd "$TMP" || exit 1
 trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home"
@@ -1527,6 +1528,7 @@ env | grep -c '^GIT_DIR=' > "$AGY_ARGS_FILE.env"
 ACTIONS
 before=$(git -C "$R43" worktree list)
 run_cfg_review "$R43" || fail 'V1 launch failed'
+[ ! -e "$(git -C "$R43" rev-parse --absolute-git-dir)/review-pinned" ] || fail "review pin not released normal"
 review_pwd=$(sed -n 's/^PWD=//p' "$AGY_ARGS_FILE")
 [ "$(cat "$AGY_ARGS_FILE.gitdir")" = "$review_pwd/.git" ] || fail 'V1 git dir shared'
 [ "$(cat "$AGY_ARGS_FILE.common")" = "$review_pwd/.git" ] || fail 'V1 common dir shared'
@@ -1568,6 +1570,7 @@ linked="$TMP/linked43"
 git -C "$R43" checkout review-main >/dev/null 2>&1
 git -C "$R43" worktree add "$linked" feature >/dev/null 2>&1
 run_cfg_review "$linked"
+[ ! -e "$(git -C "$linked" rev-parse --absolute-git-dir)/review-pinned" ] || fail "review pin not released linked"
 [ "$(sed -n '3p' "$AGY_ARGS_FILE.refs")" = "$expected_head" ] || fail 'linked source HEAD changed'
 git -C "$R43" config filter.x.clean cat
 run_cfg_review "$R43" || fail 'unsuitable fallback failed'
@@ -1631,10 +1634,12 @@ cmp -s "$TMP/refs.before" "$TMP/refs.after" || fail 'V3 source refs changed'
 cmp -s "$TMP/worktrees.before" "$TMP/worktrees.after" || fail 'V3 source worktrees changed'
 grep -q '^push=[1-9][0-9]*$' "$AGY_ARGS_FILE.push" || fail 'V3 push enabled'
 [ -z "$(find "$TMPDIR" -name 'dispatch-review-state.*' -print)" ] || fail 'V3 state directory leaked'
+[ -z "$(find "$TMPDIR" -name 'dispatch-snapshots.*' -print)" ] || fail 'V3 snapshot directory leaked'
 : > "$AGY_STUB_ACTIONS"
 GIT_CONFIG_GLOBAL="$TMP/missing-global" run_cfg_review "$r44" || fail 'missing global config launch failed'
 [ ! -e "$TMP/missing-global" ] || fail 'missing global config created outside review'
 [ -z "$(find "$TMPDIR" -name 'dispatch-review-state.*' -print)" ] || fail 'missing global state directory leaked'
+[ -z "$(find "$TMPDIR" -name 'dispatch-snapshots.*' -print)" ] || fail 'missing global snapshot directory leaked'
 echo 'test 44 (private flattened global config and absent global config) PASS'
 
 # Source-state contract: actions deliberately target only test-owned repos.
@@ -1643,6 +1648,119 @@ export SRC="$TMP/state-source"
 make_git_repo "$SRC"
 git -C "$SRC" remote add origin https://example.invalid/source
 cp "$SRC/.git/config" "$TMP/state-config.before"
+
+# Snapshot bounds apply to git internals and worktree ignore reads.
+# Bound the suite's own child even when the implementation bound regresses.
+run_hostile_review() (
+  local timer='' child guard rc=0
+  timer=$(command -v timeout || command -v gtimeout) || timer=''
+  if [ -n "$timer" ]; then
+    export DW TMP BRIEF
+    export -f run_cfg_review
+    "$timer" -k 5 60 bash -c 'run_cfg_review "$1"' _ "$SRC" || rc=$?
+  else
+    set -m
+    run_cfg_review "$SRC" &
+    child=$!
+    (
+      set +m
+      sleep 60
+      kill -TERM -- "-$child" 2>/dev/null || true
+      sleep 5
+      kill -KILL -- "-$child" 2>/dev/null || true
+    ) </dev/null >/dev/null 2>&1 &
+    guard=$!
+    wait "$child" || rc=$?
+    kill -TERM -- "-$guard" 2>/dev/null || true
+    wait "$guard" 2>/dev/null || true
+  fi
+  case "$rc" in
+    124|137|143) fail "hostile $hostile: review hung (snapshot or pin-release unbounded)" ;;
+  esac
+  exit "$rc"
+)
+
+mkdir "$TMP/tagged-git"
+export REAL_HOSTILE_GIT
+REAL_HOSTILE_GIT=$(command -v git)
+cat > "$TMP/tagged-git/git" <<'TAGGED'
+#!/usr/bin/env bash
+printf '%s\n' "$$" >> "$RUN_PID_FILE"
+# git reads a "git-<x>" argv[0] as a dashed builtin; keep the tag elsewhere.
+exec -a "tagged-$RUN_ID" "$REAL_HOSTILE_GIT" "$@"
+TAGGED
+chmod +x "$TMP/tagged-git/git"
+for hostile in .git/objects/info/alternates .gitignore .git/FETCH_HEAD loose-object; do
+  (
+  fail() { echo "FAIL: $*" >&2; exit 1; }
+  planted="$SRC/$hostile"
+  trap 'rm -f "$planted" "$SRC/.git/review-pinned"; if [ "$hostile" = loose-object ]; then git -C "$SRC" update-ref -d refs/heads/fifo; fi' EXIT
+  if [ "$hostile" = loose-object ]; then
+    sha=$(git -C "$SRC" -c user.name=t -c user.email=t@e commit-tree -m fifo 'HEAD^{tree}')
+    git -C "$SRC" update-ref refs/heads/fifo "$sha"
+    # Put the branch in place only after the readable baseline.
+    git -C "$SRC" update-ref -d refs/heads/fifo
+    planted="$SRC/.git/objects/${sha:0:2}/${sha:2}"
+    printf 'git -C "$SRC" update-ref refs/heads/fifo %s\nrm "%s"\nmkfifo "%s"\n' "$sha" "$planted" "$planted" > "$AGY_STUB_ACTIONS"
+  else
+    printf 'mkfifo "$SRC/%s"\n' "$hostile" > "$AGY_STUB_ACTIONS"
+  fi
+  (
+    fail() { echo "FAIL: $*" >&2; exit 1; }
+    trap 'rm -f "$planted"' EXIT
+    snapshot_rc=0
+    RUN_ID="hostile-$$-$(printf %s "$hostile" | tr -c 'A-Za-z0-9' _)"
+    export RUN_ID RUN_PID_FILE="$TMP/hostile-pids"
+    : > "$RUN_PID_FILE"
+    PATH="$TMP/tagged-git:$PATH" DISPATCH_SNAPSHOT_TIMEOUT_SECS=5 run_hostile_review || snapshot_rc=$?
+    while IFS= read -r tagged_pid; do
+      if ps -p "$tagged_pid" -o command= 2>/dev/null | grep -Fq "tagged-$RUN_ID"; then
+        fail "hostile $hostile left tagged git pid $tagged_pid"
+      fi
+    done < "$RUN_PID_FILE"
+    [ "$snapshot_rc" = 10 ] || fail "hostile $hostile expected critical, got $snapshot_rc"
+    ! grep -q 'baseline unreadable' "$TMP/cfg.err" || fail 'BEFORE snapshot unreadable'
+    grep -q 'SOURCE REPO CHANGED' "$TMP/cfg.err" || fail 'missing source changes'
+    if [ "$hostile" = .gitignore ]; then
+      grep -q 'drift snapshot timed out' "$TMP/cfg.err" || fail 'snapshot timeout missing'
+    else
+      grep -q 'nonregular ' "$TMP/cfg.err" || fail 'nonregular file not listed'
+    fi
+  ) || fail "hostile $hostile failed"
+  [ ! -e "$(git -C "$SRC" rev-parse --absolute-git-dir)/review-pinned" ] || fail "review pin not released hostile $hostile"
+  if [ "$hostile" = loose-object ]; then git -C "$SRC" update-ref -d refs/heads/fifo; fi
+  ) || fail "hostile $hostile failed"
+  git -C "$SRC" status --porcelain >/dev/null || fail "hostile $hostile left unusable repo"
+done
+# Before-launch FIFO uses metadata that setup does not need to open.
+: > "$AGY_STUB_ACTIONS"
+hostile='before-FETCH_HEAD'
+(
+  fail() { echo "FAIL: $*" >&2; exit 1; }
+  planted="$SRC/.git/FETCH_HEAD"
+  trap 'rm -f "$planted"' EXIT
+  mkfifo "$planted"
+  snapshot_rc=0
+  DISPATCH_SNAPSHOT_TIMEOUT_SECS=5 run_hostile_review || snapshot_rc=$?
+  [ "$snapshot_rc" = 10 ] || fail "before FIFO expected critical, got $snapshot_rc"
+) || fail "before-launch FIFO failed"
+# Termination inside the after-snapshot window must leave a pessimistic EXIT status.
+mkdir -p "$TMP/sentinel/bin/lib"
+cp "$DW" "$TMP/sentinel/bin/dispatch-worker"
+cp "$SELF_DIR/lib/"*.sh "$TMP/sentinel/bin/lib/"
+cp "$SELF_DIR/review-pin.sh" "$SELF_DIR/agy-auth-probe.sh" "$TMP/sentinel/bin/"
+# Inject only into the test-owned copy, before the bounded helper does any work.
+sed '/^review_state_snapshot_bounded() {$/a\
+  if [ "$2" = "$REVIEW_SNAPSHOT_DIR/after" ]; then kill -TERM "$$"; fi
+' "$DW" > "$TMP/sentinel/bin/dispatch-worker"
+actual=0
+TIMEOUT=0 "$TMP/sentinel/bin/dispatch-worker" --runtime agy --review --brief "$BRIEF" --workdir "$SRC" > "$TMP/sentinel.out" 2> "$TMP/sentinel.err" || actual=$?
+[ "$actual" = 143 ] || fail "sentinel TERM expected 143, got $actual"
+grep -q 'DISPATCH_REVIEW_STATE=critical(incomplete)' "$TMP/sentinel.err" || fail 'after window status not critical'
+DISPATCH_SNAPSHOT_TIMEOUT_SECS=00 run_cfg_review "$SRC" || fail '00 default review failed'
+grep -q 'invalid DISPATCH_SNAPSHOT_TIMEOUT_SECS; using 120' "$TMP/cfg.err" || fail '00 accepted unbounded'
+: > "$AGY_STUB_ACTIONS"
+
 check_state_run() {
   local expected="$1" actual=0
   run_cfg_review "${2:-$SRC}" || actual=$?
@@ -1790,12 +1908,38 @@ GIT_CONFIG_GLOBAL="$TMP/absent-global.gitconfig" run_cfg_review "$r44" > "$TMP/n
 [ "$?" -eq 0 ] || fail 'review without global gitconfig failed'
 grep -q 'fatal:' "$TMP/cfg.err" && fail 'missing global gitconfig emitted fatal diagnostic'
 
-# Loss of the baseline must fail closed for both review paths.
-# shellcheck disable=SC2016
-printf 'rm "$(dirname "$GIT_CONFIG_GLOBAL")/before"\n' > "$AGY_STUB_ACTIONS"
+# No reviewer environment entry may identify the snapshot directory.
+cat > "$AGY_STUB_ACTIONS" <<'ACTIONS'
+env > "$AGY_ARGS_FILE.snapshot-env"
+if [ -e "$(dirname "$GIT_CONFIG_GLOBAL")/before" ]; then
+  printf shared > "$AGY_ARGS_FILE.shared-snapshot"
+fi
+ACTIONS
+check_state_run 0
+if grep -q 'dispatch-snapshots\.' "$AGY_ARGS_FILE.snapshot-env"; then fail 'snapshot directory exported'; fi
+[ ! -e "$AGY_ARGS_FILE.shared-snapshot" ] || fail 'baseline beside global config'
+
+# A reviewer can enumerate same-user temp files and forge a matching baseline.
+export REPO_STATE_CHECK="$SELF_DIR/repo-state-check" SOURCE_GLOBAL="$GIT_CONFIG_GLOBAL"
+cat > "$AGY_STUB_ACTIONS" <<'ACTIONS'
+git -C "$SRC" config user.name compromised
+for state in "$TMPDIR"/dispatch-snapshots.* "$TMPDIR"/dispatch-review-state.*; do
+  [ ! -f "$state/before" ] || GIT_CONFIG_GLOBAL="$SOURCE_GLOBAL" "$REPO_STATE_CHECK" snapshot "$SRC" "$state/before"
+done
+ACTIONS
 check_state_run 10
-grep -qF 'DISPATCH_REVIEW_STATE=critical(' "$TMP/cfg.err" || fail 'agy baseline loss passed'
-grep -qF 'state: drift check could not complete' "$TMP/cfg.err" || fail 'agy compare diagnostic absent'
+grep -qF 'DISPATCH_REVIEW_STATE=critical(' "$TMP/cfg.err" || fail 'agy baseline forgery passed'
+grep -qF 'state: snapshot integrity' "$TMP/cfg.err" || fail 'agy integrity diagnostic absent'
+cp "$TMP/state-config.before" "$SRC/.git/config"
+# Loss of the baseline must also fail closed.
+cat > "$AGY_STUB_ACTIONS" <<'ACTIONS'
+for state in "$TMPDIR"/dispatch-snapshots.*; do
+  [ ! -f "$state/before" ] || rm "$state/before"
+done
+ACTIONS
+check_state_run 10
+grep -qF 'state: snapshot integrity' "$TMP/cfg.err" || fail 'agy baseline loss passed'
+if grep -q 'No such file or directory' "$TMP/cfg.err"; then fail 'missing snapshot leaked shell error'; fi
 # Removing the whole state directory must preserve the critical exit and diagnostic.
 # shellcheck disable=SC2016
 printf 'rm -rf "$(dirname "$GIT_CONFIG_GLOBAL")"\n' > "$AGY_STUB_ACTIONS"
@@ -1805,13 +1949,28 @@ grep -qF '  state: review state directory missing or unreadable' "$TMP/cfg.err" 
 cat > "$TMP/bin/claude" <<'STUB'
 #!/usr/bin/env bash
 cat >/dev/null
-for state in "$TMPDIR"/dispatch-review-state.*; do
+for state in "$TMPDIR"/dispatch-snapshots.*; do
   [ ! -d "$state" ] || rm "$state/before"
 done
 STUB
 (cd "$SRC" && run_state_runtime claude 10)
 grep -qF 'DISPATCH_REVIEW_STATE=critical(' "$TMP/cfg.err" || fail 'claude baseline loss passed'
-grep -qF 'state: drift check could not complete' "$TMP/cfg.err" || fail 'claude compare diagnostic absent'
+grep -qF 'state: snapshot integrity' "$TMP/cfg.err" || fail 'claude compare diagnostic absent'
+
+# Snapshot allocation failures must explain the failing allocation on both paths.
+REAL_MKTEMP=$(command -v mktemp)
+export REAL_MKTEMP
+cat > "$TMP/bin/mktemp" <<'STUB'
+#!/usr/bin/env bash
+case "$*" in *dispatch-snapshots.*) exit 1 ;; esac
+exec "$REAL_MKTEMP" "$@"
+STUB
+chmod +x "$TMP/bin/mktemp"
+for runtime in agy claude; do
+  (cd "$SRC" && run_state_runtime "$runtime" 3)
+  grep -qF 'could not create the review snapshot directory' "$TMP/cfg.err" || fail "$runtime snapshot allocation diagnostic absent"
+done
+rm "$TMP/bin/mktemp"
 
 # The file had 22 agy stubs before the four persona-specific controls above;
 # every definition must answer the roster subcommand instead of falling into cat.

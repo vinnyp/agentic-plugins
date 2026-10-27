@@ -8,22 +8,31 @@ _repo_state_git() (
   # shellcheck disable=SC2086
   unset $_REPO_STATE_LOCAL_ENV_VARS
   export GIT_OPTIONAL_LOCKS=0
-  git "$@"
+  if [ "${1:-}" = --history ]; then
+    shift
+    export GIT_GRAFT_FILE=/dev/null GIT_NO_REPLACE_OBJECTS=1
+    git --no-replace-objects -c core.commitGraph=false "$@"
+  else
+    git "$@"
+  fi
 )
 
 _repo_state_sha256() (
   local digest input
-  umask 077
-  input=$(mktemp "${TMPDIR:-/tmp}/repo-state-hash.XXXXXX") || return 1
-  trap 'rm -f "$input"' EXIT
-  cat > "$input" || return 1
-  if ! command -v shasum >/dev/null 2>&1 || ! digest=$(shasum -a 256 < "$input"); then
-    digest=$(sha256sum < "$input") || return 1
+  # Retain bytes in memory so a failed primary hash can retry the same input.
+  # Base64 preserves binary hook content and trailing newlines in shell memory.
+  input=$(base64) || return 1
+  if ! command -v shasum >/dev/null 2>&1 || ! digest=$(printf '%s' "$input" | base64 -d | shasum -a 256); then
+    digest=$(printf '%s' "$input" | base64 -d | sha256sum) || return 1
   fi
   digest=${digest%% *}
   [ -n "$digest" ] || return 1
   printf '%s\n' "$digest"
 )
+
+repo_state_digest() {
+  _repo_state_sha256
+}
 
 _repo_state_encode() {
   local value=$1
@@ -34,7 +43,7 @@ _repo_state_encode() {
 }
 
 _repo_state_configs() {
-  local scope origin kv key value lower
+  local scope origin kv key value lower prefix rest userinfo digest
   while IFS= read -r -d '' scope && IFS= read -r -d '' origin && IFS= read -r -d '' kv; do
     case "$kv" in
       *$'\n'*) key=${kv%%$'\n'*}; value=${kv#*$'\n'} ;;
@@ -47,12 +56,36 @@ _repo_state_configs() {
     esac
     case "$lower" in
       *extraheader*|*token*|*pass*|*secret*|*proxy*)
-        value="sha256:$(printf '%s' "$value" | _repo_state_sha256)" ;;
+        digest=$(printf '%s' "$value" | _repo_state_sha256) || return 1
+        value="sha256:$digest" ;;
       *)
-        if [[ "$value" =~ ://[^/]*@ ]]; then
-          value="sha256:$(printf '%s' "$value" | _repo_state_sha256)"
+        if [[ "$value" =~ //.*@ ]]; then
+          digest=$(printf '%s' "$value" | _repo_state_sha256) || return 1
+          value="sha256:$digest"
         fi ;;
     esac
+    # Hash URL userinfo in keys while preserving distinct credentialed keys.
+    # A slash in a password is malformed URL syntax, but still sensitive.
+    # Conservatively hash through the last @ even in that malformed shape.
+    if [[ "$key" =~ //.*@ ]] && ! [[ "$key" =~ //[^/]*@ ]]; then
+      digest=$(printf '%s%s' "$REPO_STATE_SALT" "$key" | _repo_state_sha256) || return 1
+      key="redacted.${digest:0:12}"
+    fi
+    rest=$key
+    key=''
+    while [[ "$rest" =~ (//)([^/]*)@ ]]; do
+      prefix=${rest%%"${BASH_REMATCH[0]}"*}
+      userinfo=${BASH_REMATCH[2]}
+      digest=$(printf '%s%s' "$REPO_STATE_SALT" "$userinfo" | _repo_state_sha256) || return 1
+      key="$key$prefix${BASH_REMATCH[1]}${digest:0:12}@"
+      rest=${rest#*"${BASH_REMATCH[0]}"}
+    done
+    key="$key$rest"
+    # An earlier malformed authority may precede a later well-formed one.
+    if [[ "$key" =~ //[^@]*/[^@]*@ ]]; then
+      digest=$(printf '%s%s' "$REPO_STATE_SALT" "$key" | _repo_state_sha256) || return 1
+      key="redacted.${digest:0:12}"
+    fi
     printf 'config\t%s\t%s\t%s\t%s\n' "$(_repo_state_encode "$scope")" \
       "$(_repo_state_encode "$origin")" "$(_repo_state_encode "$key")" "$(_repo_state_encode "$value")"
   done
@@ -91,7 +124,7 @@ _repo_state_hooks() {
 
 _repo_state_tree() {
   local wt=$1 status=$2 record path skip
-  if [ ! -d "$wt" ] || ! _repo_state_git -C "$wt" -c core.fsmonitor=false status --porcelain=v2 -z --untracked-files=all > "$status" 2>/dev/null; then
+  if [ "${metadata_unsafe:-0}" = 1 ] || [ ! -d "$wt" ] || ! _repo_state_git -C "$wt" -c core.fsmonitor=false status --porcelain=v2 -z --untracked-files=all > "$status" 2>/dev/null; then
     printf 'tree\t%s\tunreadable\n' "$(_repo_state_encode "$wt")"
     return
   fi
@@ -108,14 +141,60 @@ _repo_state_tree() {
   done < "$status"
 }
 
+# Inspect metadata without asking Git to open any of it.
+repo_state_nonregular_sweep() (
+  umask 077
+  local out=$1 dir existing duplicate file temp
+  shift
+  local dirs=()
+  for dir in "$@"; do
+    duplicate=0
+    for existing in ${dirs[@]+"${dirs[@]}"}; do
+      [ "$existing" != "$dir" ] || duplicate=1
+    done
+    [ "$duplicate" = 0 ] || continue
+    dirs[${#dirs[@]}]=$dir
+  done
+  : > "$out" || return 3
+  chmod 600 "$out" || return 3
+  [ "${#dirs[@]}" -gt 0 ] || return 0
+  temp=$(mktemp "${out}.find.XXXXXX") || return 3
+  trap 'rm -f "$temp"' EXIT
+  find -P "${dirs[@]}" \( -type p -o -type c -o -type b -o -type s \) -print0 > "$temp" || return 3
+  while IFS= read -r -d '' file; do
+    printf 'unsafe\t%s\n' "$(_repo_state_encode "$file")"
+  done < "$temp" > "$out"
+)
+
 repo_state_snapshot() (
   umask 077
   local repo=${1:-} out=${2:-} top ident name email config wt hooks custom head branch record temp
   _repo_state_sha256 </dev/null >/dev/null || return 3
   case "$repo" in /*) ;; *) return 3 ;; esac
-  top=$(_repo_state_git -C "$repo" rev-parse --path-format=absolute --show-toplevel 2>/dev/null) || return 3
   temp=$(mktemp -d "$(dirname "$out")/.repo-state.XXXXXX") || return 3
   trap 'rm -rf "$temp"' EXIT
+  # Standalone CLI snapshots share a private salt beside their output files.
+  if [ -z "${REPO_STATE_SALT:-}" ]; then
+    local saltfile
+    saltfile="$(dirname "$out")/.repo-state-private/salt"
+    mkdir -p "${saltfile%/*}" || return 3
+    chmod 700 "${saltfile%/*}" || return 3
+    if [ ! -f "$saltfile" ]; then
+      (set -C; od -An -tx1 -N16 /dev/urandom | tr -d ' \n' > "$saltfile") || return 3
+    fi
+    REPO_STATE_SALT=$(cat "$saltfile") || return 3
+    [ -n "$REPO_STATE_SALT" ] || return 3
+  fi
+  local path file digest target kind metadata_unsafe=0 common gitdir
+  common=${REVIEW_GIT_COMMON_DIR:-}
+  gitdir=${REVIEW_GIT_DIR:-}
+  if [ -z "$common" ] || [ -z "$gitdir" ]; then
+    common=$(_repo_state_git -C "$repo" rev-parse --path-format=absolute --git-common-dir) || return 3
+    gitdir=$(_repo_state_git -C "$repo" rev-parse --absolute-git-dir) || return 3
+  fi
+  repo_state_nonregular_sweep "$temp/unsafe" "$common" "$gitdir" || return 3
+  [ ! -s "$temp/unsafe" ] || metadata_unsafe=1
+  top=$(_repo_state_git -C "$repo" rev-parse --path-format=absolute --show-toplevel 2>/dev/null) || return 3
   config="$temp/config"
   if ! _repo_state_git -C "$repo" config --list --show-scope --show-origin -z > "$config"; then
     return 3
@@ -132,10 +211,32 @@ repo_state_snapshot() (
     name=${ident% <*}; email=${ident##*<}; email=${email%>}
     printf 'identity\t%s\t%s\n' "$(_repo_state_encode "$name")" "$(_repo_state_encode "$email")"
     cat "$config.refs"
-    hooks="$(_repo_state_git -C "$repo" rev-parse --path-format=absolute --git-common-dir)/hooks"
+    hooks="$common/hooks"
     _repo_state_hooks "$hooks" ''
     custom=$(_repo_state_git -C "$repo" rev-parse --path-format=absolute --git-path hooks)
     [ "$custom" = "$hooks" ] || _repo_state_hooks "$custom" 'core.hooksPath/'
+    cat "$temp/unsafe"
+    for path in info/exclude info/attributes objects/info/alternates info/grafts shallow; do
+      file="$common/$path"
+      digest='(absent)'
+      if [ -L "$file" ]; then
+        target=$(readlink "$file") || return 3
+        digest="link:$target"
+        if [ -f "$file" ]; then
+          digest="$digest:$(_repo_state_sha256 < "$file")" || return 3
+        else
+          metadata_unsafe=1
+        fi
+      elif [ -f "$file" ]; then
+        digest=$(_repo_state_sha256 < "$file") || return 3
+      elif [ -e "$file" ]; then
+        kind=$(stat -f '%HT' "$file" 2>/dev/null) || kind=$(stat -c '%F' "$file") || return 3
+        digest="nonregular:$kind"
+        metadata_unsafe=1
+      fi
+      digest=$(_repo_state_encode "$digest")
+      printf 'metadata\t%s\t%s\n' "$path" "$digest"
+    done
     wt='' head='' branch=''
     while IFS= read -r record || [ -n "$record" ]; do
       case "$record" in
@@ -149,12 +250,12 @@ repo_state_snapshot() (
           wt='' head='' branch='' ;;
       esac
     done < <(_repo_state_git -C "$repo" -c core.quotePath=false worktree list --porcelain 2>/dev/null)
-    _repo_state_configs < "$config"
+    _repo_state_configs < "$config" || return 3
     while IFS= read -r wt; do
       case "$wt" in 'worktree '*) wt=${wt#worktree } ;; *) continue ;; esac
       [ "$wt" != "$top" ] && [ -d "$wt" ] || continue
       if _repo_state_git -C "$wt" config --list --show-scope --show-origin -z --worktree > "$config" 2>/dev/null; then
-        _repo_state_configs < "$config"
+        _repo_state_configs < "$config" || return 3
       fi
     done < <(_repo_state_git -C "$repo" worktree list --porcelain 2>/dev/null)
   } > "$out"
@@ -168,14 +269,21 @@ repo_state_mark_unreadable() (
 )
 
 _repo_state_display() {
-  local key=$1 value=$2
+  local key=$1 value
+  value=$(_repo_state_decode "$2")
   if [ "$value" = '(absent)' ]; then printf '%s' "$value"; return; fi
   case "$key" in
-    core.*) case "$value" in true|false|/*) ;; *) value='<changed>' ;; esac ;;
+    core.editor|core.pager|core.fsmonitor)
+      if [[ "$value" =~ ^[[:space:]]*([^[:space:]]+)([[:space:]]+.*)?$ ]]; then
+        value=${BASH_REMATCH[1]}${BASH_REMATCH[2]:+…}
+      fi ;;
+    core.hookspath) case "$value" in true|false|/*) ;; *) value='<changed>' ;; esac ;;
+    core.*) case "$value" in true|false) ;; *) value='<changed>' ;; esac ;;
     commit.gpgsign|tag.gpgsign) ;;
     *) value='<changed>' ;;
   esac
-  printf '%s' "$value" | sed -E 's#(://)[^/]*@#\1#g'
+  value=$(printf '%s' "$value" | sed -E 's#(//)[^/]*@#\1#g; s#[?].*#?<redacted>#')
+  _repo_state_escape_value "$value"
 }
 
 repo_state_compare() (
@@ -184,6 +292,13 @@ repo_state_compare() (
   if [ ! -f "$before" ] || [ ! -r "$before" ]; then
     printf 'state: <unreadable before snapshot>\n' > "$changes"
     return 3
+  fi
+  if grep -q '^unsafe'"$(printf '\t')" "$before"; then
+    while IFS=$'\t' read -r kind key; do
+      [ "$kind" = unsafe ] || continue
+      printf 'nonregular %s: critical\n' "$(_repo_state_escape_value "$(_repo_state_decode "$key")")" >> "$changes"
+    done < "$before"
+    return 2
   fi
   IFS= read -r first < "$before" || true
   if [ "$first" = unreadable ]; then
@@ -196,7 +311,11 @@ repo_state_compare() (
   fi
   IFS= read -r first < "$after" || true
   if [ "$first" = unreadable ]; then
-    printf 'config: <unreadable after review>\n' > "$changes"
+    while IFS=$'\t' read -r kind key; do
+      [ "$kind" = unsafe ] || continue
+      printf 'nonregular %s: critical\n' "$(_repo_state_escape_value "$(_repo_state_decode "$key")")" >> "$changes"
+    done < "$after"
+    printf 'config: <unreadable after review>\n' >> "$changes"
     return 2
   fi
   temp=$(mktemp -d "$(dirname "$changes")/.repo-state-compare.XXXXXX") || return 3
@@ -226,13 +345,14 @@ repo_state_compare() (
       branch.*.pushremote) rc=2 ;;
       branch.*.remote)
         remote=$(_repo_state_decode "$new")
+        if [ "$remote" = . ] && REPO_STATE_MERGE="${key%.remote}.merge" awk -F '\t' '$3==ENVIRON["REPO_STATE_MERGE"] {found=1} END {exit !found}' "$temp/diff"; then rc=2; fi
         # Local repository sentinel and pre-existing remote names are benign.
         if [ "$remote" != . ] && [ "$new" != '(absent)' ] &&
-           ! awk -F '\t' -v prefix="remote.$remote." '$1=="config" && index($4,prefix)==1 { found=1 } END {exit !found}' "$before"; then rc=2; fi ;;
+           ! REPO_STATE_REMOTE="$remote" awk -F '\t' '$1=="config" && $4 ~ /^remote\./ {name=$4; sub(/^remote\./,"",name); sub(/\.[^.]*$/,"",name); if(name==ENVIRON["REPO_STATE_REMOTE"]) found=1} END {exit !found}' "$before"; then rc=2; fi ;;
       branch.*.*|remote.*.fetch|remote.*.gh-resolved|gc.*|maintenance.*|extensions.worktreeconfig|core.sparsecheckout|core.sparsecheckoutcone) ;;
       remote.*.*)
         remote=${key#remote.}; remote=${remote%.*}
-        if awk -F '\t' -v prefix="remote.$remote." '$1=="config" && index($4,prefix)==1 { found=1 } END {exit !found}' "$before"; then
+        if REPO_STATE_REMOTE="$remote" awk -F '\t' '$1=="config" && $4 ~ /^remote\./ {name=$4; sub(/^remote\./,"",name); sub(/\.[^.]*$/,"",name); if(name==ENVIRON["REPO_STATE_REMOTE"]) found=1} END {exit !found}' "$before"; then
           rc=2
         else
           case "$key" in remote.*.url) ;; *) rc=2 ;; esac
@@ -240,12 +360,12 @@ repo_state_compare() (
       *) rc=2 ;;
     esac
     printf 'config %s (%s:%s): %s -> %s\n' \
-      "$(printf '%s' "$key" | sed -E 's#(://)[^/]*@#\1#g')" "$scope" "$origin" \
+      "$(printf '%s' "$key" | sed -E 's#(//)[^/]*@#\1#g; s#[?].*#?<redacted>#')" "$scope" "$origin" \
       "$(_repo_state_display "$key" "$old")" "$(_repo_state_display "$key" "$new")" >> "$changes"
   done < "$temp/diff"
   # Pair records by kind and name; compare complete payloads (including modes/branches).
   awk -F '\t' '
-    $1!="hooks" && $1!="ref" && $1!="worktree" && $1!="tree" {next}
+    $1!="metadata" && $1!="hooks" && $1!="ref" && $1!="worktree" && $1!="tree" {next}
     {k=$1 FS $2; v=$3; for(i=4;i<=NF;i++) v=v FS $i; keys[k]=1}
     FILENAME==ARGV[1] {old[k]=v; next} {new[k]=v}
     END {for(k in keys) {hasold=(k in old); hasnew=(k in new); if(old[k]!=new[k]) {gsub(FS," ",old[k]); gsub(FS," ",new[k]); print k FS (hasold?old[k]:"(absent)") FS (hasnew?new[k]:"(absent)")}}}
@@ -255,9 +375,18 @@ repo_state_compare() (
   repo=$(_repo_state_decode "$repo")
   identity_name=$(awk -F '\t' '$1=="identity" {print $2;exit}' "$before")
   identity_email=$(awk -F '\t' '$1=="identity" {print $3;exit}' "$before")
+  local unsafe=0
+  while IFS=$'\t' read -r kind key; do
+    [ "$kind" = unsafe ] || continue
+    printf 'nonregular %s: critical\n' "$(_repo_state_escape_value "$(_repo_state_decode "$key")")" >> "$changes"
+    unsafe=1; rc=2
+  done < "$after"
   while IFS=$'\t' read -r kind key old new remote line; do
     [ "$rc" -ge 1 ] || rc=1
     case "$kind" in
+      metadata)
+        case "$key" in objects/info/alternates|info/grafts|shallow) rc=2 ;; esac
+        printf 'metadata %s: <changed>\n' "$key" >> "$changes" ;;
       hooks)
         rc=2
         if [ "$old" = '(absent)' ]; then line=added
@@ -266,19 +395,23 @@ repo_state_compare() (
         printf 'hooks %s: %s\n' "$key" "$line" >> "$changes" ;;
       ref)
         printf 'ref %s: %s -> %s\n' "$key" "$old" "$new" >> "$changes"
-        case "$key" in refs/heads/*)
+        case "$key" in
+          refs/replace/*) rc=2 ;;
+          refs/heads/*)
+          [ "$unsafe" = 0 ] || continue
           if [ ! -f "$temp/exclude" ]; then
-            awk -F '\t' '$1=="ref" {print $3}' "$before" |
+            { awk -F '\t' '$1=="ref" {print $3}' "$before";
+              awk -F '\t' '$1=="ref" && $2 ~ /^refs\/remotes\// {print $3}' "$after"; } |
               _repo_state_git -C "$repo" cat-file --batch-check='%(objectname) %(objecttype)' 2>/dev/null |
               awk '($2=="commit" || $2=="tag") {print "^" $1}' > "$temp/exclude"
           fi
           [ "$new" != '(absent)' ] || continue
-          if ! _repo_state_git -C "$repo" rev-list --stdin "$new" --not --remotes < "$temp/exclude" > "$temp/commits" 2>/dev/null; then
+          if ! _repo_state_git --history -C "$repo" rev-list --stdin "$new" < "$temp/exclude" > "$temp/commits" 2>/dev/null; then
             printf 'commit-check %s: failed\n' "$key" >> "$changes"; rc=2; continue
           fi
           while IFS= read -r sha; do
-            cn=$(_repo_state_git -C "$repo" show -s --format=%cn "$sha")
-            ce=$(_repo_state_git -C "$repo" show -s --format=%ce "$sha")
+            cn=$(_repo_state_git --history -C "$repo" show -s --format=%cn "$sha")
+            ce=$(_repo_state_git --history -C "$repo" show -s --format=%ce "$sha")
             if [ "$(_repo_state_encode "$cn")" != "$identity_name" ] || [ "$(_repo_state_encode "$ce")" != "$identity_email" ]; then
               printf 'commit %s: committer <changed>\n' "$sha" >> "$changes"; rc=2
             fi
@@ -296,8 +429,8 @@ repo_state_compare() (
         elif [ "$new" = unreadable ]; then
           printf 'tree %s: unreadable\n' "$key" >> "$changes"
         else
-          awk -F '\t' -v wt="$key" '$1=="dirty" && $2==wt {print $3}' "$before" | LC_ALL=C sort -u > "$temp/dirty-old"
-          awk -F '\t' -v wt="$key" '$1=="dirty" && $2==wt {print $3}' "$after" | LC_ALL=C sort -u > "$temp/dirty-new"
+          REPO_STATE_WT="$key" awk -F '\t' '$1=="dirty" && $2==ENVIRON["REPO_STATE_WT"] {print $3}' "$before" | LC_ALL=C sort -u > "$temp/dirty-old"
+          REPO_STATE_WT="$key" awk -F '\t' '$1=="dirty" && $2==ENVIRON["REPO_STATE_WT"] {print $3}' "$after" | LC_ALL=C sort -u > "$temp/dirty-new"
           LC_ALL=C comm -13 "$temp/dirty-old" "$temp/dirty-new" > "$temp/dirty"
           count=$(wc -l < "$temp/dirty" | tr -d ' ')
           paths=$(head -n 20 "$temp/dirty" | paste -sd ' ' -)
@@ -309,5 +442,48 @@ repo_state_compare() (
         fi ;;
     esac
   done < "$temp/records"
+  if awk -F '\t' '$1=="tree" && $3=="unreadable" {found=1} END {exit !found}' "$before"; then
+    printf 'tree check skipped: baseline unreadable\n' >> "$changes"
+    [ "$rc" -ge 1 ] || rc=1
+  fi
+  # Escape controls only at the display boundary, preserving record delimiters.
+  _repo_state_escape_output < "$changes" > "$temp/escaped"
+  cat "$temp/escaped" > "$changes"
   return "$rc"
 )
+
+_repo_state_escape_output() {
+  local line
+  while IFS= read -r line || [ -n "$line" ]; do
+    _repo_state_escape_value "$line"
+    printf '\n'
+  done
+}
+
+_repo_state_escape_value() {
+  if command -v perl >/dev/null 2>&1; then
+    printf '%s' "$1" | LC_ALL=C perl -pe 's/([\x00-\x1f\x7f]|\xc2[\x80-\x9f])/join "", map { sprintf "\\x%02x", ord $_ } split \/\/, $1/ge'
+    return
+  fi
+  local value=$1 char code i
+  local LC_ALL=C
+  for ((i=0; i<${#value}; i++)); do
+    char=${value:i:1}
+    printf -v code '%d' "'$char"
+    code=$((code & 255))
+    if [ "$code" -eq 194 ] && [ "$((i + 1))" -lt "${#value}" ]; then
+      printf -v code '%d' "'${value:i+1:1}"
+      code=$((code & 255))
+      if [ "$code" -ge 128 ] && [ "$code" -le 159 ]; then
+        printf '\\xc2\\x%02x' "$code"
+        i=$((i + 1)); continue
+      fi
+      code=194
+    fi
+    if [ "$code" -lt 32 ] || [ "$code" -eq 127 ]; then
+      printf '\\x%02x' "$code"
+    else
+      printf '%s' "$char"
+    fi
+  done
+}

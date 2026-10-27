@@ -28,6 +28,16 @@ workspace with permissions enforced. Every runtime's review checks source state 
 critical drift exits 10 and stops the review gate. Inspect and restore the named changes before
 committing, then re-run. See [the command reference](docs/commands.md#dispatch-worker).
 
+Repository-state snapshots hash sensitive config values and replace URL userinfo
+in config keys with the first 12 hex digits of its SHA-256 digest. Credentialed
+keys remain distinct for change detection; change reports omit the userinfo.
+
+Review drift checks hash Git exclude, attributes, and alternates files. Baseline
+and interim snapshots live apart from reviewer configuration and are hash-pinned;
+missing or modified snapshots cause a critical review failure (exit 10).
+
+See the drift gate’s [limits](docs/commands.md#limits) for the write boundary it does not provide.
+
 Installed Antigravity personas are reachable through
 `dispatch-worker --runtime agy --agent NAME`. The wrapper validates `NAME` against `agy agent`
 before launch, so a typo fails loudly instead of silently using the general assistant.
@@ -220,3 +230,8 @@ its tier), e.g. `gemini-4-argon` for `gemini-4-argon-high`. With today's IDs,
 ## License
 
 MIT.
+
+Review drift snapshots are bounded to 120 seconds (`DISPATCH_SNAPSHOT_TIMEOUT_SECS`
+overrides this). Normal snapshots return immediately; the bound uses coreutils
+`timeout`/`gtimeout` when available and an isolated watchdog otherwise. History metadata changes are critical; concurrent upstream pulls
+remain warnings. See [commands and known limits](docs/commands.md#limits).
