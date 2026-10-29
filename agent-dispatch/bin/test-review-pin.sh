@@ -143,3 +143,49 @@ bash "$RP" status "$REPO9" >"$TMP/out9_status" 2>&1
 rc=$?
 [ "$rc" -eq 0 ] || { cat "$TMP/out9_status"; fail "status should see pin created from different cwd, got $rc"; }
 echo "test pin from different cwd writes into workdir git-dir PASS"
+
+# Resolved-marker mode does not consult git and records the invoking process.
+mkdir "$TMP/no-git"
+cat > "$TMP/no-git/git" <<'STUB'
+#!/usr/bin/env bash
+printf called > "$PIN_GIT_CALLED"
+exit 99
+STUB
+chmod +x "$TMP/no-git/git"
+export PIN_GIT_CALLED="$TMP/git-called"
+PATH="$TMP/no-git:$PATH" bash -c 'printf "%s\n" "$$" > "$1"; exec bash "$2" pin --marker "$3" --sha abc' _ "$TMP/pin-pid" "$RP" "$TMP/direct-marker" > "$TMP/direct.out" 2>&1
+[ "$?" = 0 ] || fail 'resolved marker pin failed'
+[ ! -e "$PIN_GIT_CALLED" ] || fail 'resolved marker mode ran git'
+grep -q "^pid=$(cat "$TMP/pin-pid")$" "$TMP/direct-marker" || fail 'marker pid is not the invoking script pid'
+for args in '--marker' '--sha' '--marker x' '--marker x --sha' '--sha abc'; do
+  # Intentional token splitting for invalid argument combinations.
+  # shellcheck disable=SC2086
+  bash "$RP" pin $args > "$TMP/usage.out" 2>&1
+  [ "$?" = 2 ] || fail "invalid resolved marker arguments accepted: $args"
+done
+bash "$RP" pin --marker "$TMP/missing-sha" --sha --label > "$TMP/usage.out" 2>&1
+[ "$?" = 2 ] || fail 'option accepted as missing sha value'
+bash "$RP" pin --marker "$TMP/unused" --sha "" > "$TMP/usage.out" 2>&1
+[ "$?" = 2 ] || fail 'empty sha accepted'
+for op in status release; do
+  bash "$RP" "$op" "$NOREPO6" > "$TMP/nonrepo.out" 2>&1
+  [ "$?" = 2 ] || fail "$op outside repo must exit 2"
+done
+mkdir "$TMP/unborn"
+git -C "$TMP/unborn" init -q
+bash "$RP" pin "$TMP/unborn" > "$TMP/unborn.out" 2>&1
+[ "$?" = 2 ] || fail 'unborn HEAD must exit 2'
+grep -q 'could not resolve HEAD' "$TMP/unborn.out" || fail 'unborn HEAD diagnostic missing'
+TIMER=$(command -v timeout || command -v gtimeout)
+mkfifo "$REPO3/.git/objects/info/alternates"
+probe_rc=0
+"$TIMER" -k 1 1 git -C "$REPO3" rev-parse --verify HEAD > /dev/null 2>&1 || probe_rc=$?
+if [ "$probe_rc" = 124 ]; then
+  DISPATCH_SNAPSHOT_TIMEOUT_SECS=1 "$TIMER" -k 1 10 bash "$RP" pin "$REPO3" > "$TMP/fifo.out" 2>&1
+  [ "$?" = 3 ] || fail 'standalone FIFO pin must exit 3 within bound'
+  grep -q 'git setup timed out' "$TMP/fifo.out" || fail 'standalone FIFO timeout diagnostic missing'
+else
+  echo 'SKIP: real git does not block on alternates for pin'
+fi
+rm "$REPO3/.git/objects/info/alternates"
+echo 'resolved marker, usage, nonrepo, unborn and bounded FIFO pin PASS'

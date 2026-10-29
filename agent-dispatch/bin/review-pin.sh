@@ -54,7 +54,7 @@ print_status() {
 
 # Resolve and operate in one bounded child; git failures are tagged payloads.
 review_pin_operation() {
-  local cmd=$1 workdir=$2 marker=$3 sha=$4 requested_label=$5 now
+  local cmd=$1 workdir=$2 marker=$3 sha=$4 requested_label=$5 script_pid=$6 now
   local pinned_at pid label age git_dir git_rc=0
   if [ -z "$marker" ]; then
     git_dir=$(_repo_state_git -C "$workdir" rev-parse --absolute-git-dir 2>/dev/null) || git_rc=$?
@@ -82,7 +82,7 @@ review_pin_operation() {
       sha=$requested_sha
       (
         set -C
-        printf 'sha=%s\npinned_at=%s\npid=%s\nlabel=%s\n' "$sha" "$now" "$$" "$requested_label" > "$marker"
+        printf 'sha=%s\npinned_at=%s\npid=%s\nlabel=%s\n' "$sha" "$now" "$script_pid" "$requested_label" > "$marker"
       ) 2>/dev/null || { REPO_STATE_BOUND_OUT="active review pin exists at $marker"; return 2; }
       ;;
     release) rm -f "$marker" ;;
@@ -114,6 +114,10 @@ while [ "$#" -gt 0 ]; do
   [ "$cmd" = pin ] || { usage; exit 2; }
   [ "$#" -ge 2 ] || die2 "$1 requires a value"
   case "$1" in
+    --marker|--sha)
+      case "$2" in ''|--*) die2 "$1 requires a value" ;; esac ;;
+  esac
+  case "$1" in
     --marker) marker=$2 ;;
     --sha) sha=$2 ;;
     --label) label=$2 ;;
@@ -133,7 +137,7 @@ REPO_STATE_BOUND_VARS=DISPATCH_REVIEW_PIN_TTL_SECS
 # shellcheck disable=SC2034
 REPO_STATE_BOUND_FUNCS='load_marker pin_age pin_is_stale print_status'
 rc=0
-repo_state_run_bounded "$(repo_state_snapshot_limit review-pin 120)" review_pin_operation "$cmd" "$workdir" "$marker" "$sha" "$label" || rc=$?
+repo_state_run_bounded "$(repo_state_snapshot_limit review-pin 120)" review_pin_operation "$cmd" "$workdir" "$marker" "$sha" "$label" "$$" || rc=$?
 case "$rc" in
   124) echo 'review-pin: git setup timed out (DISPATCH_SNAPSHOT_TIMEOUT_SECS)' >&2; exit 3 ;;
   125) echo 'review-pin: git setup could not complete (DISPATCH_SNAPSHOT_TIMEOUT_SECS)' >&2; exit 3 ;;

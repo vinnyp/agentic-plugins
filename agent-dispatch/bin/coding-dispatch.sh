@@ -172,7 +172,13 @@ check_worktree_base_freshness() {
 
 refuse_if_review_pinned() {
   local dir="$1" status sha="" pinned_at="" label="" line key value now age
-  status="$("$SCRIPT_DIR/review-pin.sh" status "$dir" 2>/dev/null)" || return 0
+  local pin_rc=0
+  status="$("$SCRIPT_DIR/review-pin.sh" status "$dir" 2>/dev/null)" || pin_rc=$?
+  case "$pin_rc" in
+    0) ;;
+    1|2) return 0 ;;
+    *) echo "could not determine review pin status for $dir; refusing edits" >&2; exit 9 ;;
+  esac
   while IFS= read -r line || [ -n "$line" ]; do
     key="${line%%=*}"
     value="${line#*=}"

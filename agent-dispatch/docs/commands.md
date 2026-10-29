@@ -356,6 +356,7 @@ for the dispatcher and 60 for `repo-state-check`. The dispatcher uses
 Launch-time setup, including the before snapshot, fails closed with exit 3 on timeout
 or inability to complete; `DISPATCH_REVIEW_STATE=skipped(not-launched)` is emitted.
 The single launch probe runs before runtime temporary files or auth checks.
+A clone timeout names `DISPATCH_CLONE_TIMEOUT_SECS` in the launch refusal message.
 `DISPATCH_CLONE_TIMEOUT_SECS` bounds the entire clone operation (default 600 seconds;
 same 1-86400 validation). Clone timeout never falls back to a non-hermetic review.
 After launch, snapshot timeouts are unreadable state and critical (exit 10).
@@ -778,17 +779,25 @@ to the suite's resource budget; do not overlap an in-place run in the same tree.
 
 ```
 review-pin.sh pin <workdir> [--label <text>] | release <workdir> | status <workdir>
+review-pin.sh pin --marker <path> --sha <sha> [--label <text>]
 ```
 
 Marks a working tree as pinned to its current HEAD while a review of it is in flight, so a
 concurrent dispatch can't move the code out from under the reviewer. The marker is
 `<git-dir>/review-pinned`. `coding-dispatch.sh` and `coding-build-phase.sh` refuse with exit `9`
 while a pin is active, naming the pinned SHA, label, age, and the release command.
-`dispatch-worker --review` pins automatically and releases on exit.
+`dispatch-worker --review` pins automatically and releases on exit. Its resolved-marker
+interface (`pin --marker ... --sha ...`) writes without running Git and records the
+invoking script PID. An agy review refuses with exit `3` if its dirty-status probe fails,
+including a target outside a Git repository.
 
 Pins expire: `DISPATCH_REVIEW_PIN_TTL_SECS` (default 14400 = 4h). A stale pin is removed on the
 next `status`/`pin`, so a SIGKILLed review does not wedge the repo forever. Exit codes: `0` ok,
-`1` no pin (or a stale one, now removed), `2` usage/error.
+`1` no pin (or a stale one, now removed), `2` usage/error, `3` bounded setup could not
+complete. Edit dispatch refuses with exit `9` when status returns `3`.
+
+If `review-pin.sh release <repo>` itself exits 3, remove the marker by hand at
+`<git dir>/review-pinned` after checking that the review has ended.
 
 ## `ensure-review-gate.sh`
 

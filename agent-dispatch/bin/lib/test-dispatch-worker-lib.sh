@@ -31,7 +31,7 @@ cat > "$TMP/bin/tee" <<'STUB'
 # Hold the stderr tee before its first read to expose an unwaited capture.
 if [ "${DELAY_CODEX_STDERR_TEE:-0}" = 1 ]; then
   case "${2:-}" in
-    *dispatch-codex-out.*)
+    *dispatch-codex-out.*|/dev/fd/41)
       printf 'delayed\n' > "$CODEX_ARGS_FILE.tee-delay"
       sleep 0.5
       ;;

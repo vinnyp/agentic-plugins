@@ -30,6 +30,7 @@ assert_reaped() {
     fi
   done < "$RUN_PID_FILE"
 }
+fifo_cases=0
 for runtime in codex agy claude; do
   for metadata in objects/info/alternates config HEAD; do
     fixture="$TASK_TMP/repo/.git/$metadata"
@@ -40,6 +41,7 @@ for runtime in codex agy claude; do
     probe_rc=0
     "$TIMER" -k 1 1 "$REAL_GIT" -C "$TASK_TMP/repo" rev-parse --absolute-git-dir >/dev/null 2>&1 || probe_rc=$?
     if [ "$probe_rc" = 124 ]; then
+      fifo_cases=$((fifo_cases + 1))
       rc=0
       (cd "$TASK_TMP/repo" && PATH="$TASK_TMP/bin:$PATH" DISPATCH_SNAPSHOT_TIMEOUT_SECS=1 "$TIMER" -k 1 8 "$SELF_DIR/dispatch-worker" --review --runtime "$runtime" --brief "$TASK_TMP/brief") > "$TASK_TMP/out" 2> "$TASK_TMP/err" || rc=$?
       [ "$rc" = 3 ] || { cat "$TASK_TMP/err"; echo "FAIL: $runtime $metadata rc=$rc"; exit 1; }
@@ -55,6 +57,7 @@ for runtime in codex agy claude; do
     if [ "$existed" = 1 ]; then mv "$saved" "$fixture"; fi
   done
 done
+[ "$fifo_cases" -gt 0 ] || { echo 'FAIL: every launch FIFO case skipped'; exit 1; }
 # Unwritable temporary storage must fail before runtime allocation.
 mkdir "$TASK_TMP/readonly"
 chmod 500 "$TASK_TMP/readonly"
