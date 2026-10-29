@@ -335,12 +335,17 @@ not detected as critical:
 - untracked files hidden by an `info/exclude` change (an opaque warning);
 - a pre-existing `branch.X.remote=.` combined with a `merge` change (warning);
 - writes to ignored paths;
-- a detached process acting after the final snapshot.
+- a detached process acting after the final snapshot;
+- a detached process that can write the operator's `TMPDIR` or snapshot directory. Compare's
+  intermediate files and the CLI's snapshot files live there, so such a process can make a compare
+  report clean.
 
-A detached same-user process that can write the plugin install or repository can still tamper with the check after the final snapshot; OS containment remains the remedy.
+A detached same-user process that can write the plugin install, the repository, or the operator's
+`TMPDIR` can still tamper with the check; OS containment remains the remedy.
 
 The remedy for all of these is OS-level containment: a sandbox profile, a
-separate user, or a container that does not mount the source repository writable.
+separate user, or a container that does not mount the source repository or the operator's
+`TMPDIR` writable.
 This boundary is not provided. Do not rely on the gate to block concurrent
 integration; a concurrent pull or rebase during a review is reported as a warning.
 
