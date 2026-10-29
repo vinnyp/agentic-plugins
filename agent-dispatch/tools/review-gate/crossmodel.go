@@ -23,7 +23,7 @@ func rcMeaning(rc int) string {
 	case 2:
 		return "dispatch-worker usage error or dirty-tree refusal - fix the invocation/tree; NOT a build failure"
 	case 3:
-		return "runtime binary not on PATH, or no isolated review worktree could be allocated - fix the environment; NOT a build failure"
+		return "runtime binary not on PATH, no isolated review worktree could be allocated, or launch-time git setup timed out/could not complete - fix the environment; do not fall back to another reviewer on the same repo; NOT a build failure"
 	case 4:
 		return "require-dep gate (n/a in review mode)"
 	case 5:

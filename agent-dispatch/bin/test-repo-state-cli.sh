@@ -327,10 +327,10 @@ case_10_worker_bound() (
   local d script sentinel=sentinel-$RUN_ID mode
   fixture; d=$(outdir)
   mkfifo "$R/.git/objects/info/alternates"
-  sed -n '/^review_state_snapshot_bounded() {$/,/^}$/p' "$BIN/dispatch-worker" > "$d/worker.sh"
+  sed -n '/^review_state_snapshot_bounded() {$/,/^}$/p; /^review_state_compare_bounded() {$/,/^}$/p; /^review_launch_failure() {$/,/^}$/p' "$BIN/dispatch-worker" > "$d/worker.sh"
   # A hostile worker compare: a git read that never returns.
   cat >> "$d/worker.sh" <<'WORKER'
-review_state_compare_unbounded() { git -C "$REVIEW_GIT_DIR" cat-file -p HEAD; }
+review_state_compare_memory() { git -C "$REVIEW_GIT_DIR" cat-file -p HEAD; }
 WORKER
   script="$d/run.sh"
   cat > "$script" <<'RUN'
@@ -338,13 +338,16 @@ set -u
 . "$BIN/lib/repo-state.sh"
 . "$2"
 REVIEW_GIT_DIR="$3/.git" REVIEW_GIT_COMMON_DIR="$3/.git"
-REVIEW_BEFORE_HASH=x REVIEW_INTERIM_HASH='' REVIEW_AFTER_HASH=x REVIEW_SNAPSHOT_DIR=$4
+REVIEW_RUNTIME_LAUNCHED=1 REVIEW_BEFORE=x REVIEW_CURRENT=x
+REPO_STATE_SALT=test
+[ -p "$4/snap" ] || mkfifo "$4/snap"
+[ -p "$4/changes" ] || mkfifo "$4/changes"
 export DISPATCH_SNAPSHOT_TIMEOUT_SECS=1
 case "$1" in
   snapshot) rc=0; review_state_snapshot_bounded "$3" "$4/snap" || rc=$?
-            [ "$(head -n 1 "$4/snap")" = unreadable ] ;;
-  compare) rc=0; review_state_snapshot_bounded "$4/before" "$4/after" "$4/changes" compare || rc=$?
-           [ "$rc" = 2 ] && grep -qx 'state: compare timed out' "$4/changes" ;;
+            [ "${REPO_STATE_BOUND_OUT%%$'\n'*}" = unreadable ] && [ -p "$4/snap" ] ;;
+  compare) rc=0; review_state_compare_bounded || rc=$?
+           [ "$rc" = 2 ] && [[ "$REPO_STATE_BOUND_OUT" = *'drift check could not complete'* ]] && [ -p "$4/changes" ] ;;
   flags-off) set +m; before=$-; DISPATCH_SNAPSHOT_TIMEOUT_SECS=5 review_state_snapshot_bounded "$3" "$4/ok"; [ "$-" = "$before" ] ;;
   flags-on) set -m; before=$-; DISPATCH_SNAPSHOT_TIMEOUT_SECS=5 review_state_snapshot_bounded "$3" "$4/ok"; [ "$-" = "$before" ] ;;
 esac
@@ -367,7 +370,7 @@ set -u
 . "$BIN/lib/repo-state.sh"
 . "$1"
 REVIEW_GIT_DIR="$2/.git" REVIEW_GIT_COMMON_DIR="$2/.git"
-REVIEW_BEFORE_HASH=x REVIEW_INTERIM_HASH='' REVIEW_AFTER_HASH=x REVIEW_SNAPSHOT_DIR=$3
+REVIEW_RUNTIME_LAUNCHED=1
 REPO_STATE_SALT=$SENTINEL
 DISPATCH_SNAPSHOT_TIMEOUT_SECS=3
 review_state_snapshot_bounded "$2" "$3/argv-snap" || true
