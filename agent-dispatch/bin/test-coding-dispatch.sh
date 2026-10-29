@@ -147,6 +147,17 @@ PATH="$old_path"
 [ -f "$P_unpin/pin_guard_change.txt" ] || fail "#140 unpinned dispatch should keep the agent change"
 echo "test #140 unpinned dispatch still succeeds PASS"
 
+# A packaged caller without review-pin.sh retains the optional pin check.
+missing_pin_bin="$TMP/missing-pin-bin"; mkdir -p "$missing_pin_bin"
+cp "$CD" "$SELF_DIR/gate-run.sh" "$missing_pin_bin/"
+cp -R "$SELF_DIR/lib" "$missing_pin_bin/lib"
+[ ! -e "$missing_pin_bin/review-pin.sh" ] || fail "missing-pin fixture unexpectedly has helper"
+P_missing_pin="$TMP/missing_pin_parent"; new_parent "$P_missing_pin"
+CODING_DISPATCH_PREAMBLE="$SELF_DIR/../docs/dispatch-preamble.md" AGENT_INVOKED_FILE="$TMP/missing_pin.invoked" PATH="$TMP/pin_negative_bin:$PATH" bash "$missing_pin_bin/coding-dispatch.sh" codex "$P_missing_pin" "$TMP/prompt" true >"$TMP/out_missing_pin" 2>&1; rc=$?
+[ "$rc" -eq 0 ] || { cat "$TMP/out_missing_pin"; fail "missing review-pin.sh should proceed, got $rc"; }
+[ -e "$TMP/missing_pin.invoked" ] && [ -f "$P_missing_pin/pin_guard_change.txt" ] || fail "missing review-pin.sh should allow agent changes"
+echo "test missing review-pin.sh dispatch proceeds PASS"
+
 # #140 stale pins fall through: status removes the stale marker and dispatch proceeds.
 P_stale="$TMP/pin_stale_parent"; new_parent "$P_stale"
 stale_marker="$(review_pin_marker "$P_stale")"
