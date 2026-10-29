@@ -404,7 +404,7 @@ repo_state_compare_memory() {
   text=$(_repo_state_compare_text "$@"; result=$?; printf x; exit "$result") || result=$?
   text=${text%x}
   REPO_STATE_BOUND_OUT=$(printf '%s' "$text" | _repo_state_escape_output; result=$?; printf x; exit "$result") || {
-    REPO_STATE_BOUND_OUT='state: compare could not complete (escape failed)'
+    REPO_STATE_BOUND_OUT=$'state: compare could not complete (escape failed)\n'
     return 3
   }
   REPO_STATE_BOUND_OUT=${REPO_STATE_BOUND_OUT%x}
@@ -539,7 +539,7 @@ _repo_state_compare_text() (
   done || { _repo_state_compare_failed feed; return 3; }
   found=0
   _repo_state_probe "$after" -F '\t' '$1=="unsafe" {found=1} END {exit !found}' || found=$?
-  case "$found" in 0) unsafe=1; rc=2 ;; 1) ;; *) return 3 ;; esac
+  case "$found" in 0) unsafe=1; rc=2 ;; 1) ;; *) _repo_state_compare_failed awk; return 3 ;; esac
   if printf '%s\n' "$records" | { while IFS=$'\t' read -r kind key old new remote line; do
     [ -n "$kind" ] || continue
     [ "$rc" -ge 1 ] || rc=1
@@ -802,7 +802,7 @@ repo_state_run_bounded() {
   # shellcheck disable=SC2034
   REPO_STATE_BOUND_STARTED=1
   if [ -n "$tcmd" ]; then
-    "$tcmd" -k 5 "$limit" bash <(printf '%s\n' "$script_text") "$@" &
+    "$tcmd" -k 5s "${limit}s" bash <(printf '%s\n' "$script_text") "$@" &
     REPO_STATE_BOUND_PID=$!
     pid=$REPO_STATE_BOUND_PID
   else

@@ -219,4 +219,24 @@ grep -q 'path%0Awith newline' "$TMP/a" || fail 'NUL dirty path lost'
 git -C "$TMP/repo" config core.hooksPath changed
 repo_state_snapshot "$TMP/repo" "$TMP/b"
 rc_is 2 repo_state_compare "$TMP/a" "$TMP/b" "$TMP/changes"
+# A failed AFTER unsafe probe must retain a diagnostic, not just rc 3.
+(
+  before=$(cat "$TMP/a")
+  after=$(cat "$TMP/b")
+  eval "$(declare -f _repo_state_probe | sed '1s/_repo_state_probe/_repo_state_probe_real/')"
+  _repo_state_probe() {
+    if [ "$1" = "$after" ] && [ "$4" = '$1=="unsafe" {found=1} END {exit !found}' ]; then return 3; fi
+    _repo_state_probe_real "$@"
+  }
+  rc_is 3 repo_state_compare_memory "$before" "$after"
+  case "$REPO_STATE_BOUND_OUT" in
+    *$'state: compare could not complete (awk failed)\n') ;;
+    *) fail 'AFTER unsafe probe lost diagnostic or final newline' ;;
+  esac
+)
+(
+  _repo_state_escape_output() { return 3; }
+  rc_is 3 repo_state_compare_memory "$(cat "$TMP/a")" "$(cat "$TMP/b")"
+  [ "$REPO_STATE_BOUND_OUT" = $'state: compare could not complete (escape failed)\n' ] || fail 'escape failure payload lacks final newline'
+)
 echo 'repo-state memory tests passed'

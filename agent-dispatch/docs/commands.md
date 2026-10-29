@@ -1192,6 +1192,8 @@ as unknown identity; only a definite parent mismatch stops a wrapper.
 | `RUN_TESTS_TIMEOUT` | `run-tests.sh` | `420` seconds per suite; positive decimal integer; overridden by `--timeout`; kill grace 15 seconds |
 | `RUN_TESTS__TEST_KILL_GRACE` | `run-tests.sh` | test-only TERM-to-KILL grace override; positive integer seconds (default `15`) |
 | `RUN_TESTS_KEEP_LOGS` | `run-tests.sh` | `1` retains logs after a passing full or partial run; failure and interruption always retain them |
+| `DISPATCH_SNAPSHOT_TIMEOUT_SECS` | review setup and snapshots, `review-pin.sh`, `repo-state-check` | 1–86400 decimal seconds; default 120 for dispatcher/pins, 60 for `repo-state-check`; invalid values warn and use the default |
+| `DISPATCH_CLONE_TIMEOUT_SECS` | review clone setup | 1–86400 decimal seconds; default 600; invalid values warn and use the default; timeout refuses launch without fallback |
 | `CODING_DISPATCH_TIMEOUT` | `coding-dispatch.sh` | `15m` (codex) / `25m` (agy) — the external bound on the agent |
 | `CODING_DISPATCH_WORKTREE` | `coding-dispatch.sh`, `coding-build-phase.sh` | the worktree/branch slug; a worktree with that slug is reused so a multi-task phase accumulates on one branch |
 | `CODING_DISPATCH_RM_ON_FAIL` | `coding-dispatch.sh` | `1` = remove the worktree on failure instead of salvaging it; the patch still survives under the parent repo's git dir |

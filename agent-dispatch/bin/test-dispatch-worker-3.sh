@@ -316,10 +316,13 @@ check_state_run 0
 grep -qF 'DISPATCH_REVIEW_STATE=clean' "$TMP/cfg.err" || fail 'agy planted files changed verdict'
 # Removing the whole state directory must preserve the critical exit and diagnostic.
 # shellcheck disable=SC2016
-printf 'rm -rf "$(dirname "$GIT_CONFIG_GLOBAL")"\n' > "$AGY_STUB_ACTIONS"
+printf 'git -C "$SRC" config core.hooksPath /dev/null\nrm -rf "$(dirname "$GIT_CONFIG_GLOBAL")"\n' > "$AGY_STUB_ACTIONS"
 check_state_run 10
 grep -qE 'DISPATCH_REVIEW_STATE=critical\([0-9]' "$TMP/cfg.err" || fail 'agy state loss count absent'
 grep -qF '  state: review state directory missing or unreadable' "$TMP/cfg.err" || fail 'agy state loss diagnostic absent'
+grep -qi 'config core.hookspath' "$TMP/cfg.err" || fail 'agy state loss hid hooksPath change'
+! grep -q '^  $' "$TMP/cfg.err" || fail 'blank change-list line'
+cp "$TMP/state-config.before" "$SRC/.git/config"
 cat > "$TMP/bin/claude" <<'STUB'
 #!/usr/bin/env bash
 cat >/dev/null

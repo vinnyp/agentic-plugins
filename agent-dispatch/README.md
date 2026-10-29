@@ -261,6 +261,9 @@ Review launch-time git setup fails closed with exit 3 before launching a reviewe
 `DISPATCH_SNAPSHOT_TIMEOUT_SECS` bounds the launch probe and state checks.
 
 Review launch refuses when bounded setup or the agy dirty-status probe fails.
+Agy authentication refusals retain exit 7 before the dirty-status refusal.
+Drift diagnostics retain every change even when the reviewer removes its state
+directory, and omit empty change-list lines.
 Interrupted runtimes report `skipped(not-checked)` until drift checking completes.
 Temporary output reads are bounded even if a runtime replaces their paths with FIFOs.
 Edit dispatch refuses when review pin status cannot be determined (exit 3).

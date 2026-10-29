@@ -360,10 +360,6 @@ if [ "$REVIEW" = 1 ]; then
       dirty) _review_dirty_seen=1; REVIEW_DIRTY_STATUS=$(printf '%s' "$_review_value" | base64 -d) ;;
     esac
   done <<< "$REPO_STATE_BOUND_OUT"
-  if [ "$RUNTIME" = agy ] && { [ "$_review_dirty_rc" != 0 ] || [ "$_review_dirty_seen" != 1 ]; }; then
-    echo "dispatch-worker: dirty status probe failed (dirty-rc=$_review_dirty_rc; dirty record=$_review_dirty_seen); no reviewer was launched" >&2
-    review_launch_failure 125
-  fi
   export -n REVIEW_GIT_DIR REVIEW_GIT_COMMON_DIR
   _review_pin_rc=2
   if [ -n "$REVIEW_GIT_DIR" ] && [ -n "$REVIEW_PROBE_HEAD" ]; then
@@ -782,6 +778,10 @@ dispatch_agy() {
       return "$auth_rc"
       ;;
   esac
+  if [ "$REVIEW" = 1 ] && { [ "$_review_dirty_rc" != 0 ] || [ "$_review_dirty_seen" != 1 ]; }; then
+    echo "dispatch-worker: dirty status probe failed (dirty-rc=$_review_dirty_rc; dirty record=$_review_dirty_seen); no reviewer was launched" >&2
+    review_launch_failure 125
+  fi
   echo "dispatch-worker: agy model: $agy_model ($agy_role, $agy_source)" >&2
   if [ -n "$AGENT" ]; then
     local agent_roster agent_rc=0 roster_timeout=""
@@ -1225,18 +1225,14 @@ if [ "$REVIEW" = 1 ]; then
     1)
       REVIEW_STATE_STATUS="warn($REVIEW_STATE_N)"
       echo "dispatch-worker: warning: source repo moved during the review (may be concurrent work):" >&2 || true
-      printf '%s\n' "$REVIEW_CHANGES" | sed 's/^/  /' >&2 || true ;;
+      printf '%s\n' "$REVIEW_CHANGES" | sed '/^$/d; s/^/  /' >&2 || true ;;
     2)
       REVIEW_STATE_STATUS="critical($REVIEW_STATE_N)"
       if [ "$REVIEW_RUNTIME_LAUNCHED" = 1 ]; then rc=10; fi
       if [ "$REVIEW_RUNTIME_LAUNCHED" = 1 ]; then
         echo "dispatch-worker: SOURCE REPO CHANGED DURING THE REVIEW WINDOW (reviewer or a concurrent session; cause not attributed)." >&2 || true
         echo "Inspect and restore these before committing in that repo; the review body stands only if every change is known concurrent work:" >&2 || true
-        if [ -d "$REVIEW_STATE_DIR" ]; then
-          printf '%s\n' "$REVIEW_CHANGES" | sed 's/^/  /' >&2 || true
-        else
-          echo '  state: review state directory missing or unreadable' >&2 || true
-        fi
+        printf '%s\n' "$REVIEW_CHANGES" | sed '/^$/d; s/^/  /' >&2 || true
         echo "(the run would otherwise have exited $REVIEW_ORIGINAL_RC)" >&2 || true
       fi ;;
     *)
