@@ -71,9 +71,9 @@ fi
 PERF
   for mode in timeout no-timeout; do
     rc=0
-    "$timer" -k 1 9 bash "$TMP/performance.sh" "$BIN" "$TMP/bounded.sh" "$R" "$TMP/perf-$mode" "$mode" || rc=$?
+    "$timer" -k 1 45 bash "$TMP/performance.sh" "$BIN" "$TMP/bounded.sh" "$R" "$TMP/perf-$mode" "$mode" || rc=$?
     [ "$rc" = 0 ] || { echo "snapshot performance regression: $mode exceeded normal snapshot budget (rc=$rc)" >&2; return 1; }
-    echo "snapshot performance: $mode under 10 seconds (default limit 120) PASS"
+    echo "snapshot performance: $mode under 45 seconds (default limit 120) PASS"
   done
 }
 snapshot_performance

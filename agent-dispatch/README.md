@@ -28,7 +28,8 @@ workspace with permissions enforced. Every runtime's review checks source state 
 critical drift exits 10 and stops the review gate. Inspect and restore the named changes before
 committing, then re-run. See [the command reference](docs/commands.md#dispatch-worker).
 
-Repository-state snapshots hash sensitive config values and replace URL userinfo
+Comparison rejects malformed snapshot headers and NUL bytes, and reports failed input
+feeds as input errors. Repository-state snapshots hash sensitive config values and replace URL userinfo
 in config keys with the first 12 hex digits of its SHA-256 digest. Credentialed
 keys remain distinct for change detection; change reports omit the userinfo.
 

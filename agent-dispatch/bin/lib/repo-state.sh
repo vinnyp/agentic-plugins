@@ -288,7 +288,7 @@ _repo_state_snapshot_text() (
       printf 'metadata\t%s\t%s\n' "$path" "$digest"
     done
     wt='' head='' branch=''
-    while IFS= read -r record || [ -n "$record" ]; do
+    printf '%s\n\n' "$worktrees" | while IFS= read -r record || [ -n "$record" ]; do
       case "$record" in
         'worktree '*) wt=${record#worktree } ;;
         'HEAD '*) head=${record#HEAD } ;;
@@ -299,13 +299,13 @@ _repo_state_snapshot_text() (
           _repo_state_tree "$wt" || return 3
           wt='' head='' branch='' ;;
       esac
-    done <<< "$worktrees"$'\n'
+    done || return 3
     [ -z "$config" ] || printf '%s\n' "$config"
-    while IFS= read -r wt; do
+    printf '%s\n' "$worktrees" | while IFS= read -r wt; do
       case "$wt" in 'worktree '*) wt=${wt#worktree } ;; *) continue ;; esac
       [ "$wt" != "$top" ] && [ -d "$wt" ] || continue
       _repo_state_worktree_configs "$wt" || return 3
-    done <<< "$worktrees"
+    done || return 3
   }
 
   return 0
@@ -348,18 +348,31 @@ _repo_state_found() {
   return "$status"
 }
 
+# A failed producer is an input error, never an awk "not found" result.
+_repo_state_probe() (
+  set -o pipefail
+  local text=$1
+  local statuses=()
+  shift
+  printf '%s\n' "$text" | _repo_state_found "$@"
+  statuses=("${PIPESTATUS[@]}")
+  [ "${statuses[0]}" = 0 ] || return 3
+  return "${statuses[1]}"
+)
+
 # A tagged stream makes input identity independent of filenames and empty passes.
-_repo_state_tagged() {
+_repo_state_tagged() (
+  set -o pipefail
   local line tag text
   for tag in O N; do
     if [ "$tag" = O ]; then text=$1; else text=$2; fi
     [ -n "$text" ] || continue
-    while IFS= read -r line || [ -n "$line" ]; do
+    printf '%s\n' "$text" | while IFS= read -r line || [ -n "$line" ]; do
       [ -n "$line" ] || continue
       printf '%s\t%s\n' "$tag" "$line" || return 1
-    done <<< "$text"
+    done || return 3
   done
-}
+)
 
 _repo_state_pairs() (
   set -o pipefail
@@ -400,22 +413,29 @@ repo_state_compare_memory() {
 }
 
 # Read an input exactly once, preserving trailing newlines. FIFOs are valid inputs.
-_repo_state_read_file() {
+_repo_state_read_file() (
+  set -o pipefail
+  local encoded bytes
+  local LC_ALL=C
   [ -r "$1" ] && [ ! -d "$1" ] || return 1
-  REPO_STATE_READ=$(cat -- "$1" || exit 1; printf x) || return 1
+  encoded=$(base64 < "$1") || return 1
+  bytes=$(printf '%s' "$encoded" | base64 -d | wc -c) || return 1
+  REPO_STATE_READ=$(printf '%s' "$encoded" | base64 -d || exit 1; printf x) || return 1
   REPO_STATE_READ=${REPO_STATE_READ%x}
-}
+  [ "$bytes" -eq "${#REPO_STATE_READ}" ] || return 1
+  printf '%s' "$REPO_STATE_READ"
+)
 
 repo_state_compare_files() {
   local before after result=0
-  if ! _repo_state_read_file "$1"; then
+  if ! before=$(_repo_state_read_file "$1"; result=$?; printf x; exit "$result"); then
     REPO_STATE_BOUND_OUT=$'state: <unreadable before snapshot>\n'; result=3
   else
-    before=$REPO_STATE_READ
-    if ! _repo_state_read_file "$2"; then
+    before=${before%x}
+    if ! after=$(_repo_state_read_file "$2"; result=$?; printf x; exit "$result"); then
       REPO_STATE_BOUND_OUT=$'config: <unreadable after review>\n'; result=2
     else
-      after=$REPO_STATE_READ
+      after=${after%x}
       repo_state_compare_memory "$before" "$after" || result=$?
     fi
   fi
@@ -432,33 +452,37 @@ repo_state_compare() {
 _repo_state_compare_text() (
   set -o pipefail
   local before=$1 after=$2 first='' scope origin key old new rc=0 remote line found
+  local feed_status=()
   local diff records exclude='' exclude_ready=0 commits dirty
+  case "${before%%$'\n'*}" in repo$'\t'*|unreadable) ;; *) printf 'state: invalid before snapshot\n'; return 3 ;; esac
+  case "${after%%$'\n'*}" in repo$'\t'*|unreadable) ;; *) printf 'state: invalid after snapshot\n'; return 2 ;; esac
   found=0
-  _repo_state_found -F '\t' '$1=="unsafe" {found=1} END {exit !found}' <<< "$before" || found=$?
+  _repo_state_probe "$before" -F '\t' '$1=="unsafe" {found=1} END {exit !found}' || found=$?
   [ "$found" -le 1 ] || { _repo_state_compare_failed awk; return 3; }
   if [ "$found" = 0 ]; then
-    while IFS=$'\t' read -r kind key; do
+    printf '%s\n' "$before" | while IFS=$'\t' read -r kind key; do
       [ "$kind" = unsafe ] || continue
       printf 'nonregular %s: critical\n' "$(_repo_state_escape_value "$(_repo_state_decode "$key")")"
-    done <<< "$before"
+    done || { _repo_state_compare_failed feed; return 3; }
     return 2
   fi
-  IFS= read -r first <<< "$before" || true
+  first=${before%%$'\n'*}
   if [ "$first" = unreadable ]; then
     printf 'state: <unreadable before snapshot>\n'
     return 3
   fi
-  IFS= read -r first <<< "$after" || true
+  first=${after%%$'\n'*}
   if [ "$first" = unreadable ]; then
-    while IFS=$'\t' read -r kind key; do
+    printf '%s\n' "$after" | while IFS=$'\t' read -r kind key; do
       [ "$kind" = unsafe ] || continue
       printf 'nonregular %s: critical\n' "$(_repo_state_escape_value "$(_repo_state_decode "$key")")"
-    done <<< "$after"
+    done || { _repo_state_compare_failed feed; return 3; }
     printf 'config: <unreadable after review>\n'
     return 2
   fi
   diff=$(_repo_state_pairs config "$before" "$after") || { _repo_state_compare_failed awk; return 3; }
-  while IFS= read -r line; do
+  rc=0
+  if printf '%s\n' "$diff" | { while IFS= read -r line; do
     scope=${line%%$'\t'*}; line=${line#*$'\t'}
     origin=${line%%$'\t'*}; line=${line#*$'\t'}
     key=${line%%$'\t'*}; line=${line#*$'\t'}
@@ -471,20 +495,20 @@ _repo_state_compare_text() (
         remote=$(_repo_state_decode "$new")
         if [ "$remote" = . ]; then
           found=0
-          REPO_STATE_MERGE="${key%.remote}.merge" _repo_state_found -F '\t' '$3==ENVIRON["REPO_STATE_MERGE"] {found=1} END {exit !found}' <<< "$diff" || found=$?
+          REPO_STATE_MERGE="${key%.remote}.merge" _repo_state_probe "$diff" -F '\t' '$3==ENVIRON["REPO_STATE_MERGE"] {found=1} END {exit !found}' || found=$?
           case "$found" in 0) rc=2 ;; 1) ;; *) _repo_state_compare_failed awk; return 3 ;; esac
         fi
         # Local repository sentinel and pre-existing remote names are benign.
         if [ "$remote" != . ] && [ "$new" != '(absent)' ]; then
           found=0
-          REPO_STATE_REMOTE="$remote" _repo_state_found -F '\t' '$1=="config" && $4 ~ /^remote\./ {name=$4; sub(/^remote\./,"",name); sub(/\.[^.]*$/,"",name); if(name==ENVIRON["REPO_STATE_REMOTE"]) found=1} END {exit !found}' <<< "$before" || found=$?
+          REPO_STATE_REMOTE="$remote" _repo_state_probe "$before" -F '\t' '$1=="config" && $4 ~ /^remote\./ {name=$4; sub(/^remote\./,"",name); sub(/\.[^.]*$/,"",name); if(name==ENVIRON["REPO_STATE_REMOTE"]) found=1} END {exit !found}' || found=$?
           case "$found" in 0) ;; 1) rc=2 ;; *) _repo_state_compare_failed awk; return 3 ;; esac
         fi ;;
       branch.*.*|remote.*.fetch|remote.*.gh-resolved|gc.*|maintenance.*|extensions.worktreeconfig|core.sparsecheckout|core.sparsecheckoutcone) ;;
       remote.*.*)
         remote=${key#remote.}; remote=${remote%.*}
         found=0
-        REPO_STATE_REMOTE="$remote" _repo_state_found -F '\t' '$1=="config" && $4 ~ /^remote\./ {name=$4; sub(/^remote\./,"",name); sub(/\.[^.]*$/,"",name); if(name==ENVIRON["REPO_STATE_REMOTE"]) found=1} END {exit !found}' <<< "$before" || found=$?
+        REPO_STATE_REMOTE="$remote" _repo_state_probe "$before" -F '\t' '$1=="config" && $4 ~ /^remote\./ {name=$4; sub(/^remote\./,"",name); sub(/\.[^.]*$/,"",name); if(name==ENVIRON["REPO_STATE_REMOTE"]) found=1} END {exit !found}' || found=$?
         case "$found" in
           0) rc=2 ;;
           1) case "$key" in remote.*.url) ;; *) rc=2 ;; esac ;;
@@ -495,20 +519,29 @@ _repo_state_compare_text() (
     printf 'config %s (%s:%s): %s -> %s\n' \
       "$(printf '%s' "$key" | sed -E 's#(//)[^/]*@#\1#g; s#[?].*#?<redacted>#')" "$scope" "$origin" \
       "$(_repo_state_display "$key" "$old")" "$(_repo_state_display "$key" "$new")"
-  done <<< "$diff"
+  done; exit "$rc"; }; then
+    feed_status=("${PIPESTATUS[@]}")
+  else
+    feed_status=("${PIPESTATUS[@]}")
+  fi
+  [ "${feed_status[0]}" = 0 ] || { _repo_state_compare_failed feed; return 3; }
+  rc=${feed_status[1]}
+  [ "$rc" -le 2 ] || { _repo_state_compare_failed feed; return 3; }
   records=$(_repo_state_pairs records "$before" "$after") || { _repo_state_compare_failed awk; return 3; }
   local kind repo sha cn ce identity_name identity_email count paths
-  repo=$(awk -F '\t' '$1=="repo" {print $2;exit}' <<< "$after") || { _repo_state_compare_failed awk; return 3; }
+  repo=$( ( printf '%s\n' "$after" || exit 3 ) | awk -F '\t' '$1=="repo" {if(!seen++) print $2}') || { _repo_state_compare_failed awk; return 3; }
   repo=$(_repo_state_decode "$repo")
-  identity_name=$(awk -F '\t' '$1=="identity" {print $2;exit}' <<< "$before") || { _repo_state_compare_failed awk; return 3; }
-  identity_email=$(awk -F '\t' '$1=="identity" {print $3;exit}' <<< "$before") || { _repo_state_compare_failed awk; return 3; }
+  identity_name=$( ( printf '%s\n' "$before" || exit 3 ) | awk -F '\t' '$1=="identity" {if(!seen++) print $2}') || { _repo_state_compare_failed awk; return 3; }
+  identity_email=$( ( printf '%s\n' "$before" || exit 3 ) | awk -F '\t' '$1=="identity" {if(!seen++) print $3}') || { _repo_state_compare_failed awk; return 3; }
   local unsafe=0
-  while IFS=$'\t' read -r kind key; do
+  printf '%s\n' "$after" | while IFS=$'\t' read -r kind key; do
     [ "$kind" = unsafe ] || continue
     printf 'nonregular %s: critical\n' "$(_repo_state_escape_value "$(_repo_state_decode "$key")")"
-    unsafe=1; rc=2
-  done <<< "$after"
-  while IFS=$'\t' read -r kind key old new remote line; do
+  done || { _repo_state_compare_failed feed; return 3; }
+  found=0
+  _repo_state_probe "$after" -F '\t' '$1=="unsafe" {found=1} END {exit !found}' || found=$?
+  case "$found" in 0) unsafe=1; rc=2 ;; 1) ;; *) return 3 ;; esac
+  if printf '%s\n' "$records" | { while IFS=$'\t' read -r kind key old new remote line; do
     [ -n "$kind" ] || continue
     [ "$rc" -ge 1 ] || rc=1
     case "$kind" in
@@ -529,8 +562,8 @@ _repo_state_compare_text() (
           [ "$unsafe" = 0 ] || continue
           if [ "$exclude_ready" = 0 ]; then
             exclude=$(
-              { awk -F '\t' '$1=="ref" {print $3}' <<< "$before" || exit 1
-                awk -F '\t' '$1=="ref" && $2 ~ /^refs\/remotes\// {print $3}' <<< "$after"; } |
+              { ( printf '%s\n' "$before" || exit 3 ) | awk -F '\t' '$1=="ref" {print $3}' || exit 1
+                ( printf '%s\n' "$after" || exit 3 ) | awk -F '\t' '$1=="ref" && $2 ~ /^refs\/remotes\// {print $3}'; } |
                 _repo_state_git -C "$repo" cat-file --batch-check='%(objectname) %(objecttype)' 2>/dev/null |
                 awk '($2=="commit" || $2=="tag") {print "^" $1}'
             ) || { _repo_state_compare_failed commit-input; return 3; }
@@ -540,14 +573,21 @@ _repo_state_compare_text() (
           if ! commits=$(printf '%s\n' "$exclude" | _repo_state_git --history -C "$repo" rev-list --stdin "$new" 2>/dev/null); then
             printf 'commit-check %s: failed\n' "$key"; rc=2; continue
           fi
-          while IFS= read -r sha; do
+          if printf '%s\n' "$commits" | { while IFS= read -r sha; do
             [ -n "$sha" ] || continue
             cn=$(_repo_state_git --history -C "$repo" show -s --format=%cn "$sha") || return 3
             ce=$(_repo_state_git --history -C "$repo" show -s --format=%ce "$sha") || return 3
             if [ "$(_repo_state_encode "$cn")" != "$identity_name" ] || [ "$(_repo_state_encode "$ce")" != "$identity_email" ]; then
               printf 'commit %s: committer <changed>\n' "$sha"; rc=2
             fi
-          done <<< "$commits" ;;
+          done; exit "$rc"; }; then
+            feed_status=("${PIPESTATUS[@]}")
+          else
+            feed_status=("${PIPESTATUS[@]}")
+          fi
+          [ "${feed_status[0]}" = 0 ] || return 3
+          rc=${feed_status[1]}
+          [ "$rc" -le 2 ] || return 3 ;;
         esac ;;
       worktree)
         [ "$old" = '(absent)' ] || old="HEAD $old"
@@ -564,12 +604,8 @@ _repo_state_compare_text() (
           dirty=$(_repo_state_tagged "$before" "$after" |
             REPO_STATE_WT="$key" awk -F '\t' '$2=="dirty" && $3==ENVIRON["REPO_STATE_WT"] {if($1=="O") old[$4]=1; else newer[$4]=1} END {for(p in newer) if(!(p in old)) print p}' |
             LC_ALL=C sort) || { _repo_state_compare_failed dirty; return 3; }
-          count=0; paths=''
-          while IFS= read -r line; do
-            [ -n "$line" ] || continue
-            count=$((count + 1))
-            [ "$count" -gt 20 ] || paths="${paths:+$paths }$line"
-          done <<< "$dirty"
+          paths=$(printf '%s\n' "$dirty" | awk 'length($0) {n++; if(n<=20) paths=paths (n>1?" ":"") $0} END {print n+0; print paths}') || return 3
+          count=${paths%%$'\n'*}; paths=${paths#*$'\n'}
           if [ "$count" = 0 ]; then
             printf 'tree %s: status changed (no new dirty paths)\n' "$key"
           else
@@ -577,9 +613,16 @@ _repo_state_compare_text() (
           fi
         fi ;;
     esac
-  done <<< "$records"
+  done; exit "$rc"; }; then
+    feed_status=("${PIPESTATUS[@]}")
+  else
+    feed_status=("${PIPESTATUS[@]}")
+  fi
+  [ "${feed_status[0]}" = 0 ] || { _repo_state_compare_failed feed; return 3; }
+  rc=${feed_status[1]}
+  [ "$rc" -le 2 ] || { _repo_state_compare_failed feed; return 3; }
   found=0
-  _repo_state_found -F '\t' '$1=="tree" && $3=="unreadable" {found=1} END {exit !found}' <<< "$before" || found=$?
+  _repo_state_probe "$before" -F '\t' '$1=="tree" && $3=="unreadable" {found=1} END {exit !found}' || found=$?
   case "$found" in
     0)
       printf 'tree check skipped: baseline unreadable\n'
@@ -660,7 +703,7 @@ _repo_state_save_channel() {
   for fd in 7 8; do
     if ( : >&"$fd" ) 2>/dev/null; then
       saved=''
-      for ((candidate=10; candidate<64; candidate++)); do
+      for ((candidate=10; candidate<60; candidate++)); do
         if ! ( : >&"$candidate" ) 2>/dev/null; then
           if eval "exec $candidate>&$fd"; then saved=$candidate; break; fi
         fi
@@ -682,10 +725,10 @@ _repo_state_close_channel() {
   [ "${REPO_STATE_BOUND_CHANNEL_ACTIVE:-0}" = 1 ] || return 0
   exec 7>&- 8>&-
   if [ -n "${REPO_STATE_BOUND_SAVE7:-}" ]; then
-    eval "exec 7>&$REPO_STATE_BOUND_SAVE7 $REPO_STATE_BOUND_SAVE7>&-" || return 125
+    eval "exec 7>&$REPO_STATE_BOUND_SAVE7 $REPO_STATE_BOUND_SAVE7>&-" || echo "repo-state: could not restore caller fd 7" >&2
   fi
   if [ -n "${REPO_STATE_BOUND_SAVE8:-}" ]; then
-    eval "exec 8>&$REPO_STATE_BOUND_SAVE8 $REPO_STATE_BOUND_SAVE8>&-" || return 125
+    eval "exec 8>&$REPO_STATE_BOUND_SAVE8 $REPO_STATE_BOUND_SAVE8>&-" || echo "repo-state: could not restore caller fd 8" >&2
   fi
   REPO_STATE_BOUND_SAVE7='' REPO_STATE_BOUND_SAVE8='' REPO_STATE_BOUND_CHANNEL_ACTIVE=0
 }
@@ -743,6 +786,7 @@ repo_state_run_bounded() {
     for name in ${REPO_STATE_BOUND_FUNCS:-}; do declare -f "$name" || exit 1; done
     printf 'REPO_STATE_BOUND_OUT=\047\047\n'
     printf '%q "$@" >/dev/null 7>&- 8>&-\nrc=$?\n' "$operation"
+    printf 'case "$rc" in 124|137) echo "repo-state: operation returned reserved timeout status $rc" >&2; rc=125 ;; esac\n'
     printf 'LC_ALL=C\n'
     printf 'if [ "${#REPO_STATE_BOUND_OUT}" -gt 67108864 ]; then printf "%%s output exceeded 64 MiB; not evaluated\\n" %q >&2; exit 125; fi\n' "$operation"
     printf 'printf "%%s\\n@@done %%s %%s" "$REPO_STATE_BOUND_OUT" "$rc" "${#REPO_STATE_BOUND_OUT}" >&7 || exit 125\nexit "$rc"\n'

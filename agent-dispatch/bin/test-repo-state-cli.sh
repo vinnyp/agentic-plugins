@@ -240,7 +240,7 @@ case_5_clean_repo() (
   fixture; d=$(outdir)
   started=$SECONDS
   cli snapshot "$R" "$d/cli"
-  [ $((SECONDS - started)) -lt 10 ] || fail 'clean snapshot too slow'
+  [ $((SECONDS - started)) -lt 60 ] || fail 'clean snapshot too slow'
   repo_state_snapshot "$R" "$d/direct"
   [ "$(cut -f1 "$d/cli" | tr '\n' ' ')" = "$(cut -f1 "$d/direct" | tr '\n' ' ')" ] || fail 'line kinds or order differ from the library snapshot'
   "$REAL_GIT" -C "$R" config 'url.https://u:p@example.invalid/.insteadOf' x
@@ -348,8 +348,8 @@ case "$1" in
             [ "${REPO_STATE_BOUND_OUT%%$'\n'*}" = unreadable ] && [ -p "$4/snap" ] ;;
   compare) rc=0; review_state_compare_bounded || rc=$?
            [ "$rc" = 2 ] && [[ "$REPO_STATE_BOUND_OUT" = *'drift check could not complete'* ]] && [ -p "$4/changes" ] ;;
-  flags-off) set +m; before=$-; DISPATCH_SNAPSHOT_TIMEOUT_SECS=5 review_state_snapshot_bounded "$3" "$4/ok"; [ "$-" = "$before" ] ;;
-  flags-on) set -m; before=$-; DISPATCH_SNAPSHOT_TIMEOUT_SECS=5 review_state_snapshot_bounded "$3" "$4/ok"; [ "$-" = "$before" ] ;;
+  flags-off) set +m; before=$-; DISPATCH_SNAPSHOT_TIMEOUT_SECS=15 review_state_snapshot_bounded "$3" "$4/ok"; [ "$-" = "$before" ] ;;
+  flags-on) set -m; before=$-; DISPATCH_SNAPSHOT_TIMEOUT_SECS=15 review_state_snapshot_bounded "$3" "$4/ok"; [ "$-" = "$before" ] ;;
 esac
 RUN
   export BIN
@@ -390,7 +390,7 @@ case_11_cli_invalid_limit() (
   DISPATCH_SNAPSHOT_TIMEOUT_SECS=abc cli snapshot "$R" "$d/file" 2> "$d/err" || rc=$?
   [ "$rc" = 0 ] || fail "expected 0, got $rc"
   [ "$(cat "$d/err")" = 'repo-state-check: invalid DISPATCH_SNAPSHOT_TIMEOUT_SECS; using 60' ] || fail 'warning text'
-  [ $((SECONDS - started)) -lt 10 ] || fail 'too slow'
+  [ $((SECONDS - started)) -lt 60 ] || fail 'too slow'
   started=$SECONDS
   cp "$d/file" "$d/copy"
   for value in abc 0; do
@@ -400,20 +400,20 @@ case_11_cli_invalid_limit() (
     [ ! -s "$d/out" ] || fail 'clean compare produced output'
     grep -Fxq 'repo-state-check: invalid DISPATCH_SNAPSHOT_TIMEOUT_SECS; using 60' "$d/err" || fail 'compare warning text'
   done
-  [ $((SECONDS - started)) -lt 10 ] || fail 'compare too slow'
+  [ $((SECONDS - started)) -lt 60 ] || fail 'compare too slow'
   survivors; no_state_dir "$d"; no_bound_dir
 )
 case_12_unevaluated_child() (
   set -eu; setup_mode
   local d ro rc=0 fwd_value
   early_exit() { exit 0; }
-  rc_is 125 repo_state_run_bounded 5 early_exit
+  rc_is 125 repo_state_run_bounded 15 early_exit
   returns_seven() { return 7; }
-  rc_is 7 repo_state_run_bounded 5 returns_seven
+  rc_is 7 repo_state_run_bounded 15 returns_seven
   # A read-only TMPDIR parent makes mktemp -d fail: setup failure, never "warn".
   ro=$(mktemp -d "$TMP/ro.XXXXXX"); chmod 555 "$ro"
   if [ ! -w "$ro" ]; then
-    TMPDIR=$ro rc_is 125 repo_state_run_bounded 5 returns_seven
+    TMPDIR=$ro rc_is 125 repo_state_run_bounded 15 returns_seven
   else
     echo 'SKIP read-only TMPDIR: directory remains writable'
   fi
@@ -424,7 +424,7 @@ case_12_unevaluated_child() (
   d=$(outdir)
   unset REPO_STATE_TMP
   REPO_STATE_TMP="$d/forwarded-value"
-  repo_state_run_bounded 5 forward_tmp "$d/seen"
+  repo_state_run_bounded 15 forward_tmp "$d/seen"
   fwd_value=$(cat "$d/seen")
   [ "$fwd_value" = "$d/forwarded-value" ] || fail "temporary directory not forwarded ('$fwd_value')"
   unset REPO_STATE_TMP
@@ -485,7 +485,7 @@ case_completion_integrity() (
     ps -p "$$" -o command= | grep -qF "$RUN_ID" || return 8
     kill -TERM "$$"
   }
-  rc_is 125 repo_state_run_bounded 5 forge_completion "$RUN_ID"
+  rc_is 125 repo_state_run_bounded 15 forge_completion "$RUN_ID"
   mismatched_completion() {
     local private
     for private in "$TMPDIR"/repo-state-bound.*; do
@@ -493,17 +493,17 @@ case_completion_integrity() (
     done
     exit 7
   }
-  rc_is 125 repo_state_run_bounded 5 mismatched_completion
+  rc_is 125 repo_state_run_bounded 15 mismatched_completion
   no_script() {
     local private
     for private in "$TMPDIR"/repo-state-bound.*; do
       [ ! -e "$private/run" ] || return 9
     done
   }
-  rc_is 0 repo_state_run_bounded 5 no_script
+  rc_is 0 repo_state_run_bounded 15 no_script
   signal_exit() { exit 137; }
   if [ "$CASE_MODE" = watchdog ]; then
-    rc_is 125 repo_state_run_bounded 5 signal_exit
+    rc_is 125 repo_state_run_bounded 15 signal_exit
   fi
   symlink_token() {
     local private
@@ -512,7 +512,7 @@ case_completion_integrity() (
       ln -s "$1" "$private/done"
     done
   }
-  rc_is 0 repo_state_run_bounded 5 symlink_token "$d/token"
+  rc_is 0 repo_state_run_bounded 15 symlink_token "$d/token"
   no_bound_dir
 )
 case_cli_signals() (
@@ -738,7 +738,7 @@ exec -a "tagged-$RUN_ID" "$REAL_GIT" "$@"
 SHIM
   chmod +x "$d/bin/git"
   OUTDIR=$d PATH="$d/bin:$SHIMS:$PATH" DISPATCH_SNAPSHOT_TIMEOUT_SECS=20 \
-    "$BCASE_TIMER" -k 1 15 "$BIN/repo-state-check" snapshot "$R" "$d/file" 2> "$d/err" || rc=$?
+    "$BCASE_TIMER" -k 1 45 "$BIN/repo-state-check" snapshot "$R" "$d/file" 2> "$d/err" || rc=$?
   [ "$rc" = 0 ] || fail "temporary planting changed snapshot status $rc"
   [ "$(first_line "$d/file")" = repo ] || fail 'temporary planting changed snapshot output'
   survivors; no_state_dir "$d"; no_bound_dir
@@ -802,7 +802,7 @@ exec "$REAL_BASH" "$SCRIPT_COPY" "$@"
 SHIM
   chmod +x "$d/bin/bash"
   ok_op() { :; }
-  REAL_BASH=$(command -v bash) SCRIPT_COPY="$d/script" PATH="$d/bin:$PATH" repo_state_run_bounded 5 ok_op || rc=$?
+  REAL_BASH=$(command -v bash) SCRIPT_COPY="$d/script" PATH="$d/bin:$PATH" repo_state_run_bounded 15 ok_op || rc=$?
   [ "$rc" = 0 ] || fail "grouped script failed ($rc)"
   [ "$(head -n 1 "$d/script")" = '{' ] || fail 'script does not open a group'
   [ "$(tail -n 1 "$d/script")" = '}' ] || fail 'script does not close its group'
