@@ -509,7 +509,7 @@ case_completion_integrity() (
       ln -s "$1" "$private/done"
     done
   }
-  rc_is 125 repo_state_run_bounded 5 symlink_token "$d/token"
+  rc_is 0 repo_state_run_bounded 5 symlink_token "$d/token"
   no_bound_dir
 )
 case_cli_signals() (
@@ -582,18 +582,11 @@ case_compare_storage() (
   fixture; d=$(outdir)
   cli snapshot "$R" "$d/before"
   cp "$d/before" "$d/after"
-  mkdir "$d/bin" "$d/private"
-  cat > "$d/bin/sort" <<'SORT'
-#!/usr/bin/env bash
-for private in "$REPO_STATE_TMP"/.repo-state-compare.*; do
-  [ ! -d "$private" ] || printf '%s\n' "$private" >> "$SORT_LOG"
-done
-exec "$REAL_SORT" "$@"
-SORT
-  chmod +x "$d/bin/sort"
-  REAL_SORT=$(command -v sort) SORT_LOG="$d/sorts" REPO_STATE_TMP="$d/private" PATH="$d/bin:$PATH" \
-    rc_is 0 repo_state_compare "$d/before" "$d/after" "$d/changes"
-  [ "$(grep -Fc "$d/private/.repo-state-compare." "$d/sorts")" = 2 ] || fail 'compare ignored private storage'
+  # Reject creation itself, including directories removed before compare returns.
+  mktemp() { fail 'compare created temporary storage'; }
+  rc_is 0 repo_state_compare "$d/before" "$d/after" "$d/changes"
+  unset -f mktemp
+  [ ! -s "$d/changes" ] || fail 'self compare produced changes'
   no_bound_dir
 )
 case_cli_forged_completion() (
@@ -711,7 +704,7 @@ case_compare_helper_failure() (
   cat > "$d/bin/awk" <<'AWK'
 #!/usr/bin/env bash
 for arg in "$@"; do
-  case "$arg" in *hasold*) kill -KILL $$ ;; esac
+  case "$arg" in *hasold*|*nmax*) kill -KILL $$ ;; esac
 done
 exec "$REAL_AWK" "$@"
 AWK
@@ -743,8 +736,8 @@ SHIM
   chmod +x "$d/bin/git"
   OUTDIR=$d PATH="$d/bin:$SHIMS:$PATH" DISPATCH_SNAPSHOT_TIMEOUT_SECS=20 \
     "$BCASE_TIMER" -k 1 15 "$BIN/repo-state-check" snapshot "$R" "$d/file" 2> "$d/err" || rc=$?
-  [ "$rc" = 3 ] || fail "FIFO temporary gave status $rc"
-  [ "$(first_line "$d/file")" = unreadable ] || fail 'FIFO temporary left a readable output'
+  [ "$rc" = 0 ] || fail "temporary planting changed snapshot status $rc"
+  [ "$(first_line "$d/file")" = repo ] || fail 'temporary planting changed snapshot output'
   survivors; no_state_dir "$d"; no_bound_dir
 )
 

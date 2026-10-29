@@ -362,8 +362,16 @@ review_state_snapshot_bounded() {
   if [ "$operation" = compare ]; then
     repo_state_run_bounded "$limit" review_state_compare_unbounded "$1" "$2" "$3" || result=$?
   else
-    repo_state_run_bounded "$limit" repo_state_snapshot "$1" "$2" || result=$?
+    repo_state_run_bounded "$limit" repo_state_snapshot_memory "$1" "$(dirname "$2")/.repo-state-private" || result=$?
   fi
+  case "$result" in
+    0|1|2|3)
+      if [ "$operation" = compare ]; then
+        printf '%s' "$REPO_STATE_BOUND_OUT" > "$3" || result=2
+      else
+        printf '%s' "$REPO_STATE_BOUND_OUT" > "$2" || result=3
+      fi ;;
+  esac
   if [ "$operation" = compare ] && [ "$result" = 125 ]; then
     printf 'state: compare could not complete\n' > "$3"
     return 2
@@ -400,16 +408,16 @@ review_state_compare_pinned() {
 }
 
 review_state_compare_unbounded() {
-  local before=$1 after=$2 changes=$3 actual
+  local before=$1 after=$2 actual
   actual=$({ repo_state_digest < "$before"; } 2>/dev/null) || actual=''
   if [ -z "$actual" ] || [ "$actual" != "$REVIEW_BEFORE_HASH" ]; then
-    printf 'state: snapshot integrity failure (baseline missing or modified)\n' > "$changes"
+    REPO_STATE_BOUND_OUT=$'state: snapshot integrity failure (baseline missing or modified)\n'
     return 2
   fi
   if [ -n "$REVIEW_INTERIM_HASH" ]; then
     actual=$({ repo_state_digest < "$REVIEW_SNAPSHOT_DIR/interim"; } 2>/dev/null) || actual=''
     if [ -z "$actual" ] || [ "$actual" != "$REVIEW_INTERIM_HASH" ]; then
-      printf 'state: snapshot integrity failure (interim missing or modified)\n' > "$changes"
+      REPO_STATE_BOUND_OUT=$'state: snapshot integrity failure (interim missing or modified)\n'
       return 2
     fi
   fi
@@ -417,10 +425,10 @@ review_state_compare_unbounded() {
   local expected=$REVIEW_AFTER_HASH
   [ "$after" != "$REVIEW_SNAPSHOT_DIR/interim" ] || expected=$REVIEW_INTERIM_HASH
   if [ -z "$actual" ] || [ "$actual" != "$expected" ]; then
-    printf 'state: snapshot integrity failure (after snapshot missing or modified)\n' > "$changes"
+    REPO_STATE_BOUND_OUT=$'state: snapshot integrity failure (after snapshot missing or modified)\n'
     return 2
   fi
-  repo_state_compare "$before" "$after" "$changes"
+  repo_state_compare_files "$before" "$after"
 }
 
 # Single-attempt runtimes share the same stored results consumed by the main tail.

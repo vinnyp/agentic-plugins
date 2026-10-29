@@ -80,16 +80,17 @@ _rsc_snapshot() {
       sweep_state=failed
     fi
   fi
-  temp=$(mktemp "$(dirname "$file")/.repo-state-out.XXXXXX") || return 3
-  _rsc_tmps[${#_rsc_tmps[@]}]=$temp
   # Read by repo_state_run_bounded; set here, never taken from the environment.
   # shellcheck disable=SC2034
   REPO_STATE_BOUND_VARS='' REPO_STATE_BOUND_FUNCS=''
   # shellcheck disable=SC2034
   REPO_STATE_TMP=$_rsc_private
-  repo_state_run_bounded "$limit" repo_state_snapshot "$repo" "$temp" || rc=$?
+  repo_state_run_bounded "$limit" repo_state_snapshot_memory "$repo" "$(dirname "$file")/.repo-state-private" || rc=$?
   unset REPO_STATE_TMP
   if [ "$rc" = 0 ]; then
+    temp=$(mktemp "$(dirname "$file")/.repo-state-out.XXXXXX") || return 3
+    _rsc_tmps[${#_rsc_tmps[@]}]=$temp
+    printf '%s' "$REPO_STATE_BOUND_OUT" > "$temp" || return 3
     first=''
     # Never open anything but a regular file: a FIFO renamed over <temp> would hang the read.
     if [ -f "$temp" ] && [ ! -L "$temp" ]; then
@@ -137,20 +138,15 @@ _rsc_snapshot() {
 }
 
 _rsc_compare() {
-  local before=$1 after=$2 limit changes rc=0
+  local before=$1 after=$2 limit rc=0
   limit=$(repo_state_snapshot_limit repo-state-check 60)
   _rsc_private=$(umask 077; mktemp -d "${TMPDIR:-/tmp}/repo-state-cli.XXXXXX") || return 3
   [ -n "$_rsc_private" ] || return 3
-  # Read by the library through dynamic scope.
-  # shellcheck disable=SC2034
-  REPO_STATE_TMP=$_rsc_private
-  changes=$(mktemp "$_rsc_private/changes.XXXXXX") || return 3
-  _rsc_tmps[${#_rsc_tmps[@]}]=$changes
-  # shellcheck disable=SC2034
+  # File reads happen once, inside the same bound as the comparison.
   REPO_STATE_BOUND_VARS='' REPO_STATE_BOUND_FUNCS=''
-  repo_state_run_bounded "$limit" repo_state_compare "$before" "$after" "$changes" || rc=$?
+  repo_state_run_bounded "$limit" repo_state_compare_files "$before" "$after" || rc=$?
   case "$rc" in
-    0|1|2|3) cat "$changes"; return "$rc" ;;
+    0|1|2|3) printf '%s' "$REPO_STATE_BOUND_OUT"; return "$rc" ;;
     124) echo 'state: compare timed out' ;;
     125) echo 'state: compare could not complete (setup failed or no completion recorded)' ;;
     *) echo "state: compare could not complete (unexpected status $rc)" ;;
