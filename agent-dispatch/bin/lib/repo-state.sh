@@ -151,7 +151,7 @@ _repo_state_tree() {
 # Inspect metadata without asking Git to open any of it.
 repo_state_nonregular_sweep() (
   umask 077
-  local out=$1 dir existing duplicate file temp
+  local out=$1 dir existing duplicate file temp result=0
   shift
   local dirs=()
   for dir in "$@"; do
@@ -167,10 +167,11 @@ repo_state_nonregular_sweep() (
   [ "${#dirs[@]}" -gt 0 ] || return 0
   temp=$(mktemp "${out}.find.XXXXXX") || return 3
   trap 'rm -f "$temp"' EXIT
-  find -P "${dirs[@]}" \( -type p -o -type c -o -type b -o -type s \) -print0 > "$temp" || return 3
+  find -P "${dirs[@]}" \( -type p -o -type c -o -type b -o -type s \) -print0 > "$temp" || result=3
   while IFS= read -r -d '' file; do
     printf 'unsafe\t%s\n' "$(_repo_state_encode "$file")"
   done < "$temp" > "$out"
+  return "$result"
 )
 
 repo_state_snapshot() (
@@ -325,7 +326,7 @@ repo_state_compare() (
     printf 'config: <unreadable after review>\n' >> "$changes"
     return 2
   fi
-  temp=$(mktemp -d "$(dirname "$changes")/.repo-state-compare.XXXXXX") || return 3
+  temp=$(mktemp -d "${REPO_STATE_TMP:-$(dirname "$changes")}/.repo-state-compare.XXXXXX") || return 3
   trap 'rm -rf "$temp"' EXIT
   LC_ALL=C sort "$before" > "$temp/before"
   LC_ALL=C sort "$after" > "$temp/after"
@@ -506,50 +507,71 @@ repo_state_snapshot_limit() {
   fi
 }
 
-# Run a script by path so private caller state never appears in process argv.
+# Cancel only process groups and storage recorded by this invocation.
+repo_state_cancel_bound() {
+  if [ -n "${REPO_STATE_BOUND_PID:-}" ]; then
+    kill -TERM -- "-$REPO_STATE_BOUND_PID" 2>/dev/null || true
+  fi
+  if [ -n "${REPO_STATE_BOUND_WATCHDOG:-}" ]; then
+    kill -TERM -- "-$REPO_STATE_BOUND_WATCHDOG" 2>/dev/null || true
+    wait "$REPO_STATE_BOUND_WATCHDOG" 2>/dev/null || true
+    kill -KILL -- "-$REPO_STATE_BOUND_WATCHDOG" 2>/dev/null || true
+  fi
+  [ -z "${REPO_STATE_BOUND_PRIVATE:-}" ] || rm -rf "$REPO_STATE_BOUND_PRIVATE"
+}
+
+# Pipe the script into bash so private state appears in neither argv nor a script file.
 repo_state_run_bounded() {
-  local limit=$1 operation=$2 private script token marker name tcmd='' result=0
-  local pid watchdog monitor=0 completion='' token_rc='' extra=''
+  local limit=$1 operation=$2 private script_text token marker name tcmd='' result=0
+  local pid watchdog='' monitor=0 completion='' token_rc='' extra=''
   shift 2
   private=$(umask 077; mktemp -d "${TMPDIR:-/tmp}/repo-state-bound.XXXXXX") || return 125
-  [ -n "$private" ] && chmod 700 "$private" || return 125
-  script="$private/run"
+  REPO_STATE_BOUND_PRIVATE=$private
+  if [ -z "$private" ] || ! chmod 700 "$private"; then
+    [ -z "$private" ] || rm -rf "$private"
+    REPO_STATE_BOUND_PRIVATE=''
+    return 125
+  fi
   token="$private/done"
   marker="$private/timeout"
-  if ! (
+  if ! script_text=$(
     umask 077
     : > "$marker" && rm -f "$marker" || exit 1
-    {
-      for name in ${REPO_STATE_BOUND_VARS:-}; do
-        declare -p "$name" 2>/dev/null || true
-      done
-      if [ "${REPO_STATE_TMP+x}" = x ]; then declare -p REPO_STATE_TMP; fi
-      printf '. %q\n' "$_REPO_STATE_LIB"
-      declare -f "$operation" || exit 1
-      for name in ${REPO_STATE_BOUND_FUNCS:-}; do declare -f "$name" || exit 1; done
-      printf '%q "$@"\nrc=$?\n' "$operation"
-      printf 'printf "done %%s\\n" "$rc" > %q || exit 125\nexit "$rc"\n' "$token"
-    } > "$script" && chmod 600 "$script"
+    for name in ${REPO_STATE_BOUND_VARS:-}; do
+      declare -p "$name" 2>/dev/null || true
+    done
+    if [ "${REPO_STATE_TMP+x}" = x ]; then declare -p REPO_STATE_TMP; fi
+    printf '. %q\n' "$_REPO_STATE_LIB"
+    declare -f "$operation" || exit 1
+    for name in ${REPO_STATE_BOUND_FUNCS:-}; do declare -f "$name" || exit 1; done
+    printf '%q "$@"\nrc=$?\n' "$operation"
+    printf 'printf "done %%s\\n" "$rc" > %q || exit 125\nexit "$rc"\n' "$token"
   ); then
     rm -rf "$private"
+    REPO_STATE_BOUND_PRIVATE=''
     return 125
   fi
   if command -v timeout >/dev/null 2>&1; then tcmd=timeout
   elif command -v gtimeout >/dev/null 2>&1; then tcmd=gtimeout; fi
   if [ -n "$tcmd" ]; then
-    "$tcmd" -k 5 "$limit" bash "$script" "$@" || result=$?
+    case $- in *m*) monitor=1 ;; esac
+    set -m
+    "$tcmd" -k 5 "$limit" bash <(printf '%s\n' "$script_text") "$@" &
+    pid=$!
   else
     case $- in *m*) monitor=1 ;; esac
     set -m
-    bash "$script" "$@" &
+    bash <(printf '%s\n' "$script_text") "$@" &
     pid=$!
     (
       set +m
-      sleeper=''
-      trap '[ -z "$sleeper" ] || kill -TERM "$sleeper" 2>/dev/null || true; exit 0' TERM
+      # exec preserves the PPID fallback on Bash versions without BASHPID.
+      watchdog_self=${BASHPID:-$(exec sh -c 'echo "$PPID"')}
+      trap 'trap "" TERM; kill -TERM -- "-$watchdog_self" 2>/dev/null; exit 0' TERM
       sleep "$limit" &
       sleeper=$!
       wait "$sleeper" || exit 0
+      [ ! -e "$token" ] || exit 0
       : > "$marker"
       kill -TERM -- "-$pid" 2>/dev/null || true
       sleep 5 &
@@ -558,24 +580,35 @@ repo_state_run_bounded() {
       kill -KILL -- "-$pid" 2>/dev/null || true
     ) </dev/null >/dev/null 2>&1 &
     watchdog=$!
-    [ "$monitor" = 1 ] || set +m
-    wait "$pid" || result=$?
-    if [ -e "$marker" ]; then
-      kill -KILL -- "-$pid" 2>/dev/null || true
-      result=124
-    fi
+  fi
+  REPO_STATE_BOUND_PID=$pid
+  REPO_STATE_BOUND_WATCHDOG=$watchdog
+  [ "$monitor" = 1 ] || set +m
+  wait "$pid" || result=$?
+  if [ -z "$tcmd" ] && [ -e "$marker" ]; then
+    kill -KILL -- "-$pid" 2>/dev/null || true
+    result=124
+  fi
+  if [ -n "$watchdog" ]; then
     kill -TERM -- "-$watchdog" 2>/dev/null || true
-    kill -TERM "$watchdog" 2>/dev/null || true
+    wait "$watchdog" 2>/dev/null || true
+    # A child forked during trap delivery can inherit a transient signal disposition.
+    # Once the watchdog exits it cannot fork again; reap any remaining group members.
+    kill -KILL -- "-$watchdog" 2>/dev/null || true
   fi
   case "$result" in
-    124|137) result=124 ;;
+    124|137)
+      if [ -n "$tcmd" ] || [ -e "$marker" ]; then result=124
+      else result=125; fi ;;
     *)
-      if IFS=' ' read -r completion token_rc extra 2>/dev/null < "$token" &&
+      if [ "$result" -lt 128 ] && [ -f "$token" ] && [ ! -L "$token" ] &&
+         IFS=' ' read -r completion token_rc extra 2>/dev/null < "$token" &&
          [ "$completion" = 'done' ] && [[ "$token_rc" =~ ^[0-9]{1,3}$ ]] &&
-         [ "$token_rc" -le 255 ] && [ -z "$extra" ]; then
-        result=$((10#$token_rc))
+         [ "$((10#$token_rc))" -eq "$result" ] && [ -z "$extra" ]; then
+        :
       else result=125; fi ;;
   esac
   rm -rf "$private"
+  REPO_STATE_BOUND_PRIVATE='' REPO_STATE_BOUND_PID='' REPO_STATE_BOUND_WATCHDOG=''
   return "$result"
 }

@@ -337,6 +337,8 @@ not detected as critical:
 - writes to ignored paths;
 - a detached process acting after the final snapshot.
 
+A detached same-user process that can write the plugin install or repository can still tamper with the check after the final snapshot; OS containment remains the remedy.
+
 The remedy for all of these is OS-level containment: a sandbox profile, a
 separate user, or a container that does not mount the source repository writable.
 This boundary is not provided. Do not rely on the gate to block concurrent
@@ -1253,7 +1255,7 @@ once complete. The git reads are killed after `DISPATCH_SNAPSHOT_TIMEOUT_SECS`
 invalid value uses the default with a warning) plus a 5 second kill grace; raise the
 limit and the calling tool's own timeout for very large repositories.
 A timeout message lists special files found in git metadata (what was found, not a proven
-cause), or says none were found, or that the pre-sweep was skipped. A successful snapshot
+cause), or says none were found, or that the pre-sweep failed or was skipped. Partial results from a failed pre-sweep remain in the unreadable snapshot. A successful snapshot
 whose baseline already holds special files warns on stderr and still exits 0.
 Invalid CLI arguments exit 64.
 Snapshots also hash `info/exclude`, `info/attributes`, and
@@ -1286,6 +1288,6 @@ that cannot complete as critical and returns rc 10.
 | --- | --- |
 | `0` | Snapshot succeeded, compare clean, or help printed |
 | `1` | Compare found warn-only drift |
-| `2` | Compare found critical drift (including an unreadable after-snapshot) |
-| `3` | Snapshot failure, broken install, unreadable before-snapshot or internal temp failure |
+| `2` | Compare found critical drift (including an unreadable after-snapshot), or not evaluated |
+| `3` | Snapshot failure, broken install, unreadable before-snapshot or internal temp failure, or not evaluated |
 | `64` | Usage error; unlike the usual house exit 2, which here means critical drift |

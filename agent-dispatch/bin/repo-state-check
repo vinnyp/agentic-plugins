@@ -23,6 +23,7 @@ _rsc_private=''
 _rsc_tmps=()
 _rsc_cleanup() {
   local f
+  repo_state_cancel_bound
   [ -z "$_rsc_private" ] || rm -rf "$_rsc_private"
   for f in ${_rsc_tmps[@]+"${_rsc_tmps[@]}"}; do rm -f "$f"; done
 }
@@ -31,7 +32,11 @@ _rsc_cleanup() {
 _rsc_put() {
   local src=$1 dest=$2
   [ ! -d "$dest" ] || return 1
-  mv -f "$src" "$dest" 2>/dev/null || return 1
+  if mv --version >/dev/null 2>&1; then
+    mv -fT "$src" "$dest" 2>/dev/null || return 1
+  else
+    mv -fh "$src" "$dest" 2>/dev/null || return 1
+  fi
   [ -f "$dest" ] && [ ! -L "$dest" ]
 }
 
@@ -60,16 +65,20 @@ _rsc_snapshot() {
   temp=$(mktemp "$(dirname "$file")/.repo-state-out.XXXXXX") || return 3
   _rsc_tmps[${#_rsc_tmps[@]}]=$temp
   printf 'unreadable\n' > "$temp" || return 3
-  _rsc_put "$temp" "$file" || return 3
+  if ! _rsc_put "$temp" "$file"; then
+    if [ -f "$file" ] && [ ! -L "$file" ]; then repo_state_mark_unreadable "$file"; fi
+    return 3
+  fi
   case "$repo" in /*) ;; *) return 3 ;; esac
   limit=$(repo_state_snapshot_limit repo-state-check 60)
   _rsc_private=$(umask 077; mktemp -d "${TMPDIR:-/tmp}/repo-state-cli.XXXXXX") || return 3
   [ -n "$_rsc_private" ] || return 3
-  gitdir="$repo/.git"
-  if [ -d "$gitdir" ] && [ ! -L "$gitdir" ]; then
-    if repo_state_nonregular_sweep "$_rsc_private/sweep" "$gitdir"; then
-      sweep="$_rsc_private/sweep"
+  if gitdir=$(cd -P "$repo/.git" 2>/dev/null && pwd -P); then
+    sweep="$_rsc_private/sweep"
+    if repo_state_nonregular_sweep "$sweep" "$gitdir"; then
       sweep_state=ran
+    else
+      sweep_state=failed
     fi
   fi
   temp=$(mktemp "$(dirname "$file")/.repo-state-out.XXXXXX") || return 3
@@ -111,6 +120,7 @@ _rsc_snapshot() {
         else
           echo "repo-state-check: snapshot timed out; no special file found in $gitdir; cause unknown (if the repo is large, raise DISPATCH_SNAPSHOT_TIMEOUT_SECS and the Bash tool timeout)" >&2
         fi ;;
+      failed) echo 'repo-state-check: snapshot timed out; pre-sweep failed; cause unknown' >&2 ;;
       *) echo 'repo-state-check: snapshot timed out; pre-sweep skipped (.git is not a directory); cause unknown' >&2 ;;
     esac
   else
@@ -122,7 +132,10 @@ _rsc_snapshot() {
 _rsc_compare() {
   local before=$1 after=$2 limit changes rc=0
   limit=$(repo_state_snapshot_limit repo-state-check 60)
-  changes=$(mktemp "${TMPDIR:-/tmp}/repo-state-changes.XXXXXX") || return 3
+  _rsc_private=$(umask 077; mktemp -d "${TMPDIR:-/tmp}/repo-state-cli.XXXXXX") || return 3
+  [ -n "$_rsc_private" ] || return 3
+  REPO_STATE_TMP=$_rsc_private
+  changes=$(mktemp "$_rsc_private/changes.XXXXXX") || return 3
   _rsc_tmps[${#_rsc_tmps[@]}]=$changes
   # shellcheck disable=SC2034
   REPO_STATE_BOUND_VARS='' REPO_STATE_BOUND_FUNCS=''

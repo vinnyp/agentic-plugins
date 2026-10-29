@@ -101,6 +101,7 @@ reap_stale_review_workspaces() {
 # shellcheck disable=SC2329
 cleanup_dispatch_worker() {
   local exit_rc=$?
+  repo_state_cancel_bound
   rm -f "$ENRICHED_BRIEF_FILE"
   # The review itself is on STDOUT — that is the deliverable, and the documented consumer
   # contract is to capture stdout, never this path. The REVIEW_OUTFILE= line on stderr is a
@@ -346,6 +347,9 @@ run_with_timeout() {
 # Bound the entire snapshot, including git reads that can block on FIFOs.
 review_state_snapshot_bounded() {
   local limit result=0 operation=${4:-snapshot}
+  # Ignore caller-supplied temporary storage for repository state.
+  # shellcheck disable=SC2034
+  local REPO_STATE_TMP=''
   limit=$(repo_state_snapshot_limit dispatch-worker 120)
   if [ "$operation" = snapshot ] && [ -n "${REVIEW_GIT_DIR:-}" ] && [ -n "${REVIEW_GIT_COMMON_DIR:-}" ]; then
     repo_state_nonregular_sweep "$2.nonregular" "$REVIEW_GIT_DIR" "$REVIEW_GIT_COMMON_DIR" || return 3
