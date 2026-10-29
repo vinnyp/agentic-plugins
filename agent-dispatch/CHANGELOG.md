@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.1](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.9.0...agent-dispatch-v1.9.1) (2026-10-29)
+
+
+### Bug Fixes
+
+* **agent-dispatch:** bound the standalone repo-state-check ([#75](https://github.com/vinnyp/agentic-plugins/issues/75)) ([8b61feb](https://github.com/vinnyp/agentic-plugins/commit/8b61feb2d50b031ae93fc033e2c895b5882e7749))
+
 ## [1.9.0](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.8.5...agent-dispatch-v1.9.0) (2026-10-27)
 
 
