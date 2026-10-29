@@ -335,15 +335,24 @@ not detected as critical:
 - untracked files hidden by an `info/exclude` change (an opaque warning);
 - a pre-existing `branch.X.remote=.` combined with a `merge` change (warning);
 - writes to ignored paths;
-- a detached process acting after the final snapshot.
+- a detached process acting after the final snapshot;
+- a detached process that can write the operator's `TMPDIR` or snapshot directory. Compare's
+  intermediate files and the CLI's snapshot files live there, so such a process can make a compare
+  report clean.
+
+A detached same-user process that can write the plugin install, the repository, or the operator's
+`TMPDIR` can still tamper with the check; OS containment remains the remedy.
 
 The remedy for all of these is OS-level containment: a sandbox profile, a
-separate user, or a container that does not mount the source repository writable.
+separate user, or a container that does not mount the source repository or the operator's
+`TMPDIR` writable.
 This boundary is not provided. Do not rely on the gate to block concurrent
 integration; a concurrent pull or rebase during a review is reported as a warning.
 
-Every review snapshot has a 120-second wall-clock bound, overridden with
-`DISPATCH_SNAPSHOT_TIMEOUT_SECS` (positive integer seconds). The dispatcher uses
+Every review snapshot, and every `repo-state-check` snapshot or compare, has a
+wall-clock bound, overridden with `DISPATCH_SNAPSHOT_TIMEOUT_SECS` (1-86400 decimal
+seconds; anything else uses the default with a warning). The default is 120 seconds
+for the dispatcher and 60 for `repo-state-check`. The dispatcher uses
 `timeout -k` or `gtimeout -k`, with a watchdog fallback when neither is installed.
 Snapshot timeouts are unreadable state and critical (exit 10), with the diagnostic
 `drift snapshot timed out (possible hostile file such as a FIFO in the git dir)`.
@@ -1242,7 +1251,22 @@ Snapshot records effective config (including worktree config), hook hashes and m
 worktrees, dirty paths and configured identity. Files are mode 0600; keep them in a private
 temp directory and remove them after inspection. Snapshot exits 0 on success or 3 for an
 empty, relative or invalid repository path, a missing hasher, unreadable config or metadata files, or a hash failure in config.
-A failed snapshot writes an `unreadable` marker to the output file when possible.
+Snapshot exit 3 also means "not evaluated": a timeout, a missing completion record or an
+unexpected failure of the bounded git reads. The output file is replaced with `unreadable`
+before any other work, so a stale or partial snapshot is never left readable (any special
+files found in git metadata are listed after it). The snapshot is published by rename only
+once complete. The git reads are killed after `DISPATCH_SNAPSHOT_TIMEOUT_SECS`
+(1-86400 decimal seconds; default 60 for this command, 120 for `dispatch-worker`; an
+invalid value uses the default with a warning) plus a 5 second kill grace; raise the
+limit and the calling tool's own timeout for very large repositories.
+A timeout message lists special files found in git metadata (what was found, not a proven
+cause), or says none were found, or that the pre-sweep failed (naming any special files it
+found before failing) or was skipped; the pre-sweep only runs when `.git` is a real directory,
+never a symlink. Partial results from a failed pre-sweep remain in the unreadable snapshot. If
+the `unreadable` pre-mark cannot be made by rename, snapshot exits 3 without writing to the
+output path. A `repo-state-check` killed with SIGKILL cannot clean up and can leave empty
+`repo-state-*` directories in `TMPDIR` (they hold no secrets). A successful snapshot
+whose baseline already holds special files warns on stderr and still exits 0.
 Invalid CLI arguments exit 64.
 Snapshots also hash `info/exclude`, `info/attributes`, and
 `objects/info/alternates`; changes to these files are critical.
@@ -1255,7 +1279,12 @@ Nonregular files in Git metadata are reported before config and ref reads, so th
 names remain visible on stderr even if a later Git read times out.
 
 Compare prints named change lines and exits 0 for clean, 1 for warn-only drift or 2 for
-critical drift. Config changes are critical except these benign keys: `branch.*.*`
+critical drift. Exit 2 also means "not evaluated" when the output is a `state:` line
+(`state: compare timed out` or `state: compare could not complete (<reason>)`) or
+`config: <unreadable after review>`; stop and investigate, do not re-run. Compare
+runs under the same bound and limit as snapshot. A helper that fails during compare (a
+`sort`, `comm` or `awk` that exits abnormally or is killed) is never read as a verdict:
+compare writes `state: compare could not complete (<helper> failed)` and exits 3. Config changes are critical except these benign keys: `branch.*.*`
 except `branch.*.pushremote`; `branch.*.remote` is benign only when it names a remote
 present before the review or is `.` (the local repository);
 `remote.*.fetch`; `remote.*.gh-resolved`; a new remote's `url`/`fetch`/`gh-resolved`;
@@ -1271,6 +1300,6 @@ that cannot complete as critical and returns rc 10.
 | --- | --- |
 | `0` | Snapshot succeeded, compare clean, or help printed |
 | `1` | Compare found warn-only drift |
-| `2` | Compare found critical drift (including an unreadable after-snapshot) |
-| `3` | Snapshot failure, broken install, unreadable before-snapshot or internal temp failure |
+| `2` | Compare found critical drift (including an unreadable after-snapshot), or not evaluated |
+| `3` | Snapshot failure, broken install, unreadable before-snapshot, internal temp failure, a failed compare helper, or not evaluated |
 | `64` | Usage error; unlike the usual house exit 2, which here means critical drift |

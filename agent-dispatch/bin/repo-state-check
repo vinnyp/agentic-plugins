@@ -12,11 +12,156 @@ SCRIPT_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 . "$SCRIPT_DIR/lib/repo-state.sh"
 usage() {
   echo 'usage: repo-state-check snapshot <repo> <file> | compare <before> <after>'
-  echo 'compare exits: 0 clean, 1 warn, 2 critical, 3 input error (unreadable before file or internal temp failure), 64 usage'
-  echo 'snapshot exits: 0 ok, 3 failure, 64 usage'
+  echo 'compare exits: 0 clean, 1 warn, 2 critical or not evaluated (a "state:" line or "config: <unreadable after review>"), 3 input error (unreadable before file, internal temp failure or a failed helper), 64 usage'
+  echo 'snapshot exits: 0 ok, 3 failure or not evaluated (<file> then reads "unreadable"), 64 usage'
+  echo 'DISPATCH_SNAPSHOT_TIMEOUT_SECS: seconds (1-86400) the git reads may run before they are killed; default 60 here, 120 for dispatch-worker; an invalid value uses the default with a warning'
   echo '--help, -h: print usage and exit 0'
 }
 usage_error() { usage >&2; exit 64; }
+
+_rsc_private=''
+_rsc_tmps=()
+_rsc_cleanup() {
+  local f
+  repo_state_cancel_bound
+  [ -z "$_rsc_private" ] || rm -rf "$_rsc_private"
+  for f in ${_rsc_tmps[@]+"${_rsc_tmps[@]}"}; do rm -f "$f"; done
+}
+
+# Replace <dest> by rename so a FIFO or symlink planted there is never opened or followed.
+_rsc_put() {
+  local src=$1 dest=$2
+  [ ! -d "$dest" ] || return 1
+  if mv --version >/dev/null 2>&1; then
+    mv -fT "$src" "$dest" 2>/dev/null || return 1
+  else
+    mv -fh "$src" "$dest" 2>/dev/null || return 1
+  fi
+  [ -f "$dest" ] && [ ! -L "$dest" ]
+}
+
+# Publish "unreadable" plus any pre-sweep unsafe lines as the snapshot file.
+_rsc_publish_unreadable() {
+  local file=$1 sweep=$2 temp
+  temp=$(mktemp "$(dirname "$file")/.repo-state-out.XXXXXX") || return 1
+  _rsc_tmps[${#_rsc_tmps[@]}]=$temp
+  { printf 'unreadable\n'; if [ -n "$sweep" ] && [ -f "$sweep" ]; then cat "$sweep"; fi; } > "$temp" || return 1
+  _rsc_put "$temp" "$file"
+}
+
+_rsc_paths() {
+  local kind key out='' sep=''
+  while IFS=$'\t' read -r kind key; do
+    [ "$kind" = unsafe ] || continue
+    out="$out$sep$(_repo_state_escape_value "$(_repo_state_decode "$key")")"
+    sep=', '
+  done < "$1"
+  printf '%s' "$out"
+}
+
+_rsc_snapshot() {
+  local repo=$1 file=$2 limit rc=0 temp first gitdir sweep='' sweep_state=skipped line paths
+  # Pre-mark before anything else: no early exit may leave a stale snapshot readable.
+  temp=$(mktemp "$(dirname "$file")/.repo-state-out.XXXXXX") || return 3
+  _rsc_tmps[${#_rsc_tmps[@]}]=$temp
+  printf 'unreadable\n' > "$temp" || return 3
+  # The pre-mark is by rename only: never open or follow what is at <file>.
+  _rsc_put "$temp" "$file" || return 3
+  case "$repo" in /*) ;; *) return 3 ;; esac
+  limit=$(repo_state_snapshot_limit repo-state-check 60)
+  _rsc_private=$(umask 077; mktemp -d "${TMPDIR:-/tmp}/repo-state-cli.XXXXXX") || return 3
+  [ -n "$_rsc_private" ] || return 3
+  # Sweep only a real .git directory: a symlinked .git is never followed.
+  if [ -d "$repo/.git" ] && [ ! -L "$repo/.git" ] && gitdir=$(cd -P "$repo/.git" 2>/dev/null && pwd -P); then
+    sweep="$_rsc_private/sweep"
+    if repo_state_nonregular_sweep "$sweep" "$gitdir"; then
+      sweep_state=ran
+    else
+      sweep_state=failed
+    fi
+  fi
+  temp=$(mktemp "$(dirname "$file")/.repo-state-out.XXXXXX") || return 3
+  _rsc_tmps[${#_rsc_tmps[@]}]=$temp
+  # Read by repo_state_run_bounded; set here, never taken from the environment.
+  # shellcheck disable=SC2034
+  REPO_STATE_BOUND_VARS='' REPO_STATE_BOUND_FUNCS=''
+  # shellcheck disable=SC2034
+  REPO_STATE_TMP=$_rsc_private
+  repo_state_run_bounded "$limit" repo_state_snapshot "$repo" "$temp" || rc=$?
+  unset REPO_STATE_TMP
+  if [ "$rc" = 0 ]; then
+    first=''
+    # Never open anything but a regular file: a FIFO renamed over <temp> would hang the read.
+    if [ -f "$temp" ] && [ ! -L "$temp" ]; then
+      IFS= read -r first < "$temp" 2>/dev/null || true
+    fi
+    case "$first" in
+      repo$'\t'*)
+        if [ -n "$sweep" ]; then
+          while IFS= read -r line; do
+            grep -Fxq -- "$line" "$temp" || printf '%s\n' "$line" >> "$temp"
+          done < "$sweep"
+        fi
+        if _rsc_put "$temp" "$file"; then
+          if grep -q $'^unsafe\t' "$file" 2>/dev/null; then
+            paths=$(_rsc_paths "$file")
+            echo "repo-state-check: baseline contains special files: $paths" >&2
+          fi
+          return 0
+        fi
+        rc=1 ;;
+      *) rc=125 ;;
+    esac
+  fi
+  _rsc_publish_unreadable "$file" "$sweep" || true
+  if [ "$rc" = 124 ]; then
+    case "$sweep_state" in
+      ran)
+        if [ -s "$sweep" ]; then
+          echo "repo-state-check: snapshot timed out; special files found in git metadata: $(_rsc_paths "$sweep")" >&2
+        else
+          echo "repo-state-check: snapshot timed out; no special file found in $gitdir; cause unknown (if the repo is large, raise DISPATCH_SNAPSHOT_TIMEOUT_SECS and the Bash tool timeout)" >&2
+        fi ;;
+      failed)
+        if [ -s "$sweep" ]; then
+          echo "repo-state-check: snapshot timed out; pre-sweep failed; special files found so far: $(_rsc_paths "$sweep"); cause unknown" >&2
+        else
+          echo 'repo-state-check: snapshot timed out; pre-sweep failed; cause unknown' >&2
+        fi ;;
+      *) echo 'repo-state-check: snapshot timed out; pre-sweep skipped (.git is not a directory); cause unknown' >&2 ;;
+    esac
+  else
+    echo "repo-state-check: snapshot could not complete (status $rc)" >&2
+  fi
+  return 3
+}
+
+_rsc_compare() {
+  local before=$1 after=$2 limit changes rc=0
+  limit=$(repo_state_snapshot_limit repo-state-check 60)
+  _rsc_private=$(umask 077; mktemp -d "${TMPDIR:-/tmp}/repo-state-cli.XXXXXX") || return 3
+  [ -n "$_rsc_private" ] || return 3
+  # Read by the library through dynamic scope.
+  # shellcheck disable=SC2034
+  REPO_STATE_TMP=$_rsc_private
+  changes=$(mktemp "$_rsc_private/changes.XXXXXX") || return 3
+  _rsc_tmps[${#_rsc_tmps[@]}]=$changes
+  # shellcheck disable=SC2034
+  REPO_STATE_BOUND_VARS='' REPO_STATE_BOUND_FUNCS=''
+  repo_state_run_bounded "$limit" repo_state_compare "$before" "$after" "$changes" || rc=$?
+  case "$rc" in
+    0|1|2|3) cat "$changes"; return "$rc" ;;
+    124) echo 'state: compare timed out' ;;
+    125) echo 'state: compare could not complete (setup failed or no completion recorded)' ;;
+    *) echo "state: compare could not complete (unexpected status $rc)" ;;
+  esac
+  return 2
+}
+
+trap _rsc_cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM HUP
+unset REPO_STATE_TMP
 case "${1:-}" in
   --help|-h)
     [ "$#" -eq 1 ] || usage_error
@@ -24,18 +169,11 @@ case "${1:-}" in
     exit 0 ;;
   snapshot)
     [ "$#" -eq 3 ] || usage_error
-    if repo_state_snapshot "$2" "$3"; then
-      exit 0
-    fi
-    repo_state_mark_unreadable "$3" || true
-    exit 3 ;;
+    _rsc_snapshot "$2" "$3"
+    exit $? ;;
   compare)
     [ "$#" -eq 3 ] || usage_error
-    changes=$(mktemp "${TMPDIR:-/tmp}/repo-state-changes.XXXXXX") || exit 3
-    trap 'rm -f "$changes"' EXIT
-    rc=0
-    repo_state_compare "$2" "$3" "$changes" || rc=$?
-    cat "$changes"
-    exit "$rc" ;;
+    _rsc_compare "$2" "$3"
+    exit $? ;;
   *) usage_error ;;
 esac

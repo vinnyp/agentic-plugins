@@ -245,7 +245,13 @@ its tier), e.g. `gemini-4-argon` for `gemini-4-argon-high`. With today's IDs,
 
 MIT.
 
-Review drift snapshots are bounded to 120 seconds (`DISPATCH_SNAPSHOT_TIMEOUT_SECS`
-overrides this). Normal snapshots return immediately; the bound uses coreutils
+The standalone command handles INT, TERM and HUP promptly, removes its temporary state,
+and leaves interrupted snapshots unreadable. Completion records must agree with the
+bounded child’s exit status; scripts reach the child through a pipe. Compare and
+snapshot temporary state share the invocation’s private cleanup directory.
+
+Review drift snapshots and the standalone `repo-state-check` are bounded
+(`DISPATCH_SNAPSHOT_TIMEOUT_SECS` overrides the limit; default 120 seconds for
+`dispatch-worker`, 60 for `repo-state-check`). Normal snapshots return immediately; the bound uses coreutils
 `timeout`/`gtimeout` when available and an isolated watchdog otherwise. History metadata changes are critical; concurrent upstream pulls
 remain warnings. See [commands and known limits](docs/commands.md#limits).

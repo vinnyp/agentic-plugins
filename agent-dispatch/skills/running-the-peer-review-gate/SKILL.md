@@ -205,7 +205,14 @@ pass**; say so in the tier-rationale log entry (Phase 2).
 
   Around each Claude reviewer round, run `repo-state-check snapshot <repo> <before>`
   before dispatching. Afterwards run `repo-state-check snapshot <repo> <after-snapshot>`
-  and `repo-state-check compare <before> <after-snapshot>`. Treat compare exit 2 as
+  and `repo-state-check compare <before> <after-snapshot>`. Run these with a Bash tool
+  timeout of at least `(limit + 30)` seconds, where the limit is `DISPATCH_SNAPSHOT_TIMEOUT_SECS`
+  (default 60). Compare exit 2 whose output is only `state:` lines or
+  `config: <unreadable after review>` means "not evaluated": stop and investigate, do not
+  re-run. Exit 2 whose only lines are `nonregular` lines for paths already named in the
+  before-snapshot's `baseline contains special files` warning is a pre-existing condition:
+  stop, do not re-run. A `special files` line names what was found, not a proven cause.
+  Otherwise treat compare exit 2 as
   rc 10: inspect and restore the named changes before committing, discard the review body
   unless every change is known concurrent work, and re-run. An unreadable after-snapshot
   also requires stopping and inspection. Exits 3/64 mean "check failed: stop and investigate",

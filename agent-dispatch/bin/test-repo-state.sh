@@ -805,3 +805,5 @@ snap "$TMP/after"
 rc_is 2 repo_state_compare "$TMP/before" "$TMP/after" "$TMP/changes"
 grep -Fq 'fifo\x0ainjected: critical' "$TMP/changes" || fail 'nonregular filename newline not escaped'
 ! grep -q '^injected' "$TMP/changes" || fail 'nonregular filename injected record'
+
+# ---------------------------------------------------------------------------
