@@ -259,3 +259,8 @@ remain warnings. See [commands and known limits](docs/commands.md#limits).
 Review launch-time git setup fails closed with exit 3 before launching a reviewer.
 `DISPATCH_CLONE_TIMEOUT_SECS` bounds clone creation (default 600 seconds);
 `DISPATCH_SNAPSHOT_TIMEOUT_SECS` bounds the launch probe and state checks.
+
+Review launch refuses when bounded setup or the agy dirty-status probe fails.
+Interrupted runtimes report `skipped(not-checked)` until drift checking completes.
+Temporary output reads are bounded even if a runtime replaces their paths with FIFOs.
+Edit dispatch refuses when review pin status cannot be determined (exit 3).

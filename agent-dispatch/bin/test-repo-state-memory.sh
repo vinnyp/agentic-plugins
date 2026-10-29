@@ -25,8 +25,11 @@ rc_is 7 repo_state_run_bounded 15 payload
 [ "$REPO_STATE_BOUND_OUT" = $'hello\n@@done 7 99\n\n' ] || fail 'framed payload lost bytes'
 [ "$flags" = "$-" ] || fail 'bound changed shell flags'
 reserved_status() { return "$1"; }
-rc_is 125 repo_state_run_bounded 15 reserved_status 124 2>"$TMP/reserved.err"
-rc_is 125 repo_state_run_bounded 15 reserved_status 137 2>>"$TMP/reserved.err"
+for reserved in 124 137; do
+  reserved_rc=0
+  repo_state_run_bounded 15 reserved_status "$reserved" 2>>"$TMP/reserved.err" || reserved_rc=$?
+  [ "$reserved_rc" = 125 ] || fail "reserved status $reserved must map to 125, got $reserved_rc"
+done
 grep -q 'reserved timeout status' "$TMP/reserved.err" || fail 'reserved status not tagged'
 (
   # Read by the sourced channel cleanup helper.

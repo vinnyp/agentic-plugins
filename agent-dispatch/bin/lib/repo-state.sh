@@ -7,7 +7,6 @@
 # shellcheck source=portable-stat.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/portable-stat.sh"
 _REPO_STATE_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/repo-state.sh"
-_REPO_STATE_LOCAL_ENV_VARS=$(git rev-parse --local-env-vars 2>/dev/null)
 # Cancel state belongs to one invocation: never inherit it, never export it.
 unset REPO_STATE_BOUND_PID REPO_STATE_BOUND_WATCHDOG REPO_STATE_BOUND_PRIVATE
 REPO_STATE_BOUND_PID='' REPO_STATE_BOUND_WATCHDOG='' REPO_STATE_BOUND_PRIVATE=''
@@ -16,8 +15,8 @@ unset REPO_STATE_BOUND_SAVE7 REPO_STATE_BOUND_SAVE8 REPO_STATE_BOUND_CHANNEL_ACT
 _repo_state_git() (
   unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_PREFIX
   # Git supplies the whitespace-separated names of its repository-local variables.
-  # shellcheck disable=SC2086
-  unset $_REPO_STATE_LOCAL_ENV_VARS
+  # shellcheck disable=SC2046
+  unset $(git rev-parse --local-env-vars 2>/dev/null)
   export GIT_OPTIONAL_LOCKS=0
   if [ "${1:-}" = --history ]; then
     shift
