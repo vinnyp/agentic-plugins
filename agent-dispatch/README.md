@@ -266,4 +266,6 @@ Drift diagnostics retain every change even when the reviewer removes its state
 directory, and omit empty change-list lines.
 Interrupted runtimes report `skipped(not-checked)` until drift checking completes.
 Temporary output reads are bounded even if a runtime replaces their paths with FIFOs.
-Edit dispatch refuses when review pin status cannot be determined (exit 3).
+Edit dispatch and build phases refuse when review pin status returns exit 3
+(the bounded check timed out or could not complete). Other nonzero statuses,
+including a missing or non-executable review-pin helper, allow edits to proceed.

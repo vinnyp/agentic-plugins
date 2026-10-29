@@ -176,8 +176,8 @@ refuse_if_review_pinned() {
   status="$("$SCRIPT_DIR/review-pin.sh" status "$dir" 2>/dev/null)" || pin_rc=$?
   case "$pin_rc" in
     0) ;;
-    1|2) return 0 ;;
-    *) echo "could not determine review pin status for $dir; refusing edits" >&2; exit 9 ;;
+    3) echo "could not determine review pin status for $dir; refusing edits" >&2; exit 9 ;;
+    *) return 0 ;;
   esac
   while IFS= read -r line || [ -n "$line" ]; do
     key="${line%%=*}"

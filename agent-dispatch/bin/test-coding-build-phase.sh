@@ -56,6 +56,17 @@ printf '%s\n' "$out" | grep -q "review-pin.sh release" || { echo "$out"; echo "F
 ! printf '%s\n' "$out" | grep -q "reverted" || { echo "$out"; echo "FAIL: pinned phase refusal must not claim the tree was reverted"; exit 1; }
 echo "test #140 build phase refuses active review pin before dispatch PASS"
 
+# A packaged phase without review-pin.sh still dispatches its task.
+missing_pin_bin="$TMP/missing-pin-bin"; mkdir -p "$missing_pin_bin/lib"
+cp "$SELF_DIR/coding-build-phase.sh" "$missing_pin_bin/"
+cp "$SELF_DIR/lib/hash.sh" "$missing_pin_bin/lib/"
+[ ! -e "$missing_pin_bin/review-pin.sh" ] || { echo "FAIL: missing-pin fixture unexpectedly has helper"; exit 1; }
+: > "$CD_ARGS_FILE"
+out="$(bash "$missing_pin_bin/coding-build-phase.sh" codex "$TMP/plan.md" "$TMP" 1 --build-cmd true 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] || { echo "$out"; echo "FAIL: missing review-pin.sh phase should proceed, got $rc"; exit 1; }
+grep -qF "$TMP" "$CD_ARGS_FILE" || { echo "FAIL: missing review-pin.sh phase should dispatch"; exit 1; }
+echo "test missing review-pin.sh build phase proceeds PASS"
+
 # #20: phase-driven dispatch must pass the agent-aware default timeout through to coding-dispatch.
 : > "$CD_TIMEOUT_FILE"
 "$SELF_DIR/coding-build-phase.sh" agy "$TMP/plan.md" "$TMP" 1 --build-cmd "pytest -q" >/dev/null 2>&1
