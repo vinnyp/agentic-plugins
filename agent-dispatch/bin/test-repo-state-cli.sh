@@ -107,10 +107,10 @@ survivors() {
     [ -z "$alive" ] && return 0
     if [ "$SECONDS" -ge "$deadline" ]; then
       for pid in $alive; do ps -p "$pid" -o pid=,ppid=,pgid=,stat=,command= >&2; done
-      groups='' targets=''
       # Recheck tags before signalling. Only a separate group created inside
       # this run can contain one of our tagged descendants.
       for pass in TERM KILL; do
+        groups='' targets=''
         while read -r pid _tag; do
           [ -n "$pid" ] || continue
           state=$(ps -p "$pid" -o stat= 2>/dev/null || true)
@@ -118,7 +118,8 @@ survivors() {
           ps -p "$pid" -o command= 2>/dev/null | grep -qF "$RUN_ID" || continue
           targets="$targets $pid"
           pgid=$(ps -p "$pid" -o pgid= 2>/dev/null | tr -d '[:space:]')
-          if [[ "$pgid" =~ ^[0-9]+$ ]] && [ "$pgid" -gt 1 ] &&
+          if [[ "$SUITE_PGID" =~ ^[0-9]+$ ]] && [[ "$shell_pgid" =~ ^[0-9]+$ ]] &&
+             [[ "$pgid" =~ ^[0-9]+$ ]] && [ "$pgid" -gt 1 ] &&
              [ "$pgid" != "$SUITE_PGID" ] && [ "$pgid" != "$shell_pgid" ]; then
             case " $groups " in *" $pgid "*) ;; *) groups="$groups $pgid" ;; esac
           fi
@@ -134,8 +135,6 @@ survivors() {
           [ "$pending" = 1 ] || break
           /bin/sleep 0.1
         done
-        for pgid in $groups; do kill -KILL -- "-$pgid" 2>/dev/null || true; done
-        for pid in $targets; do kill -KILL "$pid" 2>/dev/null || true; done
         # The KILL pass also collects children recorded during the TERM wait.
       done
       fail "tagged processes survived:$alive"
@@ -884,6 +883,82 @@ case_slow_watchdog_ran() (
   grep -q ' tagged-sleep-' "$RUN_PID_FILE" || fail 'watchdog never started'
   survivors; no_bound_dir
 )
+case_survivors_reaps_own_group() (
+  set -eu; setup_mode
+  local d rc=0 monitor=0 leader tagged own_tagged bystander member deadline pending pid cleanup
+  d=$(outdir)
+  # All fixture children are ours; also clean them when an assertion fails.
+  printf -v cleanup 'for pid in $(cat %q 2>/dev/null); do kill -TERM "$pid" 2>/dev/null || true; done; wait 2>/dev/null || true; : > %q' "$d/children" "$RUN_PID_FILE"
+  # Capture paths now: function locals may be out of scope on a signal exit.
+  # shellcheck disable=SC2064
+  trap "$cleanup" EXIT
+  : > "$d/children"
+  case $- in *m*) monitor=1 ;; esac
+  set -m
+  (
+    set +m
+    trap 'wait; exit 0' TERM
+    (exec -a "tagged-sleep-$RUN_ID" /bin/sleep 300) &
+    tagged=$!
+    echo "$tagged" >> "$RUN_PID_FILE"
+    echo "$tagged" >> "$d/children"
+    /bin/sleep 300 &
+    member=$!
+    echo "$member" >> "$d/children"
+    printf '%s %s\n' "$tagged" "$member" > "$d/ready"
+    wait
+  ) &
+  leader=$!
+  echo "$leader" >> "$d/children"
+  [ "$monitor" = 1 ] || set +m
+  deadline=$((SECONDS + 5))
+  while [ ! -s "$d/ready" ]; do
+    [ "$SECONDS" -lt "$deadline" ] || fail 'group fixture did not start'
+    /bin/sleep 0.1
+  done
+  read -r tagged member < "$d/ready"
+  # Disable monitor mode so these children share the case shell's group.
+  set +m
+  (exec -a "tagged-sleep-$RUN_ID" /bin/sleep 300) &
+  own_tagged=$!
+  echo "$own_tagged" >> "$RUN_PID_FILE"
+  echo "$own_tagged" >> "$d/children"
+  /bin/sleep 300 &
+  bystander=$!
+  echo "$bystander" >> "$d/children"
+  [ "$monitor" = 0 ] || set -m
+  # Wait for exec so the cleanup's tag recheck sees both sleepers.
+  deadline=$((SECONDS + 5))
+  for pid in "$tagged" "$own_tagged"; do
+    until ps -p "$pid" -o command= | grep -qF "tagged-sleep-$RUN_ID"; do
+      [ "$SECONDS" -lt "$deadline" ] || fail 'tagged fixture did not start'
+      /bin/sleep 0.1
+    done
+  done
+  ( survivors 0 ) 2> "$d/err" || rc=$?
+  [ "$rc" = 1 ] || fail "expected survivors status 1, got $rc"
+  grep -q 'tagged processes survived:' "$d/err" || fail 'survivors diagnostic missing'
+  deadline=$((SECONDS + 5))
+  while :; do
+    pending=0
+    for pid in "$tagged" "$own_tagged"; do
+      kill -0 "$pid" 2>/dev/null && pending=1
+    done
+    kill -0 -- "-$leader" 2>/dev/null && pending=1
+    [ "$pending" = 1 ] || break
+    [ "$SECONDS" -lt "$deadline" ] || fail 'cleanup left tagged processes or group members alive'
+    /bin/sleep 0.1
+  done
+  kill -0 "$bystander" 2>/dev/null || fail 'cleanup killed the bystander'
+  kill -TERM "$bystander"
+  wait "$bystander" 2>/dev/null || true
+  wait "$own_tagged" 2>/dev/null || true
+  wait "$leader" 2>/dev/null || true
+  : > "$RUN_PID_FILE"
+  trap - EXIT
+)
+export -f case_survivors_reaps_own_group
+
 export -f case_stale_bound_env case_compare_helper_failure case_fifo_over_temp case_symlinked_gitdir
 export -f case_planted_token case_trapped_signal_wait case_script_grouped
 export -f case_slow_alternates_fifo case_slow_linked_worktree case_slow_watchdog_ran
@@ -911,6 +986,7 @@ case "${REPO_STATE_CLI_MODES:-timeout}" in
   *) fail "unknown REPO_STATE_CLI_MODES: ${REPO_STATE_CLI_MODES}" ;;
 esac
 for bcase_mode in ${REPO_STATE_CLI_MODES:-timeout}; do
+  run_bcase case_survivors_reaps_own_group 15 "$bcase_mode"
   run_bcase case_completion_integrity 20 "$bcase_mode"
   run_bcase case_compare_storage 20 "$bcase_mode"
   run_bcase case_premark_rename_failure 20 "$bcase_mode"
