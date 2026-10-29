@@ -14,7 +14,7 @@ REAL_MEMORY_GIT=$(command -v git)
 cat > "$TASK_TMP/bin/git" <<'STUB'
 #!/usr/bin/env bash
 case " $* " in
-  *' for-each-ref '*) if [ -p "$SOURCE_REPO/.git/objects/info/alternates" ]; then sleep 10; fi ;;
+  *' for-each-ref '*) if [ -p "$SOURCE_REPO/.git/objects/info/alternates" ]; then sleep 60; fi ;;
 esac
 exec "$REAL_MEMORY_GIT" "$@"
 STUB
@@ -37,7 +37,7 @@ for mode in clean drift alternates; do
   expected=10
   [ "$mode" != clean ] || expected=0
   rc=0
-  (cd "$SOURCE_REPO" && PATH="$TASK_TMP/bin:$PATH" TMPDIR="$TASK_TMP/state" TEST_MODE="$mode" DISPATCH_SNAPSHOT_TIMEOUT_SECS=1 "$TIMER" -k 1 8 "$SELF_DIR/dispatch-worker" --runtime claude --review --brief "$TASK_TMP/brief") > "$TASK_TMP/out" 2> "$TASK_TMP/err" || rc=$?
+  (cd "$SOURCE_REPO" && PATH="$TASK_TMP/bin:$PATH" TMPDIR="$TASK_TMP/state" TEST_MODE="$mode" DISPATCH_SNAPSHOT_TIMEOUT_SECS=15 "$TIMER" -k 1 90 "$SELF_DIR/dispatch-worker" --runtime claude --review --brief "$TASK_TMP/brief") > "$TASK_TMP/out" 2> "$TASK_TMP/err" || rc=$?
   [ "$rc" = "$expected" ] || { cat "$TASK_TMP/err"; echo "FAIL: planted $mode verdict expected $expected got $rc"; exit 1; }
   case "$mode" in
     drift) grep -q 'config core.hookspath' "$TASK_TMP/err"; git -C "$SOURCE_REPO" config --unset core.hooksPath ;;

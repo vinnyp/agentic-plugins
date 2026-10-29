@@ -336,7 +336,11 @@ not detected as critical:
 - a detached process acting after the final snapshot;
 - same-user `/proc/<pid>/fd` or ptrace inspection of dispatcher memory or descriptors;
 - tampering in the instant between creating and unlinking the result file;
-- tampering with the standalone CLI's own snapshot files.
+- tampering with the standalone CLI's own snapshot files or its salt file
+  (`<snapshot dir>/.repo-state-private/salt`).
+
+Bash may back here-strings with short-lived, randomly named temp files under
+`TMPDIR`; these also share the same-user boundary.
 
 The remedy for all of these is OS-level containment: a sandbox profile, a
 separate user, or a container that does not mount the source repository or the operator's

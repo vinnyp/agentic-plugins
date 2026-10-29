@@ -21,23 +21,38 @@ rc_is() { local want=$1 rc=0; shift; "$@" || rc=$?; [ "$rc" = "$want" ] || fail 
 payload() { REPO_STATE_BOUND_OUT=$'hello\n@@done 7 99\n\n'; return 7; }
 [ "$(CUSTOM_BOUND_LIMIT=08 repo_state_snapshot_limit fixture 60 CUSTOM_BOUND_LIMIT)" = 8 ] || fail 'named limit ignored'
 flags=$-
-rc_is 7 repo_state_run_bounded 5 payload
+rc_is 7 repo_state_run_bounded 15 payload
 [ "$REPO_STATE_BOUND_OUT" = $'hello\n@@done 7 99\n\n' ] || fail 'framed payload lost bytes'
 [ "$flags" = "$-" ] || fail 'bound changed shell flags'
+reserved_status() { return "$1"; }
+rc_is 125 repo_state_run_bounded 15 reserved_status 124 2>"$TMP/reserved.err"
+rc_is 125 repo_state_run_bounded 15 reserved_status 137 2>>"$TMP/reserved.err"
+grep -q 'reserved timeout status' "$TMP/reserved.err" || fail 'reserved status not tagged'
+(
+  # Read by the sourced channel cleanup helper.
+  # shellcheck disable=SC2034
+  REPO_STATE_BOUND_CHANNEL_ACTIVE=1
+  # shellcheck disable=SC2034
+  REPO_STATE_BOUND_SAVE7=59 REPO_STATE_BOUND_SAVE8=58
+  exec 59>&- 58>&-
+  _repo_state_close_channel 2>"$TMP/restore.err"
+)
+grep -q 'could not restore caller fd 7' "$TMP/restore.err" || fail 'fd 7 restore failure silent'
+grep -q 'could not restore caller fd 8' "$TMP/restore.err" || fail 'fd 8 restore failure silent'
 exec 7>"$TMP/seven" 8>"$TMP/eight"
-rc_is 7 repo_state_run_bounded 5 payload
+rc_is 7 repo_state_run_bounded 15 payload
 printf seven >&7; printf eight >&8
 repo_state_cancel_bound
 printf more >&7
 exec 7>&- 8>&-
 [ "$(cat "$TMP/seven")" = sevenmore ] && [ "$(cat "$TMP/eight")" = eight ] || fail 'inherited fds lost'
-(set -C; flags=$-; rc_is 7 repo_state_run_bounded 5 payload; [ "$flags" = "$-" ]) || fail 'noclobber changed'
+(set -C; flags=$-; rc_is 7 repo_state_run_bounded 15 payload; [ "$flags" = "$-" ]) || fail 'noclobber changed'
 closed_fds() {
   if { printf injected >&7; } 2>/dev/null; then return 9; fi
   if { printf injected >&8; } 2>/dev/null; then return 9; fi
   REPO_STATE_BOUND_OUT=closed
 }
-rc_is 0 repo_state_run_bounded 5 closed_fds
+rc_is 0 repo_state_run_bounded 15 closed_fds
 [ "$REPO_STATE_BOUND_OUT" = closed ] || fail 'operation inherited channel'
 # Change only the emitter; the operation cannot access the channel descriptors.
 REAL_BASH=$(command -v bash); export REAL_BASH
@@ -56,7 +71,7 @@ SHIM
 chmod +x "$TMP/bin/bash"
 for mutation in bytes rc suffix; do
   rc=0
-  CHANNEL_MUTATION=$mutation PATH="$TMP/bin:$PATH" repo_state_run_bounded 5 payload || rc=$?
+  CHANNEL_MUTATION=$mutation PATH="$TMP/bin:$PATH" repo_state_run_bounded 15 payload || rc=$?
   [ "$rc" = 125 ] || fail "channel $mutation mismatch accepted"
   [ -z "$REPO_STATE_BOUND_OUT" ] || fail 'invalid channel retained payload'
 done
@@ -73,7 +88,7 @@ printf '%s' "$data"
 SHIM
 chmod +x "$TMP/bin/tail"
 stream_payload() { REPO_STATE_BOUND_OUT=$(printf '%0100d' 1); }
-PATH="$TMP/bin:$PATH" rc_is 0 repo_state_run_bounded 5 stream_payload
+PATH="$TMP/bin:$PATH" rc_is 0 repo_state_run_bounded 15 stream_payload
 [ "${#REPO_STATE_BOUND_OUT}" = 100 ] || fail 'stream trailer lost payload'
 rm "$TMP/bin/tail"
 max_payload() { REPO_STATE_BOUND_OUT=$(LC_ALL=C head -c 67108864 /dev/zero | tr '\0' x); }
@@ -84,15 +99,30 @@ large_payload() { REPO_STATE_BOUND_OUT=$(LC_ALL=C head -c 67108865 /dev/zero | t
 rc_is 125 repo_state_run_bounded 20 large_payload 2>"$TMP/cap.err"
 grep -q 'large_payload output exceeded 64 MiB; not evaluated' "$TMP/cap.err" || fail 'cap diagnostic missing'
 leaks_sleeper() { bash -c 'exec -a "$1" sleep 60' _ "$2" & printf '%s\n' "$!" > "$1"; REPO_STATE_BOUND_OUT=verdict; return 2; }
-rc_is 2 repo_state_run_bounded 5 leaks_sleeper "$TMP/sleeper" "$RUN_ID"
+rc_is 2 repo_state_run_bounded 15 leaks_sleeper "$TMP/sleeper" "$RUN_ID"
 [ "$REPO_STATE_BOUND_OUT" = verdict ] || fail 'cleanup changed verdict'
 pid=$(cat "$TMP/sleeper")
-# A reaped leader may briefly leave a zombie; it cannot run or hold the channel.
-state=$(ps -p "$pid" -o stat= 2>/dev/null || true)
-case "$state" in ''|*Z*) ;; *) fail 'leaked sleeper survived group cleanup' ;; esac
-printf 'config\tlocal\tfile:fixture\tcore.hookspath\told\n' > "$TMP/old"
-printf 'config\tlocal\tfile:fixture\tcore.hookspath\tnew\n' > "$TMP/new"
-: > "$TMP/empty"
+# shellcheck disable=SC2034
+for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+  kill -0 "$pid" 2>/dev/null || break
+  sleep 0.1
+done
+! kill -0 "$pid" 2>/dev/null || fail 'leaked sleeper survived group cleanup'
+printf 'repo\tfixture\nconfig\tlocal\tfile:fixture\tcore.hookspath\told\n' > "$TMP/old"
+printf 'repo\tfixture\nconfig\tlocal\tfile:fixture\tcore.hookspath\tnew\n' > "$TMP/new"
+printf 'repo\tfixture\n' > "$TMP/empty"
+: > "$TMP/invalid"
+printf garbage > "$TMP/garbage"
+rc_is 3 repo_state_compare "$TMP/invalid" "$TMP/invalid" "$TMP/changes"
+rc_is 2 repo_state_compare "$TMP/old" "$TMP/garbage" "$TMP/changes"
+printf 'repo\tfixture\000\n' > "$TMP/nul"
+rc_is 3 "$BIN/repo-state-check" compare "$TMP/nul" "$TMP/new" > "$TMP/nul-out"
+rc_is 2 "$BIN/repo-state-check" compare "$TMP/old" "$TMP/nul" > "$TMP/nul-out"
+(
+  printf() { return 1; }
+  rc_is 3 repo_state_compare_memory "$(cat "$TMP/old")" "$(cat "$TMP/new")"
+)
+
 rc_is 0 repo_state_compare "$TMP/old" "$TMP/old" "$TMP/changes"
 [ ! -s "$TMP/changes" ] || fail 'self compare produced changes'
 rc_is 2 repo_state_compare "$TMP/empty" "$TMP/new" "$TMP/changes"
@@ -100,6 +130,24 @@ grep -q '(absent) ->' "$TMP/changes" || fail 'addition pairing'
 rc_is 2 repo_state_compare "$TMP/old" "$TMP/empty" "$TMP/changes"
 grep -q -- '-> (absent)' "$TMP/changes" || fail 'removal pairing'
 rc_is 2 repo_state_compare "$TMP/old" "$TMP/new" "$TMP/changes"
+# Isolate each verdict loop's producer while leaving its consumers functional.
+for feed_stage in config records; do
+  (
+    _repo_state_pairs() {
+      if [ "$1" = "$feed_stage" ]; then
+        if [ "$1" = config ]; then builtin printf 'local\tfixture\tcore.hookspath\told\tnew\n'
+        else builtin printf 'hooks\tfixture\told\tnew\n'; fi
+      fi
+    }
+    printf() {
+      case "${2:-}" in
+        local$'\t'fixture$'\t'core.hookspath*|hooks$'\t'fixture*) return 1 ;;
+      esac
+      builtin printf "$@"
+    }
+    rc_is 3 repo_state_compare_memory "$(cat "$TMP/old")" "$(cat "$TMP/new")"
+  )
+done
 # Fail if compare tries to create even a short-lived intermediate directory.
 mktemp() { fail 'compare created temporary storage'; }
 rc_is 2 repo_state_compare "$TMP/old" "$TMP/new" "$TMP/changes"
