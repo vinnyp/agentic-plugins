@@ -134,6 +134,8 @@ _rsc_compare() {
   limit=$(repo_state_snapshot_limit repo-state-check 60)
   _rsc_private=$(umask 077; mktemp -d "${TMPDIR:-/tmp}/repo-state-cli.XXXXXX") || return 3
   [ -n "$_rsc_private" ] || return 3
+  # Read by the library through dynamic scope.
+  # shellcheck disable=SC2034
   REPO_STATE_TMP=$_rsc_private
   changes=$(mktemp "$_rsc_private/changes.XXXXXX") || return 3
   _rsc_tmps[${#_rsc_tmps[@]}]=$changes

@@ -45,28 +45,6 @@ mkdir "$SHIMS" "$SLOW" "$NOTIMER"
 cat > "$SHIMS/git" <<'SHIM'
 #!/usr/bin/env bash
 echo $$ >> "$RUN_PID_FILE"
-# Model blocking FIFO reads consistently across Git versions.
-repo='' previous='' sub=''
-for arg in "$@"; do
-  [ "$previous" != -C ] || repo=$arg
-  case "$arg" in cat-file|rev-list) sub=$arg ;; esac
-  previous=$arg
-done
-gitdir="$repo/.git"
-if [ -f "$gitdir" ]; then
-  IFS= read -r location < "$gitdir"
-  gitdir=${location#gitdir: }
-  gitdir=${gitdir%/worktrees/*}
-fi
-if [ -n "$repo" ] && [ -p "$gitdir/objects/info/alternates" ]; then
-  exec -a "tagged-$RUN_ID" /bin/sleep 30
-fi
-if [ -n "$repo" ] && [ -n "$sub" ]; then
-  for object in "$gitdir"/objects/??/*; do
-    if [ -p "$object" ]; then exec -a "tagged-$RUN_ID" /bin/sleep 30; fi
-  done
-echo 'repo-state CLI tests passed'
-fi
 exec -a "tagged-$RUN_ID" "$REAL_GIT" "$@"
 SHIM
 cat > "$SHIMS/sleep" <<'SHIM'
@@ -150,8 +128,40 @@ moved_ref_fixture() {
   MOVED=$commit
 }
 
+
+# Probe real Git in a separate scratch fixture before claiming a blocking control.
+real_git_blocks() (
+  set -eu
+  local case_name=$1 kind=$2 rc=0 obj target
+  fixture probe
+  target=$R
+  case "$kind" in
+    loose-object)
+      moved_ref_fixture
+      obj="$R/.git/objects/${MOVED:0:2}/${MOVED:2}"
+      [ -f "$obj" ] || fail 'probe commit is not a loose object'
+      rm "$obj"; mkfifo "$obj"
+      "$BCASE_TIMER" -k 1 3 "$REAL_GIT" -C "$R" rev-list "$MOVED" >/dev/null 2>&1 || rc=$?
+      ;;
+    *)
+      if [ "$kind" = linked-alternates ]; then
+        target="$R-linked"
+        "$REAL_GIT" -C "$R" worktree add -q -b linked "$target"
+      fi
+      mkfifo "$R/.git/objects/info/alternates"
+      "$BCASE_TIMER" -k 1 3 "$REAL_GIT" -C "$target" rev-parse --absolute-git-dir >/dev/null 2>&1 || rc=$?
+      ;;
+  esac
+  if [ "$rc" != 124 ]; then
+    printf 'SKIP %s: this git does not block on %s (probe rc %s)\n' "$case_name" "$kind FIFO" "$rc"
+    return 1
+  fi
+  printf 'REAL GIT %s: blocks on %s\n' "$case_name" "$kind FIFO"
+)
+
 case_1_snapshot_alternates_fifo() (
   set -eu; setup_mode
+  real_git_blocks case_1_snapshot_alternates_fifo alternates || return 0
   local d rc=0
   fixture; d=$(outdir)
   mkfifo "$R/.git/objects/info/alternates"
@@ -184,6 +194,7 @@ compare_pair() {
 }
 case_3_compare_loose_object_fifo() (
   set -eu; setup_mode
+  real_git_blocks case_3_compare_loose_object_fifo loose-object || return 0
   local d rc=0 obj
   fixture; d=$(outdir)
   compare_pair "$d"
@@ -240,6 +251,7 @@ case_6_limit_helper() (
 )
 case_7_linked_worktree() (
   set -eu; setup_mode
+  real_git_blocks case_7_linked_worktree linked-alternates || return 0
   local d rc=0 wt
   fixture; d=$(outdir)
   wt="$R-linked"
@@ -610,14 +622,16 @@ case_watchdog_repeated() (
   for ((i=0; i<20; i++)); do
     "$BCASE_TIMER" -k 1 3 bash -c 'while :; do :; done' &
     load=$!
-    case_1_snapshot_alternates_fifo
-    case_3_compare_loose_object_fifo
+    # The race is in the watchdog, not in git: the shim cases keep each
+    # iteration short and deterministic. Real-git controls run once per mode.
+    case_2_snapshot_slow_git
+    case_4_compare_slow_git
     wait "$load" || [ "$?" = 124 ]
   done
 )
 export -f case_completion_integrity case_cli_signals case_symlink_path case_failed_sweep case_watchdog_repeated
 
-export -f fixture fail rc_is setup_mode cli slow_cli outdir survivors no_state_dir no_bound_dir first_line moved_ref_fixture compare_pair
+export -f real_git_blocks fixture fail rc_is setup_mode cli slow_cli outdir survivors no_state_dir no_bound_dir first_line moved_ref_fixture compare_pair
 export -f case_1_snapshot_alternates_fifo case_2_snapshot_slow_git case_3_compare_loose_object_fifo case_4_compare_slow_git
 export -f case_5_clean_repo case_6_limit_helper case_7_linked_worktree case_8_external_kill case_9_healthy_special_file
 export -f case_10_worker_bound case_11_cli_invalid_limit case_12_unevaluated_child case_12b_timer_claims_success case_13_hostile_output_path
@@ -653,5 +667,5 @@ for bcase_mode in timeout watchdog; do
   run_bcase case_12b_timer_claims_success 40 "$bcase_mode"
   run_bcase case_13_hostile_output_path 40 "$bcase_mode"
 done
-echo 'repo-state CLI tests passed'
 fi
+echo 'repo-state CLI tests passed'
