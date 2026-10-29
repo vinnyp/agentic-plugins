@@ -643,7 +643,13 @@ run_bcase() {
   [ "$rc" = 0 ] || fail "$fn ($mode) failed or exceeded its ${bound}s bound (rc=$rc)"
   echo "$fn ($mode) PASS"
 }
-for bcase_mode in timeout watchdog; do
+# One timer mode per run, so the runner can run both modes in parallel:
+# test-repo-state-cli-watchdog.sh runs this file with REPO_STATE_CLI_MODES=watchdog.
+case "${REPO_STATE_CLI_MODES:-timeout}" in
+  timeout|watchdog|"timeout watchdog") ;;
+  *) fail "unknown REPO_STATE_CLI_MODES: ${REPO_STATE_CLI_MODES}" ;;
+esac
+for bcase_mode in ${REPO_STATE_CLI_MODES:-timeout}; do
   run_bcase case_completion_integrity 20 "$bcase_mode"
   run_bcase case_compare_storage 20 "$bcase_mode"
   run_bcase case_premark_rename_failure 20 "$bcase_mode"
