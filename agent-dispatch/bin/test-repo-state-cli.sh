@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -uo pipefail
+SUITE_PGID=$(ps -p "$$" -o pgid= | tr -d '[:space:]')
 BIN=$(cd "$(dirname "$0")" && pwd)
 TMP=$(set -eu; scratch=$(mktemp -d "${TMPDIR:-/tmp}/repo-state-cli-test.XXXXXX"); [ -n "$scratch" ]; printf '%s\n' "$scratch")
 [ -n "$TMP" ] || exit 1
@@ -72,7 +73,7 @@ SHIM
 # A timer that claims success without running anything.
 printf '#!/bin/sh\nexit 0\n' > "$NOTIMER/timeout"
 chmod +x "$SHIMS/git" "$SHIMS/sleep" "$SLOW/git" "$NOTIMER/timeout"
-export RUN_ID RUN_PID_FILE REAL_GIT SHIMS SLOW NOTIMER BIN TMP BCASE_TIMER
+export SUITE_PGID RUN_ID RUN_PID_FILE REAL_GIT SHIMS SLOW NOTIMER BIN TMP BCASE_TIMER
 
 setup_mode() {
   # Hide only timeout discovery; the CLI under test is not modified.
@@ -93,6 +94,8 @@ outdir() { mktemp -d "$TMP/out-$RUN_ID.XXXXXX"; }
 # Poll for tagged processes that are still alive (zombies do not count).
 survivors() {
   local deadline=$((SECONDS + ${1:-2})) pid alive state
+  local groups targets pgid shell_pgid cleanup_deadline pending pass
+  shell_pgid=$(ps -p "${BASHPID:-$(exec sh -c 'echo "$PPID"')}" -o pgid= | tr -d '[:space:]')
   while :; do
     alive=''
     while read -r pid _tag; do
@@ -104,6 +107,37 @@ survivors() {
     [ -z "$alive" ] && return 0
     if [ "$SECONDS" -ge "$deadline" ]; then
       for pid in $alive; do ps -p "$pid" -o pid=,ppid=,pgid=,stat=,command= >&2; done
+      groups='' targets=''
+      # Recheck tags before signalling. Only a separate group created inside
+      # this run can contain one of our tagged descendants.
+      for pass in TERM KILL; do
+        while read -r pid _tag; do
+          [ -n "$pid" ] || continue
+          state=$(ps -p "$pid" -o stat= 2>/dev/null || true)
+          case "$state" in ''|Z*) continue ;; esac
+          ps -p "$pid" -o command= 2>/dev/null | grep -qF "$RUN_ID" || continue
+          targets="$targets $pid"
+          pgid=$(ps -p "$pid" -o pgid= 2>/dev/null | tr -d '[:space:]')
+          if [[ "$pgid" =~ ^[0-9]+$ ]] && [ "$pgid" -gt 1 ] &&
+             [ "$pgid" != "$SUITE_PGID" ] && [ "$pgid" != "$shell_pgid" ]; then
+            case " $groups " in *" $pgid "*) ;; *) groups="$groups $pgid" ;; esac
+          fi
+        done < "$RUN_PID_FILE"
+        for pgid in $groups; do kill -"$pass" -- "-$pgid" 2>/dev/null || true; done
+        for pid in $targets; do kill -"$pass" "$pid" 2>/dev/null || true; done
+        [ "$pass" = TERM ] || break
+        cleanup_deadline=$((SECONDS + 2))
+        while [ "$SECONDS" -lt "$cleanup_deadline" ]; do
+          pending=0
+          for pgid in $groups; do kill -0 -- "-$pgid" 2>/dev/null && pending=1; done
+          for pid in $targets; do kill -0 "$pid" 2>/dev/null && pending=1; done
+          [ "$pending" = 1 ] || break
+          /bin/sleep 0.1
+        done
+        for pgid in $groups; do kill -KILL -- "-$pgid" 2>/dev/null || true; done
+        for pid in $targets; do kill -KILL "$pid" 2>/dev/null || true; done
+        # The KILL pass also collects children recorded during the TERM wait.
+      done
       fail "tagged processes survived:$alive"
     fi
     /bin/sleep 0.2
