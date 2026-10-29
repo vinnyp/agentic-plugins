@@ -32,7 +32,8 @@ for name in files:
             continue
         # Ignore prose and heredoc/prompt plumbing. Still enumerate those hits
         # below, but require that they contain no executable repository command.
-        command = re.search(r'(?:\$\(|[;|(&]|^|then\s|!\s)\s*(?:[a-zA-Z_][a-zA-Z_0-9]*=\S+\s+)*(git|_repo_state_git|_review_clone_git|find|cat)\s', line)
+        assignment = r"[a-zA-Z_][a-zA-Z_0-9]*=(?:\$\([^)]*\)|\"[^\"]*\"|'[^']*'|[^\s]+)\s+"
+        command = re.search(r'(?:\$\(|[;|(&]|^|(?:then|if|elif|else|do)\s|!\s)\s*(?:' + assignment + r')*(git|_repo_state_git|_review_clone_git|find|cat)\s', line)
         metadata_read = re.search(r'wc\s+-c\s*<|grep[^\n]*\"\$(?:file|review_outfile|agy_brief|errlog|stdoutlog)|<\s*"\$(?:file|before|after|marker|saltfile|common|review_outfile|agy_brief|errlog|stdoutlog)', line)
         if '<<<' in line:
             metadata_read = None

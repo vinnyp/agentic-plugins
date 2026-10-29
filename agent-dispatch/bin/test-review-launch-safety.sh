@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -eu
 SELF_DIR=$(cd "$(dirname "$0")" && pwd)
+# shellcheck source=lib/test-env-reset.sh
+. "$SELF_DIR/lib/test-env-reset.sh"
+reset_dispatch_env
 TASK_TMP=$(mktemp -d "${TMPDIR:-/tmp}/review-launch-safety.XXXXXX")
 [ -n "$TASK_TMP" ] || exit 1
 trap 'rm -rf "$TASK_TMP"' EXIT
