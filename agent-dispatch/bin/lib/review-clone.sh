@@ -61,6 +61,9 @@ _review_clone_failed() {
   _review_clone_reason "$1" 4
 }
 
+# The review worker invokes this entire operation in one bounded child that
+# sources this library. Git statuses are mapped to library statuses below; a
+# timeout belongs to the caller and must never become the rc-4 fallback.
 review_clone_build() {
   local src=${1:-} dest=${2:-} sha=${3:-} parent common config key value
   local path attributes target source_refs dest_refs status mode attempt entry

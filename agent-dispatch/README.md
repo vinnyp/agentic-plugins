@@ -32,9 +32,8 @@ Repository-state snapshots hash sensitive config values and replace URL userinfo
 in config keys with the first 12 hex digits of its SHA-256 digest. Credentialed
 keys remain distinct for change detection; change reports omit the userinfo.
 
-Review drift checks hash Git exclude, attributes, and alternates files. Baseline
-and interim snapshots live apart from reviewer configuration and are hash-pinned;
-missing or modified snapshots cause a critical review failure (exit 10).
+Review drift checks hash Git exclude, attributes, and alternates files. Snapshots and change lists stay in dispatcher shell memory; on-disk
+tampering cannot replace captured verdict data.
 
 See the drift gate’s [limits](docs/commands.md#limits) for the write boundary it does not provide.
 
@@ -248,10 +247,14 @@ MIT.
 The standalone command handles INT, TERM and HUP promptly, removes its temporary state,
 and leaves interrupted snapshots unreadable. Completion records must agree with the
 bounded child’s exit status; scripts reach the child through a pipe. Compare and
-snapshot temporary state share the invocation’s private cleanup directory.
+snapshot data stay in memory and return through an unlinked result channel.
 
 Review drift snapshots and the standalone `repo-state-check` are bounded
 (`DISPATCH_SNAPSHOT_TIMEOUT_SECS` overrides the limit; default 120 seconds for
 `dispatch-worker`, 60 for `repo-state-check`). Normal snapshots return immediately; the bound uses coreutils
 `timeout`/`gtimeout` when available and an isolated watchdog otherwise. History metadata changes are critical; concurrent upstream pulls
 remain warnings. See [commands and known limits](docs/commands.md#limits).
+
+Review launch-time git setup fails closed with exit 3 before launching a reviewer.
+`DISPATCH_CLONE_TIMEOUT_SECS` bounds clone creation (default 600 seconds);
+`DISPATCH_SNAPSHOT_TIMEOUT_SECS` bounds the launch probe and state checks.

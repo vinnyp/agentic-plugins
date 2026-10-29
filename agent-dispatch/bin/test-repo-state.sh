@@ -49,6 +49,7 @@ REVIEW_GIT_COMMON_DIR="$3/.git"
 . "$SCRIPT_DIR/lib/repo-state.sh"
 . "$2"
 KILL_AFTER=1
+REVIEW_RUNTIME_LAUNCHED=1 REPO_STATE_SALT=test
 unset DISPATCH_SNAPSHOT_TIMEOUT_SECS
 if [ "${6:-}" = hostile ]; then
   export DISPATCH_SNAPSHOT_TIMEOUT_SECS=1
@@ -61,7 +62,8 @@ if [ "$5" = no-timeout ]; then
   }
 fi
 started=$SECONDS
-captured=$(review_state_snapshot_bounded "$3" "$4")
+review_state_snapshot_bounded "$3" || true
+printf '%s\n' "$REPO_STATE_BOUND_OUT" > "$4"
 [ -s "$4" ]
 if [ "${6:-}" = hostile ]; then
   grep -qx unreadable "$4"
@@ -107,7 +109,7 @@ else
 fi
 # Pin the compare watchdog independently of the nonregular metadata sweep.
 if [ -n "$timer" ]; then
-  sed -n '/^review_state_compare_pinned() {$/,/^}$/p' "$BIN/dispatch-worker" >> "$TMP/bounded.sh"
+  sed -n '/^review_state_compare_bounded() {$/,/^}$/p' "$BIN/dispatch-worker" >> "$TMP/bounded.sh"
   cat > "$TMP/compare-bound.sh" <<'COMPARE'
 set -eu
 SCRIPT_DIR=$1
@@ -115,7 +117,9 @@ REVIEW_GIT_DIR="$3/.git"
 REVIEW_GIT_COMMON_DIR="$3/.git"
 . "$SCRIPT_DIR/lib/repo-state.sh"
 . "$2"
-review_state_compare_unbounded() { sleep 30; }
+review_state_compare_memory() { sleep 30; }
+REVIEW_BEFORE=x REVIEW_CURRENT=x
+REVIEW_STATE_STATUS='critical(incomplete)'
 if [ "$4" = no-timeout ]; then
   command() {
     case "$*" in '-v timeout'|'-v gtimeout') return 1 ;; esac
@@ -124,10 +128,11 @@ if [ "$4" = no-timeout ]; then
 fi
 DISPATCH_SNAPSHOT_TIMEOUT_SECS=1
 rc=0
-review_state_compare_pinned "$3/before" "$3/after" "$3/changes" || rc=$?
+review_state_compare_bounded || rc=$?
+printf '%s\n' "$REPO_STATE_BOUND_OUT" > "$3/changes"
 [ "$rc" = 2 ]
 [ "$REVIEW_STATE_STATUS" = 'critical(incomplete)' ]
-grep -qx 'state: compare timed out' "$3/changes"
+grep -qx 'state: drift check could not complete' "$3/changes"
 COMPARE
   for mode in timeout no-timeout; do
     rc_is 0 "$timer" -k 1 9 bash "$TMP/compare-bound.sh" "$BIN" "$TMP/bounded.sh" "$TMP" "$mode"

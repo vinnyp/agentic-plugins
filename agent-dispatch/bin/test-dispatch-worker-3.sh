@@ -122,7 +122,7 @@ cp "$SELF_DIR/lib/"*.sh "$TMP/sentinel/bin/lib/"
 cp "$SELF_DIR/review-pin.sh" "$SELF_DIR/agy-auth-probe.sh" "$TMP/sentinel/bin/"
 # Inject only into the test-owned copy, before the bounded helper does any work.
 sed '/^review_state_snapshot_bounded() {$/a\
-  if [ "$2" = "$REVIEW_SNAPSHOT_DIR/after" ]; then kill -TERM "$$"; fi
+  if [ "$REVIEW_RUNTIME_LAUNCHED" = 1 ]; then kill -TERM "$$"; fi
 ' "$DW" > "$TMP/sentinel/bin/dispatch-worker"
 actual=0
 TIMEOUT=0 "$TMP/sentinel/bin/dispatch-worker" --runtime agy --review --brief "$BRIEF" --workdir "$SRC" > "$TMP/sentinel.out" 2> "$TMP/sentinel.err" || actual=$?
@@ -290,27 +290,25 @@ check_state_run 0
 if grep -q 'dispatch-snapshots\.' "$AGY_ARGS_FILE.snapshot-env"; then fail 'snapshot directory exported'; fi
 [ ! -e "$AGY_ARGS_FILE.shared-snapshot" ] || fail 'baseline beside global config'
 
-# A reviewer can enumerate same-user temp files and forge a matching baseline.
-export REPO_STATE_CHECK="$SELF_DIR/repo-state-check" SOURCE_GLOBAL="$GIT_CONFIG_GLOBAL"
+# Planting former snapshot paths cannot overwrite the in-memory baseline.
 cat > "$AGY_STUB_ACTIONS" <<'ACTIONS'
 git -C "$SRC" config user.name compromised
-for state in "$TMPDIR"/dispatch-snapshots.* "$TMPDIR"/dispatch-review-state.*; do
-  [ ! -f "$state/before" ] || GIT_CONFIG_GLOBAL="$SOURCE_GLOBAL" "$REPO_STATE_CHECK" snapshot "$SRC" "$state/before"
-done
+state=$(dirname "$GIT_CONFIG_GLOBAL")
+printf forged > "$state/before"
+mkfifo "$state/after" "$state/changes"
 ACTIONS
 check_state_run 10
-grep -qF 'DISPATCH_REVIEW_STATE=critical(' "$TMP/cfg.err" || fail 'agy baseline forgery passed'
-grep -qF 'state: snapshot integrity' "$TMP/cfg.err" || fail 'agy integrity diagnostic absent'
+grep -qF 'config user.name' "$TMP/cfg.err" || fail 'agy baseline forgery passed'
 cp "$TMP/state-config.before" "$SRC/.git/config"
-# Loss of the baseline must also fail closed.
+# Fake baseline loss has no effect when source state stays unchanged.
 cat > "$AGY_STUB_ACTIONS" <<'ACTIONS'
-for state in "$TMPDIR"/dispatch-snapshots.*; do
-  [ ! -f "$state/before" ] || rm "$state/before"
-done
+state=$(dirname "$GIT_CONFIG_GLOBAL")
+printf forged > "$state/before"
+rm "$state/before"
+mkfifo "$state/after" "$state/changes"
 ACTIONS
-check_state_run 10
-grep -qF 'state: snapshot integrity' "$TMP/cfg.err" || fail 'agy baseline loss passed'
-if grep -q 'No such file or directory' "$TMP/cfg.err"; then fail 'missing snapshot leaked shell error'; fi
+check_state_run 0
+grep -qF 'DISPATCH_REVIEW_STATE=clean' "$TMP/cfg.err" || fail 'agy planted files changed verdict'
 # Removing the whole state directory must preserve the critical exit and diagnostic.
 # shellcheck disable=SC2016
 printf 'rm -rf "$(dirname "$GIT_CONFIG_GLOBAL")"\n' > "$AGY_STUB_ACTIONS"
@@ -320,28 +318,40 @@ grep -qF '  state: review state directory missing or unreadable' "$TMP/cfg.err" 
 cat > "$TMP/bin/claude" <<'STUB'
 #!/usr/bin/env bash
 cat >/dev/null
-for state in "$TMPDIR"/dispatch-snapshots.*; do
-  [ ! -d "$state" ] || rm "$state/before"
+for state in "$TMPDIR"/dispatch-review-state.*; do
+  [ ! -d "$state" ] || { printf forged > "$state/before"; mkfifo "$state/after" "$state/changes"; }
 done
 STUB
-(cd "$SRC" && run_state_runtime claude 10)
-grep -qF 'DISPATCH_REVIEW_STATE=critical(' "$TMP/cfg.err" || fail 'claude baseline loss passed'
-grep -qF 'state: snapshot integrity' "$TMP/cfg.err" || fail 'claude compare diagnostic absent'
+(cd "$SRC" && run_state_runtime claude 0)
+grep -qF 'DISPATCH_REVIEW_STATE=clean' "$TMP/cfg.err" || fail 'claude planted snapshot changed verdict'
 
-# Snapshot allocation failures must explain the failing allocation on both paths.
+# A failed bound allocation refuses launch before runtime temporary files.
 REAL_MKTEMP=$(command -v mktemp)
 export REAL_MKTEMP
 cat > "$TMP/bin/mktemp" <<'STUB'
 #!/usr/bin/env bash
-case "$*" in *dispatch-snapshots.*) exit 1 ;; esac
+case "$*" in *repo-state-bound.*) exit 1 ;; esac
 exec "$REAL_MKTEMP" "$@"
 STUB
 chmod +x "$TMP/bin/mktemp"
 for runtime in agy claude; do
   (cd "$SRC" && run_state_runtime "$runtime" 3)
-  grep -qF 'could not create the review snapshot directory' "$TMP/cfg.err" || fail "$runtime snapshot allocation diagnostic absent"
+  grep -qF 'launch-time git setup could not complete' "$TMP/cfg.err" || fail "$runtime bound allocation diagnostic absent"
 done
 rm "$TMP/bin/mktemp"
+
+# A slow clone is a launch failure, never a non-hermetic fallback.
+mkdir "$TMP/slow-clone-bin"
+cat > "$TMP/slow-clone-bin/git" <<'STUB'
+#!/usr/bin/env bash
+case "$1" in clone) sleep 10 ;; esac
+exec "$REAL_HOSTILE_GIT" "$@"
+STUB
+chmod +x "$TMP/slow-clone-bin/git"
+: > "$AGY_STUB_ACTIONS"
+PATH="$TMP/slow-clone-bin:$PATH" DISPATCH_CLONE_TIMEOUT_SECS=3 check_state_run 3
+grep -qF 'skipped(not-launched) original_rc=3' "$TMP/cfg.err" || fail 'clone timeout launched reviewer'
+! grep -q 'running non-hermetically' "$TMP/cfg.err" || fail 'clone timeout fell back'
 
 # Count suite-local stubs and the definitions factored into the shared helper.
 # There are 28 agy stubs across the three parts and shared helper;
