@@ -697,6 +697,9 @@ repo_state_run_bounded() {
   local LC_ALL=C noclobber=0
   shift 2
   REPO_STATE_BOUND_OUT=''
+  # Read by file-interface callers to preserve setup-error status.
+  # shellcheck disable=SC2034
+  REPO_STATE_BOUND_STARTED=0
   _repo_state_save_channel || { _repo_state_close_channel; return 125; }
   private=$(umask 077; mktemp -d "${TMPDIR:-/tmp}/repo-state-bound.XXXXXX") || {
     _repo_state_close_channel; return 125;
@@ -753,6 +756,8 @@ repo_state_run_bounded() {
   elif command -v gtimeout >/dev/null 2>&1; then tcmd=gtimeout; fi
   case $- in *m*) monitor=1 ;; esac
   set -m
+  # shellcheck disable=SC2034
+  REPO_STATE_BOUND_STARTED=1
   if [ -n "$tcmd" ]; then
     "$tcmd" -k 5 "$limit" bash <(printf '%s\n' "$script_text") "$@" &
     REPO_STATE_BOUND_PID=$!
@@ -799,16 +804,14 @@ repo_state_run_bounded() {
     wait "$watchdog" 2>/dev/null || true
     kill -KILL -- "-$watchdog" 2>/dev/null || true
   fi
+  # Keep the sentinel until validation; removing it with a wildcard expansion
+  # scans the entire payload very slowly on Bash 3.2. Feed tail fresh bytes:
+  # GNU tail treats an already-consumed descriptor as an empty stream.
   if ! out=$(cat <&8 || exit 1; printf x); then result=125; fi
-  out=${out%x}
-  # Seek only over a small suffix: Bash 3.2 wildcard splitting is slow at the cap.
-  if [ "${#out}" -le 64 ]; then
-    completion=$out
-  else
-    completion=$(tail -c 64 <&8) || result=125
-  fi
+  completion=$(set -o pipefail; printf '%s' "$out" | tail -c 65) || result=125
+  completion=${completion%x}
   completion=${completion##*$'\n'}
-  payload_bytes=$((${#out} - ${#completion} - 1))
+  payload_bytes=$((${#out} - ${#completion} - 2))
   _repo_state_close_channel
   case "$result" in
     124|137)

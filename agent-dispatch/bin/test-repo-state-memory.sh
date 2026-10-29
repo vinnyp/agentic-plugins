@@ -60,6 +60,22 @@ for mutation in bytes rc suffix; do
   [ "$rc" = 125 ] || fail "channel $mutation mismatch accepted"
   [ -z "$REPO_STATE_BOUND_OUT" ] || fail 'invalid channel retained payload'
 done
+# A stream reader must not rely on seeking backwards after consuming stdin.
+cat > "$TMP/bin/tail" <<'SHIM'
+#!/bin/bash
+# Behave like a stream-only tail on stdin, including when it is already at EOF.
+data=$(cat; printf x)
+data=${data%x}
+count=$2
+size=${#data}
+[ "$size" -le "$count" ] || data=${data:size-count}
+printf '%s' "$data"
+SHIM
+chmod +x "$TMP/bin/tail"
+stream_payload() { REPO_STATE_BOUND_OUT=$(printf '%0100d' 1); }
+PATH="$TMP/bin:$PATH" rc_is 0 repo_state_run_bounded 5 stream_payload
+[ "${#REPO_STATE_BOUND_OUT}" = 100 ] || fail 'stream trailer lost payload'
+rm "$TMP/bin/tail"
 max_payload() { REPO_STATE_BOUND_OUT=$(LC_ALL=C head -c 67108864 /dev/zero | tr '\0' x); }
 rc_is 0 repo_state_run_bounded 20 max_payload
 [ "${#REPO_STATE_BOUND_OUT}" = 67108864 ] || fail 'at-cap payload lost bytes'

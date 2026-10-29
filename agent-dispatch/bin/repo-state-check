@@ -140,15 +140,17 @@ _rsc_snapshot() {
 _rsc_compare() {
   local before=$1 after=$2 limit rc=0
   limit=$(repo_state_snapshot_limit repo-state-check 60)
-  _rsc_private=$(umask 077; mktemp -d "${TMPDIR:-/tmp}/repo-state-cli.XXXXXX") || return 3
-  [ -n "$_rsc_private" ] || return 3
   # File reads happen once, inside the same bound as the comparison.
+  # shellcheck disable=SC2034
   REPO_STATE_BOUND_VARS='' REPO_STATE_BOUND_FUNCS=''
   repo_state_run_bounded "$limit" repo_state_compare_files "$before" "$after" || rc=$?
   case "$rc" in
     0|1|2|3) printf '%s' "$REPO_STATE_BOUND_OUT"; return "$rc" ;;
     124) echo 'state: compare timed out' ;;
-    125) echo 'state: compare could not complete (setup failed or no completion recorded)' ;;
+    125)
+      echo 'state: compare could not complete (setup failed or no completion recorded)'
+      # Keep internal setup failures distinct from an unproven child result.
+      [ "$REPO_STATE_BOUND_STARTED" = 1 ] || return 3 ;;
     *) echo "state: compare could not complete (unexpected status $rc)" ;;
   esac
   return 2
