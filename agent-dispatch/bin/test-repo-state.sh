@@ -9,6 +9,7 @@ export GIT_CONFIG_GLOBAL="$TMP/global" GIT_CONFIG_NOSYSTEM=1
 printf '[user]\n name = Fixture\n email = fixture@example.invalid\n' > "$GIT_CONFIG_GLOBAL"
 # shellcheck source=agent-dispatch/bin/lib/repo-state.sh
 . "$BIN/lib/repo-state.sh"
+"${BASH:-bash}" "$BIN/test-repo-state-memory.sh"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 rc_is() {
   local want=$1 rc=0
@@ -161,7 +162,7 @@ done
 (TMPDIR="$TMP/nonexistent"; export TMPDIR
  rc_is 3 "$BIN/repo-state-check" compare "$TMP/before" "$TMP/before"
  mktemp() { return 1; }
- rc_is 3 repo_state_compare "$TMP/before" "$TMP/before" "$TMP/changes")
+ rc_is 0 repo_state_compare "$TMP/before" "$TMP/before" "$TMP/changes")
 check_key user.name Other 2
 grep -Eq '^config user.name \(local:.*<changed>' "$TMP/changes"
 check_key core.hooksPath /x 2
