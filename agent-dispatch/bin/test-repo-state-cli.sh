@@ -130,8 +130,10 @@ moved_ref_fixture() {
 
 
 # Probe real Git in a separate scratch fixture before claiming a blocking control.
+# Exits 0 when git blocks, 1 when it does not, 2 for a fixture or setup error.
 real_git_blocks() (
-  set -eu
+  set -eEu
+  trap 'echo "real-git probe for $1: setup error" >&2; exit 2' ERR
   local case_name=$1 kind=$2 rc=0 obj target
   fixture probe
   target=$R
@@ -139,7 +141,7 @@ real_git_blocks() (
     loose-object)
       moved_ref_fixture
       obj="$R/.git/objects/${MOVED:0:2}/${MOVED:2}"
-      [ -f "$obj" ] || fail 'probe commit is not a loose object'
+      [ -f "$obj" ]
       rm "$obj"; mkfifo "$obj"
       "$BCASE_TIMER" -k 1 3 "$REAL_GIT" -C "$R" rev-list "$MOVED" >/dev/null 2>&1 || rc=$?
       ;;
@@ -152,16 +154,31 @@ real_git_blocks() (
       "$BCASE_TIMER" -k 1 3 "$REAL_GIT" -C "$target" rev-parse --absolute-git-dir >/dev/null 2>&1 || rc=$?
       ;;
   esac
-  if [ "$rc" != 124 ]; then
+  if [ "$rc" != 124 ] && [ "$rc" != 137 ]; then
     printf 'SKIP %s: this git does not block on %s (probe rc %s)\n' "$case_name" "$kind FIFO" "$rc"
-    return 1
+    exit 1
   fi
   printf 'REAL GIT %s: blocks on %s\n' "$case_name" "$kind FIFO"
 )
+# Run the probe; a git that does not block skips the calling case (status 77),
+# and a probe that itself failed is a test failure, never a skip.
+need_real_git_block() {
+  local rc
+  # Not an `||` list: bash would switch errexit off inside the probe and hide its setup errors.
+  set +e
+  real_git_blocks "$1" "$2"
+  rc=$?
+  set -e
+  case "$rc" in
+    0) return 0 ;;
+    1) exit 77 ;;
+    *) fail "real-git probe for $1 failed (status $rc)" ;;
+  esac
+}
 
 case_1_snapshot_alternates_fifo() (
   set -eu; setup_mode
-  real_git_blocks case_1_snapshot_alternates_fifo alternates || return 0
+  [ "${SKIP_PROBE:-}" = 1 ] || need_real_git_block case_1_snapshot_alternates_fifo alternates
   local d rc=0
   fixture; d=$(outdir)
   mkfifo "$R/.git/objects/info/alternates"
@@ -194,7 +211,7 @@ compare_pair() {
 }
 case_3_compare_loose_object_fifo() (
   set -eu; setup_mode
-  real_git_blocks case_3_compare_loose_object_fifo loose-object || return 0
+  need_real_git_block case_3_compare_loose_object_fifo loose-object
   local d rc=0 obj
   fixture; d=$(outdir)
   compare_pair "$d"
@@ -251,7 +268,7 @@ case_6_limit_helper() (
 )
 case_7_linked_worktree() (
   set -eu; setup_mode
-  real_git_blocks case_7_linked_worktree linked-alternates || return 0
+  need_real_git_block case_7_linked_worktree linked-alternates
   local d rc=0 wt
   fixture; d=$(outdir)
   wt="$R-linked"
@@ -374,7 +391,9 @@ case_11_cli_invalid_limit() (
   started=$SECONDS
   cp "$d/file" "$d/copy"
   for value in abc 0; do
-    rc_is 0 env DISPATCH_SNAPSHOT_TIMEOUT_SECS="$value" PATH="$SHIMS:$PATH" "$BIN/repo-state-check" compare "$d/file" "$d/copy" > "$d/out" 2> "$d/err"
+    rc=0
+    env DISPATCH_SNAPSHOT_TIMEOUT_SECS="$value" PATH="$SHIMS:$PATH" "$BIN/repo-state-check" compare "$d/file" "$d/copy" > "$d/out" 2> "$d/err" || rc=$?
+    [ "$rc" = 0 ] || fail "compare limit $value gave $rc"
     [ ! -s "$d/out" ] || fail 'clean compare produced output'
     grep -Fxq 'repo-state-check: invalid DISPATCH_SNAPSHOT_TIMEOUT_SECS; using 60' "$d/err" || fail 'compare warning text'
   done
@@ -424,7 +443,7 @@ case_12b_timer_claims_success() (
   PATH="$NOTIMER:$PATH" "$BIN/repo-state-check" compare "$d/before" "$d/after" > "$d/out" 2> "$d/err" || rc=$?
   [ "$rc" = 2 ] || fail "compare expected 2, got $rc"
   [ "$(wc -l < "$d/out" | tr -d ' ')" = 1 ] || fail 'compare output is not one line'
-  grep -Eq '^state: compare could not complete \(.+\)$' "$d/out" || fail 'compare output text'
+  [ "$(grep -Ec '^state: compare could not complete \(.+\)$' "$d/out")" = 1 ] || fail 'compare output text'
   no_bound_dir
 )
 case_13_hostile_output_path() (
@@ -511,7 +530,7 @@ case_cli_signals() (
     case "$sig:$rc" in TERM:143|INT:130) ;; *) fail "signal $sig returned $rc" ;; esac
     [ $((SECONDS - started)) -le 2 ] || fail 'signal handling deferred'
     [ "$(first_line "$d/file")" = unreadable ] || fail 'signal left readable output'
-    survivors 27
+    survivors
     no_state_dir "$d"; no_bound_dir
   done
 )
@@ -544,9 +563,17 @@ FIND
     "$BIN/repo-state-check" snapshot "$R" "$d/file" 2> "$d/err" || rc=$?
   chmod 700 "$R/.git/inaccessible"
   [ "$rc" = 3 ] || fail 'failed sweep did not fail closed'
-  grep -Fxq 'repo-state-check: snapshot timed out; pre-sweep failed; cause unknown' "$d/err" || { cat "$d/err" >&2; fail 'failed sweep message missing'; }
+  grep -Fxq "repo-state-check: snapshot timed out; pre-sweep failed; special files found so far: $R/.git/objects/info/alternates; cause unknown" "$d/err" || { cat "$d/err" >&2; fail 'failed sweep message missing'; }
   grep -q '^unsafe' "$d/file" || fail 'partial sweep discarded'
   ! grep -q 'pre-sweep skipped' "$d/err" || fail 'failed sweep reported skipped'
+  survivors; no_bound_dir
+  # With nothing found, the plain message stays.
+  rm "$R/.git/objects/info/alternates"
+  rc=0
+  REAL_FIND=$(cat "$d/real-find") PATH="$d/bin:$SLOW:$SHIMS:$PATH" DISPATCH_SNAPSHOT_TIMEOUT_SECS=1 \
+    "$BIN/repo-state-check" snapshot "$R" "$d/file2" 2> "$d/err2" || rc=$?
+  [ "$rc" = 3 ] || fail 'failed sweep (none found) did not fail closed'
+  grep -Fxq 'repo-state-check: snapshot timed out; pre-sweep failed; cause unknown' "$d/err2" || { cat "$d/err2" >&2; fail 'plain failed sweep message missing'; }
   survivors; no_bound_dir
 )
 case_compare_storage() (
@@ -594,7 +621,7 @@ TIMER
   chmod +x "$d/bin/timeout"
   PATH="$d/bin:$SLOW:$SHIMS:$PATH" "$BIN/repo-state-check" compare "$d/before" "$d/after" > "$d/out" 2> "$d/err" || rc=$?
   [ "$rc" = 2 ] || fail 'forged compare was accepted'
-  grep -q '^state:' "$d/out" || fail 'unevaluated compare lacks state line'
+  [ "$(grep -Ec '^state: compare could not complete \(.+\)$' "$d/out")" = 1 ] || fail 'unevaluated compare lacks its state line'
   survivors; no_bound_dir
 )
 export -f case_compare_storage case_cli_forged_completion
@@ -603,13 +630,22 @@ case_premark_rename_failure() (
   set -eu; setup_mode
   local d rc=0
   fixture; d=$(outdir)
-  cli snapshot "$R" "$d/file"
   mkdir "$d/bin"
   printf '#!/bin/sh\nexit 1\n' > "$d/bin/mv"
   chmod +x "$d/bin/mv"
-  PATH="$d/bin:$SHIMS:$PATH" "$BIN/repo-state-check" snapshot "$R" "$d/file" 2> "$d/err" || rc=$?
+  # The pre-mark is by rename only: when it cannot be made, nothing is written
+  # through a symlink or opened at the output path.
+  printf sentinel > "$d/sentinel"
+  ln -s "$d/sentinel" "$d/link"
+  PATH="$d/bin:$SHIMS:$PATH" "$BIN/repo-state-check" snapshot "$R" "$d/link" 2> "$d/err" || rc=$?
   [ "$rc" = 3 ] || fail 'failed rename was accepted'
-  [ "$(first_line "$d/file")" = unreadable ] || fail 'failed rename left stale output'
+  [ "$(cat "$d/sentinel")" = sentinel ] || fail 'failed pre-mark wrote through a symlink'
+  # A regular file sharing its inode with another path is never opened for writing.
+  ln "$d/sentinel" "$d/hard"
+  rc=0
+  PATH="$d/bin:$SHIMS:$PATH" "$BIN/repo-state-check" snapshot "$R" "$d/hard" 2> "$d/err" || rc=$?
+  [ "$rc" = 3 ] || fail 'failed rename on a regular file was accepted'
+  [ "$(cat "$d/sentinel")" = sentinel ] || fail 'failed pre-mark wrote through a hard link'
   no_state_dir "$d"; no_bound_dir
 )
 export -f case_premark_rename_failure
@@ -617,21 +653,209 @@ export -f case_premark_rename_failure
 case_watchdog_repeated() (
   set -eu
   [ "$CASE_MODE" = watchdog ] || exit 0
-  local i load
-  # This finite load runs under our own deadline; wait for it before returning.
-  for ((i=0; i<20; i++)); do
-    "$BCASE_TIMER" -k 1 3 bash -c 'while :; do :; done' &
-    load=$!
-    # The race is in the watchdog, not in git: the shim cases keep each
-    # iteration short and deterministic. Real-git controls run once per mode.
-    case_2_snapshot_slow_git
-    case_4_compare_slow_git
-    wait "$load" || [ "$?" = 124 ]
+  need_real_git_block case_watchdog_repeated alternates
+  local i j n ncpu pid burners=()
+  ncpu=$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 2)
+  n=$((ncpu - 2)); [ "$n" -ge 1 ] || n=1
+  reap_burners() {
+    local pid
+    for pid in ${burners[@]+"${burners[@]}"}; do wait "$pid" 2>/dev/null || true; done
+    burners=()
+  }
+  # Every burner runs under its own deadline, and only those pids are signalled or waited on.
+  trap reap_burners EXIT
+  for ((i=0; i<12; i++)); do
+    for ((j=0; j<n; j++)); do
+      "$BCASE_TIMER" -k 1 12 bash -c 'while :; do :; done' &
+      burners[${#burners[@]}]=$!
+    done
+    SKIP_PROBE=1 case_1_snapshot_alternates_fifo
+    # Stop only the burners this iteration started; their timers still bound them.
+    for pid in "${burners[@]}"; do kill "$pid" 2>/dev/null || true; done
+    reap_burners
   done
 )
+# A stale cancel variable in the environment must never be acted on.
+case_stale_bound_env() (
+  set -eu; setup_mode
+  local d pid rc=0
+  d=$(outdir); mkdir "$d/sentinel-dir"
+  # A sleep the test starts, in its own process group.
+  set -m
+  bash -c 'exec -a "tagged-sleep-$RUN_ID" /bin/sleep 60' &
+  pid=$!
+  set +m
+  echo "$pid tagged-sleep-$RUN_ID" >> "$RUN_PID_FILE"
+  REPO_STATE_BOUND_PID=$pid REPO_STATE_BOUND_WATCHDOG=$pid REPO_STATE_BOUND_PRIVATE="$d/sentinel-dir" \
+    "$BIN/repo-state-check" --help > /dev/null || rc=$?
+  [ "$rc" = 0 ] || { kill "$pid" 2>/dev/null || true; fail "--help exited $rc"; }
+  [ -d "$d/sentinel-dir" ] || { kill "$pid" 2>/dev/null || true; fail 'stale private variable removed a directory'; }
+  kill -0 "$pid" 2>/dev/null || fail 'stale pid variable killed a process group'
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  survivors; no_bound_dir
+)
+
+# A helper that dies mid-compare must never read as a verdict.
+case_compare_helper_failure() (
+  set -eu; setup_mode
+  local d rc=0 real_awk
+  fixture; d=$(outdir)
+  cli snapshot "$R" "$d/before"
+  printf '#!/bin/sh\nexit 0\n' > "$R/.git/hooks/pre-commit"
+  chmod +x "$R/.git/hooks/pre-commit"
+  cli snapshot "$R" "$d/after"
+  rc_is 2 cli compare "$d/before" "$d/after" > "$d/baseline-out"
+  real_awk=$(command -v awk)
+  mkdir "$d/bin"
+  cat > "$d/bin/awk" <<'AWK'
+#!/usr/bin/env bash
+for arg in "$@"; do
+  case "$arg" in *hasold*) kill -KILL $$ ;; esac
+done
+exec "$REAL_AWK" "$@"
+AWK
+  chmod +x "$d/bin/awk"
+  REAL_AWK=$real_awk PATH="$d/bin:$SHIMS:$PATH" "$BIN/repo-state-check" compare "$d/before" "$d/after" > "$d/out" 2> "$d/err" || rc=$?
+  case "$rc" in 2|3) ;; *) fail "a dying helper gave compare status $rc" ;; esac
+  grep -Eq '^state: ' "$d/out" || fail 'a dying helper left no state line'
+  survivors; no_bound_dir
+)
+
+# A FIFO renamed over the output temporary must not hang the CLI.
+case_fifo_over_temp() (
+  set -eu; setup_mode
+  local d rc=0
+  fixture; d=$(outdir)
+  mkdir "$d/bin"
+  cat > "$d/bin/git" <<'SHIM'
+#!/usr/bin/env bash
+echo $$ >> "$RUN_PID_FILE"
+case " $* " in
+  *' worktree list '*)
+    for t in "$OUTDIR"/.repo-state-out.*; do
+      [ -f "$t" ] || continue
+      rm -f "$t"; mkfifo "$t"
+    done ;;
+esac
+exec -a "tagged-$RUN_ID" "$REAL_GIT" "$@"
+SHIM
+  chmod +x "$d/bin/git"
+  OUTDIR=$d PATH="$d/bin:$SHIMS:$PATH" DISPATCH_SNAPSHOT_TIMEOUT_SECS=20 \
+    "$BCASE_TIMER" -k 1 15 "$BIN/repo-state-check" snapshot "$R" "$d/file" 2> "$d/err" || rc=$?
+  [ "$rc" = 3 ] || fail "FIFO temporary gave status $rc"
+  [ "$(first_line "$d/file")" = unreadable ] || fail 'FIFO temporary left a readable output'
+  survivors; no_state_dir "$d"; no_bound_dir
+)
+
+# A symlinked .git is never followed by the pre-sweep; a symlinked repo path still is.
+case_symlinked_gitdir() (
+  set -eu; setup_mode
+  local d rc=0
+  fixture; d=$(outdir)
+  mv "$R/.git" "$d/realgit"
+  ln -s "$d/realgit" "$R/.git"
+  mkfifo "$d/realgit/FETCH_HEAD"
+  DISPATCH_SNAPSHOT_TIMEOUT_SECS=1 slow_cli snapshot "$R" "$d/file" 2> "$d/err" || rc=$?
+  [ "$rc" = 3 ] || fail "expected 3, got $rc"
+  ! grep -q '^unsafe' "$d/file" || fail 'a symlinked .git was followed'
+  grep -Fq 'pre-sweep skipped (.git is not a directory)' "$d/err" || fail 'skip message missing'
+  survivors; no_state_dir "$d"; no_bound_dir
+)
+
+# The watchdog decides from the child, not from a file the child can plant.
+case_planted_token() (
+  set -eu; setup_mode
+  local rc=0
+  [ "$CASE_MODE" = watchdog ] || exit 0
+  plant_and_wait() {
+    local private
+    for private in "$TMPDIR"/repo-state-bound.*; do printf 'done 0\n' > "$private/done"; done
+    /bin/sleep 8
+  }
+  repo_state_run_bounded 1 plant_and_wait || rc=$?
+  [ "$rc" = 124 ] || fail "a planted token disarmed the watchdog (status $rc)"
+  no_bound_dir
+)
+
+# A trapped signal in the caller must not end the wait early.
+case_trapped_signal_wait() (
+  set -eu; setup_mode
+  local d rc=0 self
+  d=$(outdir)
+  self=${BASHPID:-$(exec sh -c 'echo "$PPID"')}
+  trap ':' USR1
+  slow_ok() { /bin/sleep 3; }
+  ( /bin/sleep 1; kill -USR1 "$self" 2>/dev/null || true ) &
+  repo_state_run_bounded 20 slow_ok || rc=$?
+  wait 2>/dev/null || true
+  [ "$rc" = 0 ] || fail "a trapped signal ended the wait early (status $rc)"
+  no_bound_dir
+)
+
+# The generated script is one group, so it is parsed whole before anything runs.
+case_script_grouped() (
+  set -eu; setup_mode
+  local d rc=0
+  d=$(outdir); mkdir "$d/bin"
+  cat > "$d/bin/bash" <<'SHIM'
+#!/bin/sh
+script=$1; shift
+cat "$script" > "$SCRIPT_COPY"
+exec "$REAL_BASH" "$SCRIPT_COPY" "$@"
+SHIM
+  chmod +x "$d/bin/bash"
+  ok_op() { :; }
+  REAL_BASH=$(command -v bash) SCRIPT_COPY="$d/script" PATH="$d/bin:$PATH" repo_state_run_bounded 5 ok_op || rc=$?
+  [ "$rc" = 0 ] || fail "grouped script failed ($rc)"
+  [ "$(head -n 1 "$d/script")" = '{' ] || fail 'script does not open a group'
+  [ "$(tail -n 1 "$d/script")" = '}' ] || fail 'script does not close its group'
+  bash -n "$d/script" || fail 'script does not parse'
+  no_bound_dir
+)
+
+# Deterministic copies of the real-git FIFO cases: the slow-git shim stands in for git.
+case_slow_alternates_fifo() (
+  set -eu; setup_mode
+  local d rc=0
+  fixture; d=$(outdir)
+  mkfifo "$R/.git/objects/info/alternates"
+  DISPATCH_SNAPSHOT_TIMEOUT_SECS=1 slow_cli snapshot "$R" "$d/file" 2> "$d/err" || rc=$?
+  [ "$rc" = 3 ] || fail "expected 3, got $rc"
+  [ "$(first_line "$d/file")" = unreadable ] || fail 'file not unreadable'
+  grep -q $'^unsafe\t.*objects/info/alternates' "$d/file" || fail 'unsafe line missing'
+  grep -q 'repo-state-check: snapshot timed out; special files found in git metadata:.*objects/info/alternates' "$d/err" || fail 'message (a) missing'
+  survivors; no_state_dir "$d"; no_bound_dir
+)
+case_slow_linked_worktree() (
+  set -eu; setup_mode
+  local d rc=0 wt
+  fixture; d=$(outdir)
+  wt="$R-linked"
+  "$REAL_GIT" -C "$R" worktree add -q -b linked "$wt"
+  DISPATCH_SNAPSHOT_TIMEOUT_SECS=1 slow_cli snapshot "$wt" "$d/file" 2> "$d/err" || rc=$?
+  [ "$rc" = 3 ] || fail "expected 3, got $rc"
+  [ "$(first_line "$d/file")" = unreadable ] || fail 'file not unreadable'
+  ! grep -q '^unsafe' "$d/file" || fail 'unexpected unsafe line'
+  grep -Fq 'repo-state-check: snapshot timed out; pre-sweep skipped (.git is not a directory); cause unknown' "$d/err" || fail 'message (c) missing'
+  survivors; no_state_dir "$d"; no_bound_dir
+)
+case_slow_watchdog_ran() (
+  set -eu; setup_mode
+  local d rc=0
+  [ "$CASE_MODE" = watchdog ] || exit 0
+  fixture; d=$(outdir)
+  DISPATCH_SNAPSHOT_TIMEOUT_SECS=1 slow_cli snapshot "$R" "$d/file" 2> "$d/err" || rc=$?
+  [ "$rc" = 3 ] || fail "expected 3, got $rc"
+  grep -q ' tagged-sleep-' "$RUN_PID_FILE" || fail 'watchdog never started'
+  survivors; no_bound_dir
+)
+export -f case_stale_bound_env case_compare_helper_failure case_fifo_over_temp case_symlinked_gitdir
+export -f case_planted_token case_trapped_signal_wait case_script_grouped
+export -f case_slow_alternates_fifo case_slow_linked_worktree case_slow_watchdog_ran
 export -f case_completion_integrity case_cli_signals case_symlink_path case_failed_sweep case_watchdog_repeated
 
-export -f real_git_blocks fixture fail rc_is setup_mode cli slow_cli outdir survivors no_state_dir no_bound_dir first_line moved_ref_fixture compare_pair
+export -f real_git_blocks need_real_git_block fixture fail rc_is setup_mode cli slow_cli outdir survivors no_state_dir no_bound_dir first_line moved_ref_fixture compare_pair
 export -f case_1_snapshot_alternates_fifo case_2_snapshot_slow_git case_3_compare_loose_object_fifo case_4_compare_slow_git
 export -f case_5_clean_repo case_6_limit_helper case_7_linked_worktree case_8_external_kill case_9_healthy_special_file
 export -f case_10_worker_bound case_11_cli_invalid_limit case_12_unevaluated_child case_12b_timer_claims_success case_13_hostile_output_path
@@ -640,8 +864,11 @@ export GIT_CONFIG_GLOBAL GIT_CONFIG_NOSYSTEM
 run_bcase() {
   local fn=$1 bound=$2 mode=$3 rc=0
   CASE_MODE=$mode "$BCASE_TIMER" -k 1 "$bound" bash -c '. "$BIN/lib/repo-state.sh"; "$@"' _ "$fn" || rc=$?
-  [ "$rc" = 0 ] || fail "$fn ($mode) failed or exceeded its ${bound}s bound (rc=$rc)"
-  echo "$fn ($mode) PASS"
+  case "$rc" in
+    0) echo "$fn ($mode) PASS" ;;
+    77) echo "$fn ($mode) SKIPPED" ;;
+    *) fail "$fn ($mode) failed or exceeded its ${bound}s bound (rc=$rc)" ;;
+  esac
 }
 # One timer mode per run, so the runner can run both modes in parallel:
 # test-repo-state-cli-watchdog.sh runs this file with REPO_STATE_CLI_MODES=watchdog.
@@ -657,6 +884,16 @@ for bcase_mode in ${REPO_STATE_CLI_MODES:-timeout}; do
   run_bcase case_cli_signals 65 "$bcase_mode"
   run_bcase case_symlink_path 20 "$bcase_mode"
   run_bcase case_failed_sweep 20 "$bcase_mode"
+  run_bcase case_stale_bound_env 40 "$bcase_mode"
+  run_bcase case_compare_helper_failure 40 "$bcase_mode"
+  run_bcase case_fifo_over_temp 40 "$bcase_mode"
+  run_bcase case_symlinked_gitdir 40 "$bcase_mode"
+  run_bcase case_planted_token 40 "$bcase_mode"
+  run_bcase case_trapped_signal_wait 40 "$bcase_mode"
+  run_bcase case_script_grouped 40 "$bcase_mode"
+  run_bcase case_slow_alternates_fifo 40 "$bcase_mode"
+  run_bcase case_slow_linked_worktree 40 "$bcase_mode"
+  run_bcase case_slow_watchdog_ran 40 "$bcase_mode"
   run_bcase case_watchdog_repeated 180 "$bcase_mode"
   run_bcase case_1_snapshot_alternates_fifo 40 "$bcase_mode"
   run_bcase case_2_snapshot_slow_git 40 "$bcase_mode"

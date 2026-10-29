@@ -12,7 +12,7 @@ SCRIPT_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 . "$SCRIPT_DIR/lib/repo-state.sh"
 usage() {
   echo 'usage: repo-state-check snapshot <repo> <file> | compare <before> <after>'
-  echo 'compare exits: 0 clean, 1 warn, 2 critical or not evaluated (a "state:" line or "config: <unreadable after review>"), 3 input error (unreadable before file or internal temp failure), 64 usage'
+  echo 'compare exits: 0 clean, 1 warn, 2 critical or not evaluated (a "state:" line or "config: <unreadable after review>"), 3 input error (unreadable before file, internal temp failure or a failed helper), 64 usage'
   echo 'snapshot exits: 0 ok, 3 failure or not evaluated (<file> then reads "unreadable"), 64 usage'
   echo 'DISPATCH_SNAPSHOT_TIMEOUT_SECS: seconds (1-86400) the git reads may run before they are killed; default 60 here, 120 for dispatch-worker; an invalid value uses the default with a warning'
   echo '--help, -h: print usage and exit 0'
@@ -65,15 +65,14 @@ _rsc_snapshot() {
   temp=$(mktemp "$(dirname "$file")/.repo-state-out.XXXXXX") || return 3
   _rsc_tmps[${#_rsc_tmps[@]}]=$temp
   printf 'unreadable\n' > "$temp" || return 3
-  if ! _rsc_put "$temp" "$file"; then
-    if [ -f "$file" ] && [ ! -L "$file" ]; then repo_state_mark_unreadable "$file"; fi
-    return 3
-  fi
+  # The pre-mark is by rename only: never open or follow what is at <file>.
+  _rsc_put "$temp" "$file" || return 3
   case "$repo" in /*) ;; *) return 3 ;; esac
   limit=$(repo_state_snapshot_limit repo-state-check 60)
   _rsc_private=$(umask 077; mktemp -d "${TMPDIR:-/tmp}/repo-state-cli.XXXXXX") || return 3
   [ -n "$_rsc_private" ] || return 3
-  if gitdir=$(cd -P "$repo/.git" 2>/dev/null && pwd -P); then
+  # Sweep only a real .git directory: a symlinked .git is never followed.
+  if [ -d "$repo/.git" ] && [ ! -L "$repo/.git" ] && gitdir=$(cd -P "$repo/.git" 2>/dev/null && pwd -P); then
     sweep="$_rsc_private/sweep"
     if repo_state_nonregular_sweep "$sweep" "$gitdir"; then
       sweep_state=ran
@@ -92,7 +91,10 @@ _rsc_snapshot() {
   unset REPO_STATE_TMP
   if [ "$rc" = 0 ]; then
     first=''
-    IFS= read -r first < "$temp" 2>/dev/null || true
+    # Never open anything but a regular file: a FIFO renamed over <temp> would hang the read.
+    if [ -f "$temp" ] && [ ! -L "$temp" ]; then
+      IFS= read -r first < "$temp" 2>/dev/null || true
+    fi
     case "$first" in
       repo$'\t'*)
         if [ -n "$sweep" ]; then
@@ -120,7 +122,12 @@ _rsc_snapshot() {
         else
           echo "repo-state-check: snapshot timed out; no special file found in $gitdir; cause unknown (if the repo is large, raise DISPATCH_SNAPSHOT_TIMEOUT_SECS and the Bash tool timeout)" >&2
         fi ;;
-      failed) echo 'repo-state-check: snapshot timed out; pre-sweep failed; cause unknown' >&2 ;;
+      failed)
+        if [ -s "$sweep" ]; then
+          echo "repo-state-check: snapshot timed out; pre-sweep failed; special files found so far: $(_rsc_paths "$sweep"); cause unknown" >&2
+        else
+          echo 'repo-state-check: snapshot timed out; pre-sweep failed; cause unknown' >&2
+        fi ;;
       *) echo 'repo-state-check: snapshot timed out; pre-sweep skipped (.git is not a directory); cause unknown' >&2 ;;
     esac
   else

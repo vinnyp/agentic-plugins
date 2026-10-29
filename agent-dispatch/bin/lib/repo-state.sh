@@ -8,6 +8,9 @@
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/portable-stat.sh"
 _REPO_STATE_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/repo-state.sh"
 _REPO_STATE_LOCAL_ENV_VARS=$(git rev-parse --local-env-vars 2>/dev/null)
+# Cancel state belongs to one invocation: never inherit it, never export it.
+unset REPO_STATE_BOUND_PID REPO_STATE_BOUND_WATCHDOG REPO_STATE_BOUND_PRIVATE
+REPO_STATE_BOUND_PID='' REPO_STATE_BOUND_WATCHDOG='' REPO_STATE_BOUND_PRIVATE=''
 
 _repo_state_git() (
   unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_PREFIX
@@ -294,8 +297,21 @@ _repo_state_display() {
   _repo_state_escape_value "$value"
 }
 
+# Record that compare could not finish; every caller then returns 3.
+_repo_state_compare_failed() {
+  printf 'state: compare could not complete (%s failed)\n' "$2" > "$1"
+}
+
+# Run an awk "found" probe: 0 found, 1 not found, 3 for any other status.
+_repo_state_found() {
+  local status=0
+  awk "$@" || status=$?
+  [ "$status" -le 1 ] || return 3
+  return "$status"
+}
+
 repo_state_compare() (
-  local before=$1 after=$2 changes=$3 first='' temp scope origin key old new rc=0 remote line
+  local before=$1 after=$2 changes=$3 first='' temp scope origin key old new rc=0 remote line found
   : > "$changes" || return 2
   if [ ! -f "$before" ] || [ ! -r "$before" ]; then
     printf 'state: <unreadable before snapshot>\n' > "$changes"
@@ -328,10 +344,10 @@ repo_state_compare() (
   fi
   temp=$(mktemp -d "${REPO_STATE_TMP:-$(dirname "$changes")}/.repo-state-compare.XXXXXX") || return 3
   trap 'rm -rf "$temp"' EXIT
-  LC_ALL=C sort "$before" > "$temp/before"
-  LC_ALL=C sort "$after" > "$temp/after"
-  LC_ALL=C comm -23 "$temp/before" "$temp/after" > "$temp/old"
-  LC_ALL=C comm -13 "$temp/before" "$temp/after" > "$temp/new"
+  LC_ALL=C sort "$before" > "$temp/before" || { _repo_state_compare_failed "$changes" sort; return 3; }
+  LC_ALL=C sort "$after" > "$temp/after" || { _repo_state_compare_failed "$changes" sort; return 3; }
+  LC_ALL=C comm -23 "$temp/before" "$temp/after" > "$temp/old" || { _repo_state_compare_failed "$changes" comm; return 3; }
+  LC_ALL=C comm -13 "$temp/before" "$temp/after" > "$temp/new" || { _repo_state_compare_failed "$changes" comm; return 3; }
   # Pair removed and added values within a scope/origin/key, retaining duplicates.
   awk -F '\t' '
     $1 != "config" { next }
@@ -341,7 +357,7 @@ repo_state_compare() (
     END { for (k in keys) {
       n=no[k]>nn[k]?no[k]:nn[k]
       for(i=1;i<=n;i++) print k FS (i<=no[k]?old[k,i]:"(absent)") FS (i<=nn[k]?new[k,i]:"(absent)")
-    }}' "$temp/old" "$temp/new" > "$temp/diff"
+    }}' "$temp/old" "$temp/new" > "$temp/diff" || { _repo_state_compare_failed "$changes" awk; return 3; }
   while IFS= read -r line; do
     scope=${line%%$'\t'*}; line=${line#*$'\t'}
     origin=${line%%$'\t'*}; line=${line#*$'\t'}
@@ -353,18 +369,27 @@ repo_state_compare() (
       branch.*.pushremote) rc=2 ;;
       branch.*.remote)
         remote=$(_repo_state_decode "$new")
-        if [ "$remote" = . ] && REPO_STATE_MERGE="${key%.remote}.merge" awk -F '\t' '$3==ENVIRON["REPO_STATE_MERGE"] {found=1} END {exit !found}' "$temp/diff"; then rc=2; fi
+        if [ "$remote" = . ]; then
+          found=0
+          REPO_STATE_MERGE="${key%.remote}.merge" _repo_state_found -F '\t' '$3==ENVIRON["REPO_STATE_MERGE"] {found=1} END {exit !found}' "$temp/diff" || found=$?
+          case "$found" in 0) rc=2 ;; 1) ;; *) _repo_state_compare_failed "$changes" awk; return 3 ;; esac
+        fi
         # Local repository sentinel and pre-existing remote names are benign.
-        if [ "$remote" != . ] && [ "$new" != '(absent)' ] &&
-           ! REPO_STATE_REMOTE="$remote" awk -F '\t' '$1=="config" && $4 ~ /^remote\./ {name=$4; sub(/^remote\./,"",name); sub(/\.[^.]*$/,"",name); if(name==ENVIRON["REPO_STATE_REMOTE"]) found=1} END {exit !found}' "$before"; then rc=2; fi ;;
+        if [ "$remote" != . ] && [ "$new" != '(absent)' ]; then
+          found=0
+          REPO_STATE_REMOTE="$remote" _repo_state_found -F '\t' '$1=="config" && $4 ~ /^remote\./ {name=$4; sub(/^remote\./,"",name); sub(/\.[^.]*$/,"",name); if(name==ENVIRON["REPO_STATE_REMOTE"]) found=1} END {exit !found}' "$before" || found=$?
+          case "$found" in 0) ;; 1) rc=2 ;; *) _repo_state_compare_failed "$changes" awk; return 3 ;; esac
+        fi ;;
       branch.*.*|remote.*.fetch|remote.*.gh-resolved|gc.*|maintenance.*|extensions.worktreeconfig|core.sparsecheckout|core.sparsecheckoutcone) ;;
       remote.*.*)
         remote=${key#remote.}; remote=${remote%.*}
-        if REPO_STATE_REMOTE="$remote" awk -F '\t' '$1=="config" && $4 ~ /^remote\./ {name=$4; sub(/^remote\./,"",name); sub(/\.[^.]*$/,"",name); if(name==ENVIRON["REPO_STATE_REMOTE"]) found=1} END {exit !found}' "$before"; then
-          rc=2
-        else
-          case "$key" in remote.*.url) ;; *) rc=2 ;; esac
-        fi ;;
+        found=0
+        REPO_STATE_REMOTE="$remote" _repo_state_found -F '\t' '$1=="config" && $4 ~ /^remote\./ {name=$4; sub(/^remote\./,"",name); sub(/\.[^.]*$/,"",name); if(name==ENVIRON["REPO_STATE_REMOTE"]) found=1} END {exit !found}' "$before" || found=$?
+        case "$found" in
+          0) rc=2 ;;
+          1) case "$key" in remote.*.url) ;; *) rc=2 ;; esac ;;
+          *) _repo_state_compare_failed "$changes" awk; return 3 ;;
+        esac ;;
       *) rc=2 ;;
     esac
     printf 'config %s (%s:%s): %s -> %s\n' \
@@ -377,12 +402,12 @@ repo_state_compare() (
     {k=$1 FS $2; v=$3; for(i=4;i<=NF;i++) v=v FS $i; keys[k]=1}
     FILENAME==ARGV[1] {old[k]=v; next} {new[k]=v}
     END {for(k in keys) {hasold=(k in old); hasnew=(k in new); if(old[k]!=new[k]) {gsub(FS," ",old[k]); gsub(FS," ",new[k]); print k FS (hasold?old[k]:"(absent)") FS (hasnew?new[k]:"(absent)")}}}
-  ' "$before" "$after" > "$temp/records"
-  local kind repo sha cn ce identity_name identity_email count paths
-  repo=$(awk -F '\t' '$1=="repo" {print $2;exit}' "$after")
+  ' "$before" "$after" > "$temp/records" || { _repo_state_compare_failed "$changes" awk; return 3; }
+  local kind repo sha cn ce identity_name identity_email count paths pipe
+  repo=$(awk -F '\t' '$1=="repo" {print $2;exit}' "$after") || { _repo_state_compare_failed "$changes" awk; return 3; }
   repo=$(_repo_state_decode "$repo")
-  identity_name=$(awk -F '\t' '$1=="identity" {print $2;exit}' "$before")
-  identity_email=$(awk -F '\t' '$1=="identity" {print $3;exit}' "$before")
+  identity_name=$(awk -F '\t' '$1=="identity" {print $2;exit}' "$before") || { _repo_state_compare_failed "$changes" awk; return 3; }
+  identity_email=$(awk -F '\t' '$1=="identity" {print $3;exit}' "$before") || { _repo_state_compare_failed "$changes" awk; return 3; }
   local unsafe=0
   while IFS=$'\t' read -r kind key; do
     [ "$kind" = unsafe ] || continue
@@ -408,10 +433,15 @@ repo_state_compare() (
           refs/heads/*)
           [ "$unsafe" = 0 ] || continue
           if [ ! -f "$temp/exclude" ]; then
-            { awk -F '\t' '$1=="ref" {print $3}' "$before";
+            { awk -F '\t' '$1=="ref" {print $3}' "$before" || exit 1;
               awk -F '\t' '$1=="ref" && $2 ~ /^refs\/remotes\// {print $3}' "$after"; } |
               _repo_state_git -C "$repo" cat-file --batch-check='%(objectname) %(objecttype)' 2>/dev/null |
               awk '($2=="commit" || $2=="tag") {print "^" $1}' > "$temp/exclude"
+            pipe=("${PIPESTATUS[@]}")
+            if [ "${pipe[0]}" != 0 ] || [ "${pipe[2]}" != 0 ]; then
+              rm -f "$temp/exclude"
+              _repo_state_compare_failed "$changes" awk; return 3
+            fi
           fi
           [ "$new" != '(absent)' ] || continue
           if ! _repo_state_git --history -C "$repo" rev-list --stdin "$new" < "$temp/exclude" > "$temp/commits" 2>/dev/null; then
@@ -438,10 +468,14 @@ repo_state_compare() (
           printf 'tree %s: unreadable\n' "$key" >> "$changes"
         else
           REPO_STATE_WT="$key" awk -F '\t' '$1=="dirty" && $2==ENVIRON["REPO_STATE_WT"] {print $3}' "$before" | LC_ALL=C sort -u > "$temp/dirty-old"
+          pipe=("${PIPESTATUS[@]}")
+          if [ "${pipe[0]}" != 0 ] || [ "${pipe[1]}" != 0 ]; then _repo_state_compare_failed "$changes" awk; return 3; fi
           REPO_STATE_WT="$key" awk -F '\t' '$1=="dirty" && $2==ENVIRON["REPO_STATE_WT"] {print $3}' "$after" | LC_ALL=C sort -u > "$temp/dirty-new"
-          LC_ALL=C comm -13 "$temp/dirty-old" "$temp/dirty-new" > "$temp/dirty"
-          count=$(wc -l < "$temp/dirty" | tr -d ' ')
-          paths=$(head -n 20 "$temp/dirty" | paste -sd ' ' -)
+          pipe=("${PIPESTATUS[@]}")
+          if [ "${pipe[0]}" != 0 ] || [ "${pipe[1]}" != 0 ]; then _repo_state_compare_failed "$changes" awk; return 3; fi
+          LC_ALL=C comm -13 "$temp/dirty-old" "$temp/dirty-new" > "$temp/dirty" || { _repo_state_compare_failed "$changes" comm; return 3; }
+          count=$(wc -l < "$temp/dirty" | tr -d ' ') || { _repo_state_compare_failed "$changes" wc; return 3; }
+          paths=$(head -n 20 "$temp/dirty" | paste -sd ' ' -) || { _repo_state_compare_failed "$changes" paste; return 3; }
           if [ "$count" = 0 ]; then
             printf 'tree %s: status changed (no new dirty paths)\n' "$key" >> "$changes"
           else
@@ -450,13 +484,18 @@ repo_state_compare() (
         fi ;;
     esac
   done < "$temp/records"
-  if awk -F '\t' '$1=="tree" && $3=="unreadable" {found=1} END {exit !found}' "$before"; then
-    printf 'tree check skipped: baseline unreadable\n' >> "$changes"
-    [ "$rc" -ge 1 ] || rc=1
-  fi
+  found=0
+  _repo_state_found -F '\t' '$1=="tree" && $3=="unreadable" {found=1} END {exit !found}' "$before" || found=$?
+  case "$found" in
+    0)
+      printf 'tree check skipped: baseline unreadable\n' >> "$changes"
+      [ "$rc" -ge 1 ] || rc=1 ;;
+    1) ;;
+    *) _repo_state_compare_failed "$changes" awk; return 3 ;;
+  esac
   # Escape controls only at the display boundary, preserving record delimiters.
-  _repo_state_escape_output < "$changes" > "$temp/escaped"
-  cat "$temp/escaped" > "$changes"
+  _repo_state_escape_output < "$changes" > "$temp/escaped" || { _repo_state_compare_failed "$changes" escape; return 3; }
+  cat "$temp/escaped" > "$changes" || { _repo_state_compare_failed "$changes" cat; return 3; }
   return "$rc"
 )
 
@@ -537,6 +576,8 @@ repo_state_run_bounded() {
   if ! script_text=$(
     umask 077
     : > "$marker" && rm -f "$marker" || exit 1
+    # One group: bash parses all of it before running any of it.
+    printf '{\n'
     for name in ${REPO_STATE_BOUND_VARS:-}; do
       declare -p "$name" 2>/dev/null || true
     done
@@ -546,6 +587,7 @@ repo_state_run_bounded() {
     for name in ${REPO_STATE_BOUND_FUNCS:-}; do declare -f "$name" || exit 1; done
     printf '%q "$@"\nrc=$?\n' "$operation"
     printf 'printf "done %%s\\n" "$rc" > %q || exit 125\nexit "$rc"\n' "$token"
+    printf '}\n'
   ); then
     rm -rf "$private"
     REPO_STATE_BOUND_PRIVATE=''
@@ -557,12 +599,14 @@ repo_state_run_bounded() {
     case $- in *m*) monitor=1 ;; esac
     set -m
     "$tcmd" -k 5 "$limit" bash <(printf '%s\n' "$script_text") "$@" &
-    pid=$!
+    REPO_STATE_BOUND_PID=$!
+    pid=$REPO_STATE_BOUND_PID
   else
     case $- in *m*) monitor=1 ;; esac
     set -m
     bash <(printf '%s\n' "$script_text") "$@" &
-    pid=$!
+    REPO_STATE_BOUND_PID=$!
+    pid=$REPO_STATE_BOUND_PID
     (
       set +m
       # exec preserves the PPID fallback on Bash versions without BASHPID.
@@ -571,7 +615,8 @@ repo_state_run_bounded() {
       sleep "$limit" &
       sleeper=$!
       wait "$sleeper" || exit 0
-      [ ! -e "$token" ] || exit 0
+      # The child's own exit, not a file it could plant, says it already finished.
+      kill -0 "$pid" 2>/dev/null || exit 0
       : > "$marker"
       kill -TERM -- "-$pid" 2>/dev/null || true
       sleep 5 &
@@ -579,12 +624,17 @@ repo_state_run_bounded() {
       wait "$sleeper" || exit 0
       kill -KILL -- "-$pid" 2>/dev/null || true
     ) </dev/null >/dev/null 2>&1 &
-    watchdog=$!
+    REPO_STATE_BOUND_WATCHDOG=$!
+    watchdog=$REPO_STATE_BOUND_WATCHDOG
   fi
-  REPO_STATE_BOUND_PID=$pid
-  REPO_STATE_BOUND_WATCHDOG=$watchdog
   [ "$monitor" = 1 ] || set +m
-  wait "$pid" || result=$?
+  # A trapped signal ends a single wait early: keep waiting while the child lives.
+  while :; do
+    result=0
+    wait "$pid" || result=$?
+    [ "$result" != 127 ] || break
+    kill -0 "$pid" 2>/dev/null || break
+  done
   if [ -z "$tcmd" ] && [ -e "$marker" ]; then
     kill -KILL -- "-$pid" 2>/dev/null || true
     result=124

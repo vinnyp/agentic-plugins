@@ -1255,7 +1255,12 @@ once complete. The git reads are killed after `DISPATCH_SNAPSHOT_TIMEOUT_SECS`
 invalid value uses the default with a warning) plus a 5 second kill grace; raise the
 limit and the calling tool's own timeout for very large repositories.
 A timeout message lists special files found in git metadata (what was found, not a proven
-cause), or says none were found, or that the pre-sweep failed or was skipped. Partial results from a failed pre-sweep remain in the unreadable snapshot. A successful snapshot
+cause), or says none were found, or that the pre-sweep failed (naming any special files it
+found before failing) or was skipped; the pre-sweep only runs when `.git` is a real directory,
+never a symlink. Partial results from a failed pre-sweep remain in the unreadable snapshot. If
+the `unreadable` pre-mark cannot be made by rename, snapshot exits 3 without writing to the
+output path. A `repo-state-check` killed with SIGKILL cannot clean up and can leave empty
+`repo-state-*` directories in `TMPDIR` (they hold no secrets). A successful snapshot
 whose baseline already holds special files warns on stderr and still exits 0.
 Invalid CLI arguments exit 64.
 Snapshots also hash `info/exclude`, `info/attributes`, and
@@ -1272,7 +1277,9 @@ Compare prints named change lines and exits 0 for clean, 1 for warn-only drift o
 critical drift. Exit 2 also means "not evaluated" when the output is a `state:` line
 (`state: compare timed out` or `state: compare could not complete (<reason>)`) or
 `config: <unreadable after review>`; stop and investigate, do not re-run. Compare
-runs under the same bound and limit as snapshot. Config changes are critical except these benign keys: `branch.*.*`
+runs under the same bound and limit as snapshot. A helper that fails during compare (a
+`sort`, `comm` or `awk` that exits abnormally or is killed) is never read as a verdict:
+compare writes `state: compare could not complete (<helper> failed)` and exits 3. Config changes are critical except these benign keys: `branch.*.*`
 except `branch.*.pushremote`; `branch.*.remote` is benign only when it names a remote
 present before the review or is `.` (the local repository);
 `remote.*.fetch`; `remote.*.gh-resolved`; a new remote's `url`/`fetch`/`gh-resolved`;
@@ -1289,5 +1296,5 @@ that cannot complete as critical and returns rc 10.
 | `0` | Snapshot succeeded, compare clean, or help printed |
 | `1` | Compare found warn-only drift |
 | `2` | Compare found critical drift (including an unreadable after-snapshot), or not evaluated |
-| `3` | Snapshot failure, broken install, unreadable before-snapshot or internal temp failure, or not evaluated |
+| `3` | Snapshot failure, broken install, unreadable before-snapshot, internal temp failure, a failed compare helper, or not evaluated |
 | `64` | Usage error; unlike the usual house exit 2, which here means critical drift |
