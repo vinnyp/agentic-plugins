@@ -345,61 +345,24 @@ run_with_timeout() {
 
 # Bound the entire snapshot, including git reads that can block on FIFOs.
 review_state_snapshot_bounded() {
-  local limit=${DISPATCH_SNAPSHOT_TIMEOUT_SECS:-120} tcmd='' result=0 pid watchdog marker monitor=0
-  case "$limit" in ''|*[!0-9]*) limit=0 ;; esac
-  limit=$((10#$limit))
-  if [ "$limit" -le 0 ]; then
-    echo 'dispatch-worker: invalid DISPATCH_SNAPSHOT_TIMEOUT_SECS; using 120' >&2
-    limit=120
-  fi
-  local operation=${4:-snapshot}
+  local limit result=0 operation=${4:-snapshot}
+  limit=$(repo_state_snapshot_limit dispatch-worker 120)
   if [ "$operation" = snapshot ] && [ -n "${REVIEW_GIT_DIR:-}" ] && [ -n "${REVIEW_GIT_COMMON_DIR:-}" ]; then
     repo_state_nonregular_sweep "$2.nonregular" "$REVIEW_GIT_DIR" "$REVIEW_GIT_COMMON_DIR" || return 3
   fi
-  local script
-  script="$(declare -p REVIEW_GIT_DIR REVIEW_GIT_COMMON_DIR REPO_STATE_SALT REVIEW_BEFORE_HASH REVIEW_INTERIM_HASH REVIEW_AFTER_HASH REVIEW_SNAPSHOT_DIR 2>/dev/null || true)
-$(declare -f review_state_compare_unbounded)
-. \"\$1\"
-if [ \"\$5\" = compare ]; then review_state_compare_unbounded \"\$2\" \"\$3\" \"\$4\"; else repo_state_snapshot \"\$2\" \"\$3\"; fi"
-  if command -v timeout >/dev/null 2>&1; then tcmd=timeout
-  elif command -v gtimeout >/dev/null 2>&1; then tcmd=gtimeout; fi
-  if [ -n "$tcmd" ]; then
-    "$tcmd" -k 5 "$limit" bash -c "$script" _ "$SCRIPT_DIR/lib/repo-state.sh" "$1" "$2" "${3:-}" "$operation" || result=$?
+  # Read by repo_state_run_bounded through dynamic scope.
+  # shellcheck disable=SC2034
+  local REPO_STATE_BOUND_VARS='REVIEW_GIT_DIR REVIEW_GIT_COMMON_DIR REPO_STATE_SALT REVIEW_BEFORE_HASH REVIEW_INTERIM_HASH REVIEW_AFTER_HASH REVIEW_SNAPSHOT_DIR'
+  # shellcheck disable=SC2034
+  local REPO_STATE_BOUND_FUNCS=review_state_compare_unbounded
+  if [ "$operation" = compare ]; then
+    repo_state_run_bounded "$limit" review_state_compare_unbounded "$1" "$2" "$3" || result=$?
   else
-    marker="$2.timeout"
-    # A separate process group lets the watchdog reap blocked git descendants.
-    case $- in *m*) monitor=1 ;; esac
-    set -m
-    (if [ "$operation" = compare ]; then review_state_compare_unbounded "$1" "$2" "$3"; else repo_state_snapshot "$1" "$2"; fi) &
-    pid=$!
-    (
-      # Keep the timer in this group and also kill it directly on cancellation.
-      # No inherited descriptor may keep the caller's output pipe open.
-      set +m
-      sleeper=''
-      trap '[ -z "$sleeper" ] || kill -TERM "$sleeper" 2>/dev/null || true; exit 0' TERM
-      sleep "$limit" &
-      sleeper=$!
-      wait "$sleeper" || exit 0
-      : > "$marker"
-      kill -TERM -- "-$pid" 2>/dev/null || true
-      sleep 5 &
-      sleeper=$!
-      wait "$sleeper" || exit 0
-      kill -KILL -- "-$pid" 2>/dev/null || true
-    ) </dev/null >/dev/null 2>&1 &
-    watchdog=$!
-    [ "$monitor" = 1 ] || set +m
-    wait "$pid" || result=$?
-    if [ -e "$marker" ]; then
-      # Reap descendants even when the snapshot shell exited on TERM first.
-      kill -KILL -- "-$pid" 2>/dev/null || true
-      result=124
-      rm -f "$marker"
-    fi
-    kill -TERM -- "-$watchdog" 2>/dev/null || true
-    kill -TERM "$watchdog" 2>/dev/null || true
-    # Do not wait on the watchdog: a timer must never delay a completed snapshot.
+    repo_state_run_bounded "$limit" repo_state_snapshot "$1" "$2" || result=$?
+  fi
+  if [ "$operation" = compare ] && [ "$result" = 125 ]; then
+    printf 'state: compare could not complete\n' > "$3"
+    return 2
   fi
   case "$result" in
     124|137)

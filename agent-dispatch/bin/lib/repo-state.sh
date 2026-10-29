@@ -6,6 +6,7 @@
 }
 # shellcheck source=portable-stat.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/portable-stat.sh"
+_REPO_STATE_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/repo-state.sh"
 _REPO_STATE_LOCAL_ENV_VARS=$(git rev-parse --local-env-vars 2>/dev/null)
 
 _repo_state_git() (
@@ -177,7 +178,7 @@ repo_state_snapshot() (
   local repo=${1:-} out=${2:-} top ident name email config wt hooks custom head branch record temp
   _repo_state_sha256 </dev/null >/dev/null || return 3
   case "$repo" in /*) ;; *) return 3 ;; esac
-  temp=$(mktemp -d "$(dirname "$out")/.repo-state.XXXXXX") || return 3
+  temp=$(mktemp -d "${REPO_STATE_TMP:-$(dirname "$out")}/.repo-state.XXXXXX") || return 3
   trap 'rm -rf "$temp"' EXIT
   # Standalone CLI snapshots share a private salt beside their output files.
   if [ -z "${REPO_STATE_SALT:-}" ]; then
@@ -492,4 +493,89 @@ _repo_state_escape_value() {
       printf '%s' "$char"
     fi
   done
+}
+
+# Validate before arithmetic: long values must never overflow or disable timeout.
+repo_state_snapshot_limit() {
+  local caller=$1 default=$2 value=${DISPATCH_SNAPSHOT_TIMEOUT_SECS-$2}
+  if [[ "$value" =~ ^[0-9]{1,5}$ ]] && [ "$((10#$value))" -ge 1 ] && [ "$((10#$value))" -le 86400 ]; then
+    printf '%s\n' "$((10#$value))"
+  else
+    printf '%s: invalid DISPATCH_SNAPSHOT_TIMEOUT_SECS; using %s\n' "$caller" "$default" >&2
+    printf '%s\n' "$default"
+  fi
+}
+
+# Run a script by path so private caller state never appears in process argv.
+repo_state_run_bounded() {
+  local limit=$1 operation=$2 private script token marker name tcmd='' result=0
+  local pid watchdog monitor=0 completion='' token_rc='' extra=''
+  shift 2
+  private=$(umask 077; mktemp -d "${TMPDIR:-/tmp}/repo-state-bound.XXXXXX") || return 125
+  [ -n "$private" ] && chmod 700 "$private" || return 125
+  script="$private/run"
+  token="$private/done"
+  marker="$private/timeout"
+  if ! (
+    umask 077
+    : > "$marker" && rm -f "$marker" || exit 1
+    {
+      for name in ${REPO_STATE_BOUND_VARS:-}; do
+        declare -p "$name" 2>/dev/null || true
+      done
+      if [ "${REPO_STATE_TMP+x}" = x ]; then declare -p REPO_STATE_TMP; fi
+      printf '. %q\n' "$_REPO_STATE_LIB"
+      declare -f "$operation" || exit 1
+      for name in ${REPO_STATE_BOUND_FUNCS:-}; do declare -f "$name" || exit 1; done
+      printf '%q "$@"\nrc=$?\n' "$operation"
+      printf 'printf "done %%s\\n" "$rc" > %q || exit 125\nexit "$rc"\n' "$token"
+    } > "$script" && chmod 600 "$script"
+  ); then
+    rm -rf "$private"
+    return 125
+  fi
+  if command -v timeout >/dev/null 2>&1; then tcmd=timeout
+  elif command -v gtimeout >/dev/null 2>&1; then tcmd=gtimeout; fi
+  if [ -n "$tcmd" ]; then
+    "$tcmd" -k 5 "$limit" bash "$script" "$@" || result=$?
+  else
+    case $- in *m*) monitor=1 ;; esac
+    set -m
+    bash "$script" "$@" &
+    pid=$!
+    (
+      set +m
+      sleeper=''
+      trap '[ -z "$sleeper" ] || kill -TERM "$sleeper" 2>/dev/null || true; exit 0' TERM
+      sleep "$limit" &
+      sleeper=$!
+      wait "$sleeper" || exit 0
+      : > "$marker"
+      kill -TERM -- "-$pid" 2>/dev/null || true
+      sleep 5 &
+      sleeper=$!
+      wait "$sleeper" || exit 0
+      kill -KILL -- "-$pid" 2>/dev/null || true
+    ) </dev/null >/dev/null 2>&1 &
+    watchdog=$!
+    [ "$monitor" = 1 ] || set +m
+    wait "$pid" || result=$?
+    if [ -e "$marker" ]; then
+      kill -KILL -- "-$pid" 2>/dev/null || true
+      result=124
+    fi
+    kill -TERM -- "-$watchdog" 2>/dev/null || true
+    kill -TERM "$watchdog" 2>/dev/null || true
+  fi
+  case "$result" in
+    124|137) result=124 ;;
+    *)
+      if IFS=' ' read -r completion token_rc extra 2>/dev/null < "$token" &&
+         [ "$completion" = 'done' ] && [[ "$token_rc" =~ ^[0-9]{1,3}$ ]] &&
+         [ "$token_rc" -le 255 ] && [ -z "$extra" ]; then
+        result=$((10#$token_rc))
+      else result=125; fi ;;
+  esac
+  rm -rf "$private"
+  return "$result"
 }
