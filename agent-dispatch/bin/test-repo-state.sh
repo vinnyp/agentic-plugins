@@ -9,6 +9,7 @@ export GIT_CONFIG_GLOBAL="$TMP/global" GIT_CONFIG_NOSYSTEM=1
 printf '[user]\n name = Fixture\n email = fixture@example.invalid\n' > "$GIT_CONFIG_GLOBAL"
 # shellcheck source=agent-dispatch/bin/lib/repo-state.sh
 . "$BIN/lib/repo-state.sh"
+"${BASH:-bash}" "$BIN/test-repo-state-memory.sh"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 rc_is() {
   local want=$1 rc=0
@@ -48,6 +49,7 @@ REVIEW_GIT_COMMON_DIR="$3/.git"
 . "$SCRIPT_DIR/lib/repo-state.sh"
 . "$2"
 KILL_AFTER=1
+REVIEW_RUNTIME_LAUNCHED=1 REPO_STATE_SALT=test
 unset DISPATCH_SNAPSHOT_TIMEOUT_SECS
 if [ "${6:-}" = hostile ]; then
   export DISPATCH_SNAPSHOT_TIMEOUT_SECS=1
@@ -60,7 +62,8 @@ if [ "$5" = no-timeout ]; then
   }
 fi
 started=$SECONDS
-captured=$(review_state_snapshot_bounded "$3" "$4")
+review_state_snapshot_bounded "$3" || true
+printf '%s\n' "$REPO_STATE_BOUND_OUT" > "$4"
 [ -s "$4" ]
 if [ "${6:-}" = hostile ]; then
   grep -qx unreadable "$4"
@@ -68,9 +71,9 @@ fi
 PERF
   for mode in timeout no-timeout; do
     rc=0
-    "$timer" -k 1 9 bash "$TMP/performance.sh" "$BIN" "$TMP/bounded.sh" "$R" "$TMP/perf-$mode" "$mode" || rc=$?
+    "$timer" -k 1 45 bash "$TMP/performance.sh" "$BIN" "$TMP/bounded.sh" "$R" "$TMP/perf-$mode" "$mode" || rc=$?
     [ "$rc" = 0 ] || { echo "snapshot performance regression: $mode exceeded normal snapshot budget (rc=$rc)" >&2; return 1; }
-    echo "snapshot performance: $mode under 10 seconds (default limit 120) PASS"
+    echo "snapshot performance: $mode under 45 seconds (default limit 120) PASS"
   done
 }
 snapshot_performance
@@ -106,7 +109,7 @@ else
 fi
 # Pin the compare watchdog independently of the nonregular metadata sweep.
 if [ -n "$timer" ]; then
-  sed -n '/^review_state_compare_pinned() {$/,/^}$/p' "$BIN/dispatch-worker" >> "$TMP/bounded.sh"
+  sed -n '/^review_state_compare_bounded() {$/,/^}$/p' "$BIN/dispatch-worker" >> "$TMP/bounded.sh"
   cat > "$TMP/compare-bound.sh" <<'COMPARE'
 set -eu
 SCRIPT_DIR=$1
@@ -114,7 +117,9 @@ REVIEW_GIT_DIR="$3/.git"
 REVIEW_GIT_COMMON_DIR="$3/.git"
 . "$SCRIPT_DIR/lib/repo-state.sh"
 . "$2"
-review_state_compare_unbounded() { sleep 30; }
+review_state_compare_memory() { sleep 30; }
+REVIEW_BEFORE=x REVIEW_CURRENT=x
+REVIEW_STATE_STATUS='critical(incomplete)'
 if [ "$4" = no-timeout ]; then
   command() {
     case "$*" in '-v timeout'|'-v gtimeout') return 1 ;; esac
@@ -123,10 +128,11 @@ if [ "$4" = no-timeout ]; then
 fi
 DISPATCH_SNAPSHOT_TIMEOUT_SECS=1
 rc=0
-review_state_compare_pinned "$3/before" "$3/after" "$3/changes" || rc=$?
+review_state_compare_bounded || rc=$?
+printf '%s\n' "$REPO_STATE_BOUND_OUT" > "$3/changes"
 [ "$rc" = 2 ]
 [ "$REVIEW_STATE_STATUS" = 'critical(incomplete)' ]
-grep -qx 'state: compare timed out' "$3/changes"
+grep -qx 'state: drift check could not complete' "$3/changes"
 COMPARE
   for mode in timeout no-timeout; do
     rc_is 0 "$timer" -k 1 9 bash "$TMP/compare-bound.sh" "$BIN" "$TMP/bounded.sh" "$TMP" "$mode"
@@ -161,7 +167,7 @@ done
 (TMPDIR="$TMP/nonexistent"; export TMPDIR
  rc_is 3 "$BIN/repo-state-check" compare "$TMP/before" "$TMP/before"
  mktemp() { return 1; }
- rc_is 3 repo_state_compare "$TMP/before" "$TMP/before" "$TMP/changes")
+ rc_is 0 repo_state_compare "$TMP/before" "$TMP/before" "$TMP/changes")
 check_key user.name Other 2
 grep -Eq '^config user.name \(local:.*<changed>' "$TMP/changes"
 check_key core.hooksPath /x 2

@@ -22,6 +22,7 @@
 # such var it finds is covered here (directly or via an explicit opt-out) —
 # extend this list first if that check ever fails.
 DISPATCH_ENV_VARS=(
+  DISPATCH_CLONE_TIMEOUT_SECS
   DISPATCH_SNAPSHOT_TIMEOUT_SECS
   CODING_PREFLIGHT_CODEX_PROBE
   CODEX_EXEC_PROBE_TIMEOUT

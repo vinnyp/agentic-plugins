@@ -28,7 +28,13 @@ SCRIPT_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 
 refuse_if_review_pinned() {
   local dir="$1" status sha="" pinned_at="" label="" line key value now age
-  status="$("$SCRIPT_DIR/review-pin.sh" status "$dir" 2>/dev/null)" || return 0
+  local pin_rc=0
+  status="$("$SCRIPT_DIR/review-pin.sh" status "$dir" 2>/dev/null)" || pin_rc=$?
+  case "$pin_rc" in
+    0) ;;
+    3) echo "could not determine review pin status for $dir; refusing edits" >&2; exit 9 ;;
+    *) return 0 ;;
+  esac
   while IFS= read -r line || [ -n "$line" ]; do
     key="${line%%=*}"
     value="${line#*=}"

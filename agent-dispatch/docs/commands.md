@@ -266,9 +266,7 @@ passing `--dangerously-skip-permissions`. Allocation refusal remains exit 3.
 `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`, `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY` and
 `GIT_PREFIX` are cleared for repository operations and the review child.
 
-Snapshots live separately from reviewer configuration, with no snapshot path in the
-reviewer environment or brief. SHA-256 pins detect missing or modified baselines
-and interim snapshots; tampering exits 10. The drift check also detects changes
+Snapshots and change lists stay in dispatcher shell memory and reach the parent through an unlinked result channel. The drift check also detects changes
 to `info/exclude`, `info/attributes`, and `objects/info/alternates`.
 
 Every runtime's `--review`, including fallback, snapshots source state before and after.
@@ -308,7 +306,7 @@ so judge those reviews yourself. For a whole round of lenses, see
 |---|---|
 | `0` | the runtime returned success |
 | `2` | usage error, unreadable brief, unknown runtime, or the dirty-tree review refusal |
-| `3` | the runtime binary is not on PATH, or no isolated review workspace could be allocated |
+| `3` | runtime binary unavailable, isolated workspace allocation failed, or launch-time git setup timed out/could not complete (including a bound’s `mktemp` failure); no reviewer launched for setup failures. Fix the environment; do not fall back on the same repo. |
 | `4` | `--require-dep` gate failed — a promised module is missing from `go.mod` |
 | `5` | codex rejected every model at the auth/config layer. Fix auth; **do not** retry as a build. |
 | `6` | codex hit a usage/rate limit. It can exit 0 on a zero-edit no-op, so this is detected from the limit signature *plus* an absence of substantive output. Treat as blocked. |
@@ -336,12 +334,13 @@ not detected as critical:
 - a pre-existing `branch.X.remote=.` combined with a `merge` change (warning);
 - writes to ignored paths;
 - a detached process acting after the final snapshot;
-- a detached process that can write the operator's `TMPDIR` or snapshot directory. Compare's
-  intermediate files and the CLI's snapshot files live there, so such a process can make a compare
-  report clean.
+- same-user `/proc/<pid>/fd` or ptrace inspection of dispatcher memory or descriptors;
+- tampering in the instant between creating and unlinking the result file;
+- tampering with the standalone CLI's own snapshot files or its salt file
+  (`<snapshot dir>/.repo-state-private/salt`).
 
-A detached same-user process that can write the plugin install, the repository, or the operator's
-`TMPDIR` can still tamper with the check; OS containment remains the remedy.
+Bash may back here-strings with short-lived, randomly named temp files under
+`TMPDIR`; these also share the same-user boundary.
 
 The remedy for all of these is OS-level containment: a sandbox profile, a
 separate user, or a container that does not mount the source repository or the operator's
@@ -354,11 +353,17 @@ wall-clock bound, overridden with `DISPATCH_SNAPSHOT_TIMEOUT_SECS` (1-86400 deci
 seconds; anything else uses the default with a warning). The default is 120 seconds
 for the dispatcher and 60 for `repo-state-check`. The dispatcher uses
 `timeout -k` or `gtimeout -k`, with a watchdog fallback when neither is installed.
-Snapshot timeouts are unreadable state and critical (exit 10), with the diagnostic
-`drift snapshot timed out (possible hostile file such as a FIFO in the git dir)`.
-The metadata sweep runs before bounded Git reads using directories resolved before review.
-Nonregular metadata paths remain listed even when the snapshot times out. Nonregular
-metadata present before launch is also critical (exit `10`).
+Launch-time setup, including the before snapshot, fails closed with exit 3 on timeout
+or inability to complete; `DISPATCH_REVIEW_STATE=skipped(not-launched)` is emitted.
+The single launch probe runs before runtime temporary files or auth checks.
+A clone timeout names `DISPATCH_CLONE_TIMEOUT_SECS` in the launch refusal message.
+`DISPATCH_CLONE_TIMEOUT_SECS` bounds the entire clone operation (default 600 seconds;
+same 1-86400 validation). Clone timeout never falls back to a non-hermetic review.
+After launch, snapshot timeouts are unreadable state and critical (exit 10).
+The separate bounded metadata sweep preserves special-file names even on timeout.
+Metadata that Git can read without blocking, such as a `FETCH_HEAD` FIFO, still
+launches and is reported as critical after review. Cancellation is best-effort;
+expiry within the configured limit plus five seconds of kill grace is guaranteed.
 The compare runs under the same bound; a compare timeout is critical. While an
 interim or after snapshot or the compare is running, the exit status line reads
 `DISPATCH_REVIEW_STATE=critical(incomplete)`, so a run killed in that window never
@@ -774,17 +779,25 @@ to the suite's resource budget; do not overlap an in-place run in the same tree.
 
 ```
 review-pin.sh pin <workdir> [--label <text>] | release <workdir> | status <workdir>
+review-pin.sh pin --marker <path> --sha <sha> [--label <text>]
 ```
 
 Marks a working tree as pinned to its current HEAD while a review of it is in flight, so a
 concurrent dispatch can't move the code out from under the reviewer. The marker is
 `<git-dir>/review-pinned`. `coding-dispatch.sh` and `coding-build-phase.sh` refuse with exit `9`
 while a pin is active, naming the pinned SHA, label, age, and the release command.
-`dispatch-worker --review` pins automatically and releases on exit.
+`dispatch-worker --review` pins automatically and releases on exit. Its resolved-marker
+interface (`pin --marker ... --sha ...`) writes without running Git and records the
+invoking script PID. An agy review refuses with exit `3` if its dirty-status probe fails inside a Git work tree.
+Targets outside Git repositories continue to run non-hermetically.
 
 Pins expire: `DISPATCH_REVIEW_PIN_TTL_SECS` (default 14400 = 4h). A stale pin is removed on the
 next `status`/`pin`, so a SIGKILLed review does not wedge the repo forever. Exit codes: `0` ok,
-`1` no pin (or a stale one, now removed), `2` usage/error.
+`1` no pin (or a stale one, now removed), `2` usage/error, `3` bounded setup could not
+complete. Edit dispatch refuses with exit `9` when status returns `3`.
+
+If `review-pin.sh release <repo>` itself exits 3, remove the marker by hand at
+`<git dir>/review-pinned` after checking that the review has ended.
 
 ## `ensure-review-gate.sh`
 
@@ -1179,6 +1192,8 @@ as unknown identity; only a definite parent mismatch stops a wrapper.
 | `RUN_TESTS_TIMEOUT` | `run-tests.sh` | `420` seconds per suite; positive decimal integer; overridden by `--timeout`; kill grace 15 seconds |
 | `RUN_TESTS__TEST_KILL_GRACE` | `run-tests.sh` | test-only TERM-to-KILL grace override; positive integer seconds (default `15`) |
 | `RUN_TESTS_KEEP_LOGS` | `run-tests.sh` | `1` retains logs after a passing full or partial run; failure and interruption always retain them |
+| `DISPATCH_SNAPSHOT_TIMEOUT_SECS` | review setup and snapshots, `review-pin.sh`, `repo-state-check` | 1–86400 decimal seconds; default 120 for dispatcher/pins, 60 for `repo-state-check`; invalid values warn and use the default |
+| `DISPATCH_CLONE_TIMEOUT_SECS` | review clone setup | 1–86400 decimal seconds; default 600; invalid values warn and use the default; timeout refuses launch without fallback |
 | `CODING_DISPATCH_TIMEOUT` | `coding-dispatch.sh` | `15m` (codex) / `25m` (agy) — the external bound on the agent |
 | `CODING_DISPATCH_WORKTREE` | `coding-dispatch.sh`, `coding-build-phase.sh` | the worktree/branch slug; a worktree with that slug is reused so a multi-task phase accumulates on one branch |
 | `CODING_DISPATCH_RM_ON_FAIL` | `coding-dispatch.sh` | `1` = remove the worktree on failure instead of salvaging it; the patch still survives under the parent repo's git dir |
@@ -1271,12 +1286,10 @@ Invalid CLI arguments exit 64.
 Snapshots also hash `info/exclude`, `info/attributes`, and
 `objects/info/alternates`; changes to these files are critical.
 
-In `dispatch-worker` review runs, snapshots live separately from reviewer
-configuration, with no snapshot path exported or included in the brief. Every
-snapshot is SHA-256-pinned in a dispatcher shell variable. A missing or modified
-snapshot is critical (exit 10), even if a same-user reviewer discovers its path.
-Nonregular files in Git metadata are reported before config and ref reads, so their
-names remain visible on stderr even if a later Git read times out.
+In `dispatch-worker` review runs, snapshots and changes stay in shell memory.
+The dispatcher never reopens snapshot or changes paths to decide the verdict.
+Results use an unlinked channel with a checked exit status and byte count; payloads
+over 64 MiB are not evaluated and produce exit 3 before launch or exit 10 afterwards.
 
 Compare prints named change lines and exits 0 for clean, 1 for warn-only drift or 2 for
 critical drift. Exit 2 also means "not evaluated" when the output is a `state:` line

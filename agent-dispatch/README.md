@@ -24,17 +24,19 @@ not select a partial gate. Use the full runner as the build gate.
 private global Git config; origin's fetch and push URLs point at a disabled path.
 Other remotes and the operator's credential helper remain reachable, so the drift check,
 not the clone, detects source changes. Unsuitable repos fall back to the live
-workspace with permissions enforced. Every runtime's review checks source state before and after;
+workspace with permissions enforced; non-git directories are also supported with a warning.
+Review output opens read-write to avoid blocking if a FIFO replaces the checked path;
+each attempt truncates output before capture. Every runtime's review checks source state before and after;
 critical drift exits 10 and stops the review gate. Inspect and restore the named changes before
 committing, then re-run. See [the command reference](docs/commands.md#dispatch-worker).
 
-Repository-state snapshots hash sensitive config values and replace URL userinfo
+Comparison rejects malformed snapshot headers and NUL bytes, and reports failed input
+feeds as input errors. Repository-state snapshots hash sensitive config values and replace URL userinfo
 in config keys with the first 12 hex digits of its SHA-256 digest. Credentialed
 keys remain distinct for change detection; change reports omit the userinfo.
 
-Review drift checks hash Git exclude, attributes, and alternates files. Baseline
-and interim snapshots live apart from reviewer configuration and are hash-pinned;
-missing or modified snapshots cause a critical review failure (exit 10).
+Review drift checks hash Git exclude, attributes, and alternates files. Snapshots and change lists stay in dispatcher shell memory; on-disk
+tampering cannot replace captured verdict data.
 
 See the drift gate’s [limits](docs/commands.md#limits) for the write boundary it does not provide.
 
@@ -248,10 +250,27 @@ MIT.
 The standalone command handles INT, TERM and HUP promptly, removes its temporary state,
 and leaves interrupted snapshots unreadable. Completion records must agree with the
 bounded child’s exit status; scripts reach the child through a pipe. Compare and
-snapshot temporary state share the invocation’s private cleanup directory.
+snapshot data stay in memory and return through an unlinked result channel.
 
 Review drift snapshots and the standalone `repo-state-check` are bounded
 (`DISPATCH_SNAPSHOT_TIMEOUT_SECS` overrides the limit; default 120 seconds for
 `dispatch-worker`, 60 for `repo-state-check`). Normal snapshots return immediately; the bound uses coreutils
 `timeout`/`gtimeout` when available and an isolated watchdog otherwise. History metadata changes are critical; concurrent upstream pulls
 remain warnings. See [commands and known limits](docs/commands.md#limits).
+
+Review launch-time git setup fails closed with exit 3 before launching a reviewer.
+`DISPATCH_CLONE_TIMEOUT_SECS` bounds clone creation (default 600 seconds);
+`DISPATCH_SNAPSHOT_TIMEOUT_SECS` bounds the launch probe and state checks.
+
+Review launch refuses when bounded setup fails or the agy dirty-status probe fails
+inside a Git work tree. Non-Git agy targets continue to run non-hermetically.
+Agy review output replaces existing caller output and timeout attempts; capture
+descriptors are closed in reviewer children. Snapshot failures retain their diagnostic reason.
+Agy authentication refusals retain exit 7 before the dirty-status refusal.
+Drift diagnostics retain every change even when the reviewer removes its state
+directory, and omit empty change-list lines.
+Interrupted runtimes report `skipped(not-checked)` until drift checking completes.
+Temporary output reads are bounded even if a runtime replaces their paths with FIFOs.
+Edit dispatch and build phases refuse when review pin status returns exit 3
+(the bounded check timed out or could not complete). Other nonzero statuses,
+including a missing or non-executable review-pin helper, allow edits to proceed.

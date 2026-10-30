@@ -17,6 +17,9 @@ SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=lib/test-dispatch-worker-lib.sh
 . "$SELF_DIR/lib/test-dispatch-worker-lib.sh"
 
+# Prompt and model checks exercise supported non-git review targets.
+export WORKDIR="$TMP"
+
 # Missing review pin refuses dispatch; an offered override bypasses the dead pin.
 AGY_MISSING_REVIEW=1 TIMEOUT=0 "$DW" --runtime agy --review --brief "$BRIEF" >"$TMP/missing" 2>&1; rc=$?
 [ "$rc" -eq 9 ] || fail "missing review default expected rc9, got $rc"
@@ -614,6 +617,18 @@ grep -q "Do NOT edit, create, or delete any files" "$AGY_STDIN_FILE" || fail "no
 grep -q "If a tool, command, or capability your method requires is unavailable or denied" "$AGY_STDIN_FILE" || fail "non-hermetic review preamble missing degradation clause"
 [ "$(wc -c < "$TMP/t18.out" | tr -d ' ')" -ge 1200 ] || fail "non-git review did not return substantive output"
 echo "test 18 (agy non-git review warns and returns output) PASS"
+
+# 18b. A Git repo is required here: a configured filter makes it unsuitable
+# for a private clone, exercising the separate live-workspace fallback.
+R18B="$TMP/non-hermetic-review"; make_git_repo "$R18B"
+git -C "$R18B" config filter.fixture.clean cat
+TIMEOUT=0 "$DW" --runtime agy --review --brief "$BRIEF" --workdir "$R18B" >"$TMP/t18b.out" 2>"$TMP/t18b.err"
+rc=$?
+[ "$rc" -eq 0 ] || fail "unsuitable private-clone review should return rc 0, got $rc"
+grep -q "unsuitable for a private clone" "$TMP/t18b.err" || fail "unsuitable repo did not print private-clone warning"
+grep -q "non-hermetically and therefore read-only" "$TMP/t18b.err" || fail "unsuitable repo did not print read-only warning"
+[ "$(wc -c < "$TMP/t18b.out" | tr -d ' ')" -ge 1200 ] || fail "unsuitable repo review did not return substantive output"
+echo "test 18b (agy unsuitable private-clone review warns and returns output) PASS"
 
 # 19. Missing agy auth still returns rc 7, distinct from short-review rc 8.
 R19="$TMP/repo19"; make_git_repo "$R19"

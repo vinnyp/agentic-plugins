@@ -72,13 +72,11 @@ REVIEW_SRC_TOP=""
 REVIEW_PIN_DIR=""
 REVIEW_PIN_MARKER=""
 REVIEW_STATE_DIR=""
-REVIEW_SNAPSHOT_DIR=""
-REVIEW_BEFORE_HASH=""
-REVIEW_INTERIM_HASH=""
-REVIEW_AFTER_HASH=""
-export -n REVIEW_SNAPSHOT_DIR REVIEW_BEFORE_HASH REVIEW_INTERIM_HASH REVIEW_AFTER_HASH
+REVIEW_BEFORE='' REVIEW_CURRENT='' REVIEW_CHANGES=''
+export -n REVIEW_BEFORE REVIEW_CURRENT REVIEW_CHANGES
 REVIEW_STATE_CLASS=""
 REVIEW_STATE_N=0
+REVIEW_OUTPUT_FAILED=0
 REPO_STATE_SALT=$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')
 export -n REPO_STATE_SALT
 REVIEW_ORIGINAL_RC=""
@@ -86,7 +84,9 @@ REVIEW_STATE_STATUS="skipped(not-launched)"
 REVIEW_OUTFILE_TMP=""   # set only when WE mktemp'd the review file, so only that one is removed
 
 # Reap stale clones safely; legacy worktrees may belong to a sibling repository.
-reap_stale_review_workspaces() {
+review_reap_unbounded() {
+  # shellcheck disable=SC1090
+  . "$2"
   local parent="$1" workspace
   while IFS= read -r -d '' workspace; do
     if [ -d "$workspace/.git" ]; then
@@ -95,6 +95,23 @@ reap_stale_review_workspaces() {
       git -C "$REVIEW_SRC_TOP" worktree remove --force "$workspace" 2>/dev/null || true
     fi
   done < <(find "$parent" -mindepth 1 -maxdepth 1 -type d -name 'dispatch-review-wt.*' -mmin +360 -print0 2>/dev/null)
+}
+
+reap_stale_review_workspaces() {
+  local result=0
+  local REPO_STATE_BOUND_VARS=REVIEW_SRC_TOP
+  # shellcheck disable=SC2034
+  local REPO_STATE_BOUND_FUNCS=''
+  repo_state_run_bounded "$(repo_state_snapshot_limit dispatch-worker 120)" review_reap_unbounded "$1" "$SCRIPT_DIR/lib/review-clone.sh" || result=$?
+  case "$result" in 124|125) echo 'dispatch-worker: skipping stale review workspace cleanup (bounded setup unavailable)' >&2 ;; esac
+}
+review_reap_prune_child() {
+  _repo_state_git -C "$1" worktree prune 2>/dev/null || true
+}
+review_reap_prune() {
+  local result=0
+  repo_state_run_bounded "$(repo_state_snapshot_limit dispatch-worker 120)" review_reap_prune_child "$REVIEW_SRC_TOP" || result=$?
+  case "$result" in 124|125) echo 'dispatch-worker: skipping stale review workspace prune (bounded setup unavailable)' >&2 ;; esac
 }
 
 # Invoked by the EXIT trap.
@@ -115,15 +132,10 @@ cleanup_dispatch_worker() {
     # that blocks `git rev-parse` forever. Remove the marker path resolved at pin time.
     if [ -n "${REVIEW_PIN_MARKER:-}" ]; then
       rm -f "$REVIEW_PIN_MARKER" 2>/dev/null || true
-    else
-      "$SCRIPT_DIR/review-pin.sh" release "$REVIEW_PIN_DIR" 2>/dev/null || true
     fi
   fi
   if [ -n "${REVIEW_WT:-}" ]; then
     review_clone_guarded_rm "$REVIEW_WT_RM_PARENT" "$REVIEW_WT" 2>/dev/null || true
-  fi
-  if [ -n "${REVIEW_SNAPSHOT_DIR:-}" ]; then
-    rm -rf "$REVIEW_SNAPSHOT_DIR"
   fi
   if [ -n "${REVIEW_STATE_DIR:-}" ]; then
     rm -rf "$REVIEW_STATE_DIR"
@@ -135,6 +147,8 @@ cleanup_dispatch_worker() {
   fi
 }
 trap cleanup_dispatch_worker EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM HUP
 
 usage() {
   cat <<USAGE
@@ -274,17 +288,90 @@ if [ "$REVIEW" = "1" ] && [ "${#REQUIRE_DEPS[@]}" -gt 0 ]; then
   echo "dispatch-worker: --require-dep is ignored in --review mode (a read-only review builds nothing)." >&2
 fi
 
-if [ "$REVIEW" = "1" ]; then
-  _review_pin_workdir="${WORKDIR:-$PWD}"
-  REVIEW_GIT_DIR=$(git -C "$_review_pin_workdir" rev-parse --absolute-git-dir 2>/dev/null) || REVIEW_GIT_DIR=''
-  REVIEW_GIT_COMMON_DIR=$(git -C "$_review_pin_workdir" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || REVIEW_GIT_COMMON_DIR=''
+# One bounded child resolves both targets before runtime allocation or auth.
+review_launch_probe() {
+  local target tag fact value result records
+  for tag in pin source; do
+    if [ "$tag" = pin ]; then target=$1; else target=$2; fi
+    for fact in gitdir common top inside head; do
+      result=0
+      case "$fact" in
+        gitdir) value=$(_repo_state_git -C "$target" rev-parse --absolute-git-dir 2>/dev/null) || result=$? ;;
+        common) value=$(_repo_state_git -C "$target" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || result=$? ;;
+        top) value=$(_repo_state_git -C "$target" rev-parse --show-toplevel 2>/dev/null) || result=$? ;;
+        inside) value=$(_repo_state_git -C "$target" rev-parse --is-inside-work-tree 2>/dev/null) || result=$? ;;
+        head) value=$(_repo_state_git -C "$target" rev-parse --verify HEAD 2>/dev/null) || result=$? ;;
+      esac
+      REPO_STATE_BOUND_OUT="${REPO_STATE_BOUND_OUT}${tag}-${fact}-rc $result"$'\n'
+      if [ "$result" = 0 ]; then
+        case "$fact" in gitdir|common|top) value=$(set -o pipefail; printf '%s' "$value" | base64 | tr -d '\n') || return 3 ;; esac
+        REPO_STATE_BOUND_OUT="${REPO_STATE_BOUND_OUT}${tag}-${fact} $value"$'\n'
+      fi
+    done
+  done
+  if [ "$3" = agy ]; then
+    result=0
+    value=$(_repo_state_git -C "$1" -c core.fsmonitor=false status --porcelain --untracked-files=all 2>/dev/null) || result=$?
+    REPO_STATE_BOUND_OUT="${REPO_STATE_BOUND_OUT}dirty-rc $result"$'\n'
+    if [ "$result" = 0 ]; then
+      records=$(set -o pipefail; printf '%s' "$value" | base64 | tr -d '\n') || return 3
+      REPO_STATE_BOUND_OUT="${REPO_STATE_BOUND_OUT}dirty $records"$'\n'
+    fi
+  fi
+  result=0
+  records=$(set -o pipefail; _repo_state_git -C "$2" config --global --includes --list -z 2>/dev/null | base64 | tr -d '\n') || result=$?
+  REPO_STATE_BOUND_OUT="${REPO_STATE_BOUND_OUT}global-rc $result"$'\n'
+  [ "$result" != 0 ] || REPO_STATE_BOUND_OUT="${REPO_STATE_BOUND_OUT}global $records"$'\n'
+  return 0
+}
+
+review_launch_failure() {
+  local limit_name=${2:-DISPATCH_SNAPSHOT_TIMEOUT_SECS}
+  case "$1" in
+    0) return 0 ;;
+    124) echo 'dispatch-worker: launch-time git setup timed out (possible hostile file such as a FIFO in the git dir); no reviewer was launched '"($limit_name)" >&2 ;;
+    *) echo 'dispatch-worker: launch-time git setup could not complete; no reviewer was launched '"($limit_name)" >&2 ;;
+  esac
+  REVIEW_STATE_STATUS='skipped(not-launched)'
+  REVIEW_ORIGINAL_RC=3
+  exit 3
+}
+
+REPO_STATE_SRC=''
+REVIEW_GIT_DIR='' REVIEW_GIT_COMMON_DIR='' REVIEW_PROBE_TOP='' REVIEW_PROBE_INSIDE=''
+REVIEW_PROBE_HEAD='' REVIEW_GLOBAL_RECORDS='' REVIEW_DIRTY_STATUS=''
+if [ "$REVIEW" = 1 ]; then
+  _review_source=${WORKDIR:-$PWD}
+  [ "$RUNTIME" != claude ] || _review_source=$PWD
+  _review_probe_rc=0
+  repo_state_run_bounded "$(repo_state_snapshot_limit dispatch-worker 120)" review_launch_probe "${WORKDIR:-$PWD}" "$_review_source" "$RUNTIME" || _review_probe_rc=$?
+  review_launch_failure "$_review_probe_rc"
+  _review_dirty_rc=missing _review_dirty_seen=0
+  while IFS=' ' read -r _review_tag _review_value; do
+    case "$_review_tag" in
+      pin-gitdir) REVIEW_GIT_DIR=$(printf '%s' "$_review_value" | base64 -d) ;;
+      pin-common) REVIEW_GIT_COMMON_DIR=$(printf '%s' "$_review_value" | base64 -d) ;;
+      pin-top) REVIEW_PROBE_TOP=$(printf '%s' "$_review_value" | base64 -d) ;;
+      pin-inside) REVIEW_PROBE_INSIDE=$_review_value ;;
+      pin-head) REVIEW_PROBE_HEAD=$_review_value ;;
+      source-top) REPO_STATE_SRC=$(printf '%s' "$_review_value" | base64 -d) ;;
+      global) REVIEW_GLOBAL_RECORDS=$_review_value ;;
+      dirty-rc) _review_dirty_rc=$_review_value ;;
+      dirty) _review_dirty_seen=1; REVIEW_DIRTY_STATUS=$(printf '%s' "$_review_value" | base64 -d) ;;
+    esac
+  done <<< "$REPO_STATE_BOUND_OUT"
   export -n REVIEW_GIT_DIR REVIEW_GIT_COMMON_DIR
-  if "$SCRIPT_DIR/review-pin.sh" pin "$_review_pin_workdir" --label "peer-review"; then
-    REVIEW_PIN_DIR="$_review_pin_workdir"
-    _review_pin_gitdir=$REVIEW_GIT_DIR
-    [ -z "$_review_pin_gitdir" ] || REVIEW_PIN_MARKER="$_review_pin_gitdir/review-pinned"
+  _review_pin_rc=2
+  if [ -n "$REVIEW_GIT_DIR" ] && [ -n "$REVIEW_PROBE_HEAD" ]; then
+    _review_pin_rc=0
+    "$SCRIPT_DIR/review-pin.sh" pin --marker "$REVIEW_GIT_DIR/review-pinned" --sha "$REVIEW_PROBE_HEAD" --label peer-review || _review_pin_rc=$?
+    [ "$_review_pin_rc" != 3 ] || review_launch_failure 125
+  fi
+  if [ "$_review_pin_rc" = 0 ]; then
+    REVIEW_PIN_DIR=${WORKDIR:-$PWD}
+    REVIEW_PIN_MARKER=$REVIEW_GIT_DIR/review-pinned
   else
-    echo "dispatch-worker: could not pin review tree — continuing unpinned" >&2
+    echo 'dispatch-worker: could not pin review tree — continuing unpinned' >&2
   fi
 fi
 
@@ -344,113 +431,126 @@ run_with_timeout() {
   return "$rc"
 }
 
-# Bound the entire snapshot, including git reads that can block on FIFOs.
+# The sweep and snapshot share only shell memory with the parent.
 review_state_snapshot_bounded() {
-  local limit result=0 operation=${4:-snapshot}
-  # Ignore caller-supplied temporary storage for repository state.
-  # shellcheck disable=SC2034
-  local REPO_STATE_TMP=''
+  local limit result=0 sweep='' sweep_rc=0
+  local REPO_STATE_BOUND_VARS='REVIEW_GIT_DIR REVIEW_GIT_COMMON_DIR REPO_STATE_SALT'
   limit=$(repo_state_snapshot_limit dispatch-worker 120)
-  if [ "$operation" = snapshot ] && [ -n "${REVIEW_GIT_DIR:-}" ] && [ -n "${REVIEW_GIT_COMMON_DIR:-}" ]; then
-    repo_state_nonregular_sweep "$2.nonregular" "$REVIEW_GIT_DIR" "$REVIEW_GIT_COMMON_DIR" || return 3
+  if [ -n "$REVIEW_GIT_DIR" ] && [ -n "$REVIEW_GIT_COMMON_DIR" ]; then
+    repo_state_run_bounded "$limit" repo_state_nonregular_sweep_memory "$REVIEW_GIT_DIR" "$REVIEW_GIT_COMMON_DIR" || sweep_rc=$?
+    sweep=$REPO_STATE_BOUND_OUT
   fi
-  # Read by repo_state_run_bounded through dynamic scope.
-  # shellcheck disable=SC2034
-  local REPO_STATE_BOUND_VARS='REVIEW_GIT_DIR REVIEW_GIT_COMMON_DIR REPO_STATE_SALT REVIEW_BEFORE_HASH REVIEW_INTERIM_HASH REVIEW_AFTER_HASH REVIEW_SNAPSHOT_DIR'
-  # shellcheck disable=SC2034
-  local REPO_STATE_BOUND_FUNCS=review_state_compare_unbounded
-  if [ "$operation" = compare ]; then
-    repo_state_run_bounded "$limit" review_state_compare_unbounded "$1" "$2" "$3" || result=$?
-  else
-    repo_state_run_bounded "$limit" repo_state_snapshot "$1" "$2" || result=$?
+  if [ "$REVIEW_RUNTIME_LAUNCHED" = 0 ]; then review_launch_failure "$sweep_rc"; fi
+  repo_state_run_bounded "$limit" repo_state_snapshot_memory "$1" || result=$?
+  if [ "$REVIEW_RUNTIME_LAUNCHED" = 0 ]; then
+    review_launch_failure "$result"
   fi
-  if [ "$operation" = compare ] && [ "$result" = 125 ]; then
-    printf 'state: compare could not complete\n' > "$3"
-    return 2
+  if [ "$result" = 124 ]; then
+    echo 'drift snapshot timed out (possible hostile file such as a FIFO in the git dir)' >&2
   fi
-  case "$result" in
-    124|137)
-      if [ "$operation" = compare ]; then
-        printf 'state: compare timed out\n' > "$3"
-        return 2
-      fi
-      REVIEW_SNAPSHOT_TIMED_OUT=1
-      echo 'drift snapshot timed out (possible hostile file such as a FIFO in the git dir)' >&2
-      repo_state_mark_unreadable "$2"
-      # Let baseline callers pin the unreadable state so comparison fails closed.
-      result=0 ;;
-  esac
-  if [ "$operation" = snapshot ] && [ -f "$2.nonregular" ]; then
-    if [ "$result" != 0 ]; then repo_state_mark_unreadable "$2"; fi
-    local unsafe_line
-    while IFS= read -r unsafe_line; do
-      grep -Fxq "$unsafe_line" "$2" 2>/dev/null || printf '%s\n' "$unsafe_line" >> "$2"
-    done < "$2.nonregular"
-    rm -f "$2.nonregular"
-    result=0
-  fi
+  if [ "$result" != 0 ] || [ "$sweep_rc" != 0 ]; then REPO_STATE_BOUND_OUT=$'unreadable\n'; fi
+  REPO_STATE_BOUND_OUT=$(set -o pipefail; _repo_state_tagged "$REPO_STATE_BOUND_OUT" "$sweep" |
+    awk 'BEGIN {FS="\t"} {tag=$1; sub(/^[^\t]*\t/, ""); if(tag=="O" || !seen[$0]) print; seen[$0]=1}') || {
+    if [ "$REVIEW_RUNTIME_LAUNCHED" = 0 ]; then review_launch_failure 125; fi
+    REPO_STATE_BOUND_OUT=$'unreadable\n'; return 3
+  }
   return "$result"
 }
 
-# Hash pins are shell-local and never exported to the reviewer. Same-user
-# reviewers can discover files, so directory separation alone is insufficient.
-review_state_compare_pinned() {
-  REVIEW_STATE_STATUS='critical(incomplete)'
-  review_state_snapshot_bounded "$1" "$2" "$3" compare
+review_state_compare_bounded() {
+  local result=0 limit
+  local REPO_STATE_BOUND_VARS='REVIEW_BEFORE REVIEW_CURRENT'
+  limit=$(repo_state_snapshot_limit dispatch-worker 120)
+  repo_state_run_bounded "$limit" review_state_compare_memory || result=$?
+  case "$result" in
+    0|1|2) ;;
+    *) REPO_STATE_BOUND_OUT="${REPO_STATE_BOUND_OUT}"$'\nstate: drift check could not complete\n'; result=2 ;;
+  esac
+  return "$result"
 }
 
-review_state_compare_unbounded() {
-  local before=$1 after=$2 changes=$3 actual
-  actual=$({ repo_state_digest < "$before"; } 2>/dev/null) || actual=''
-  if [ -z "$actual" ] || [ "$actual" != "$REVIEW_BEFORE_HASH" ]; then
-    printf 'state: snapshot integrity failure (baseline missing or modified)\n' > "$changes"
-    return 2
-  fi
-  if [ -n "$REVIEW_INTERIM_HASH" ]; then
-    actual=$({ repo_state_digest < "$REVIEW_SNAPSHOT_DIR/interim"; } 2>/dev/null) || actual=''
-    if [ -z "$actual" ] || [ "$actual" != "$REVIEW_INTERIM_HASH" ]; then
-      printf 'state: snapshot integrity failure (interim missing or modified)\n' > "$changes"
-      return 2
-    fi
-  fi
-  actual=$({ repo_state_digest < "$after"; } 2>/dev/null) || actual=''
-  local expected=$REVIEW_AFTER_HASH
-  [ "$after" != "$REVIEW_SNAPSHOT_DIR/interim" ] || expected=$REVIEW_INTERIM_HASH
-  if [ -z "$actual" ] || [ "$actual" != "$expected" ]; then
-    printf 'state: snapshot integrity failure (after snapshot missing or modified)\n' > "$changes"
-    return 2
-  fi
-  repo_state_compare "$before" "$after" "$changes"
+review_state_compare_memory() {
+  repo_state_compare_memory "$REVIEW_BEFORE" "$REVIEW_CURRENT"
 }
 
-# Single-attempt runtimes share the same stored results consumed by the main tail.
+review_state_count() {
+  REVIEW_STATE_N=$(printf '%s' "$REVIEW_CHANGES" | awk 'NF {n++} END {print n+0}')
+  if [ "$REVIEW_STATE_CLASS" = 2 ] && [ "$REVIEW_STATE_N" = 0 ]; then REVIEW_STATE_N=1; fi
+}
+
 review_state_before_runtime() {
   [ "$REVIEW" = 1 ] || return 0
-  REVIEW_STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/dispatch-review-state.XXXXXX")" || { echo "dispatch-worker: could not create the review state directory" >&2; return 3; }
-  REVIEW_SNAPSHOT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/dispatch-snapshots.XXXXXX")" || { echo "dispatch-worker: could not create the review snapshot directory" >&2; return 3; }
+  REVIEW_STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/dispatch-review-state.XXXXXX")" || { review_launch_failure 125; }
   if [ -z "$REPO_STATE_SRC" ]; then
-    REVIEW_STATE_STATUS="skipped(not-a-git-repo)"
-  elif ! review_state_snapshot_bounded "$REPO_STATE_SRC" "$REVIEW_SNAPSHOT_DIR/before"; then
-    REVIEW_STATE_STATUS="skipped(snapshot-failed)"
-  else
-    REVIEW_BEFORE_HASH=$(repo_state_digest < "$REVIEW_SNAPSHOT_DIR/before") || return 3
+    REVIEW_STATE_STATUS='skipped(not-a-git-repo)'
+  elif review_state_snapshot_bounded "$REPO_STATE_SRC"; then
+    REVIEW_BEFORE=$REPO_STATE_BOUND_OUT
     REVIEW_STATE_CLASS=0
+  else
+    REVIEW_STATE_STATUS='skipped(snapshot-failed)'
   fi
 }
 
 review_state_after_runtime() {
   [ "$REVIEW" = 1 ] && [ -n "$REVIEW_STATE_CLASS" ] || return 0
   REVIEW_STATE_STATUS='critical(incomplete)'
-  review_state_snapshot_bounded "$REPO_STATE_SRC" "$REVIEW_SNAPSHOT_DIR/after" || repo_state_mark_unreadable "$REVIEW_SNAPSHOT_DIR/after"
-  REVIEW_AFTER_HASH=$(repo_state_digest < "$REVIEW_SNAPSHOT_DIR/after") || REVIEW_AFTER_HASH=''
+  review_state_snapshot_bounded "$REPO_STATE_SRC" 40>&- 41>&- 42>&- || true
+  REVIEW_CURRENT=$REPO_STATE_BOUND_OUT
   REVIEW_STATE_CLASS=0
-  review_state_compare_pinned "$REVIEW_SNAPSHOT_DIR/before" "$REVIEW_SNAPSHOT_DIR/after" "$REVIEW_STATE_DIR/changes" || REVIEW_STATE_CLASS=$?
-  case "$REVIEW_STATE_CLASS" in
-    0|1|2) ;;
-    *) printf 'state: drift check could not complete (compare exit %s)\n' "$REVIEW_STATE_CLASS" >> "$REVIEW_STATE_DIR/changes"; REVIEW_STATE_CLASS=2 ;;
-  esac
-  REVIEW_STATE_N=$(wc -l < "$REVIEW_STATE_DIR/changes" 2>/dev/null | tr -d ' ')
-  [ -n "$REVIEW_STATE_N" ] || REVIEW_STATE_N=1
+  review_state_compare_bounded || REVIEW_STATE_CLASS=$?
+  REVIEW_CHANGES=$REPO_STATE_BOUND_OUT
+  if [ ! -d "$REVIEW_STATE_DIR" ]; then
+    REVIEW_CHANGES="${REVIEW_CHANGES}"$'\nstate: review state directory missing or unreadable\n'
+    REVIEW_STATE_CLASS=2
+  fi
+  review_state_count
+}
+
+review_clone_bounded_child() {
+  # shellcheck disable=SC1090
+  . "$1"
+  shift
+  local result=0
+  review_clone_build "$@" || result=$?
+  REPO_STATE_BOUND_OUT="sha $REVIEW_CLONE_SHA"$'\n'"reason $REVIEW_CLONE_REASON"
+  return "$result"
+}
+
+review_private_config() (
+  set -o pipefail
+  local record key value
+  (umask 077; : > "$REVIEW_STATE_DIR/global.gitconfig") || return 3
+  printf '%s' "$REVIEW_GLOBAL_RECORDS" | base64 -d |
+    while IFS= read -r -d '' record; do
+      case "$record" in
+        *$'\n'*) key=${record%%$'\n'*}; value=${record#*$'\n'} ;;
+        *) key=$record; value=true ;;
+      esac
+      case "$key" in include.path|includeif.*) continue ;; esac
+      GIT_CEILING_DIRECTORIES=$(dirname "$REVIEW_STATE_DIR") git -C "$REVIEW_STATE_DIR" config --file "$REVIEW_STATE_DIR/global.gitconfig" --add "$key" "$value" || exit 3
+    done
+)
+
+# Check the type inside the bound: a swap between the check and open is bounded too.
+review_read_output_child() {
+  local file=$1
+  [ -f "$file" ] && [ ! -L "$file" ] || return 3
+  REPO_STATE_BOUND_OUT=$(cat "$file" || exit 3; printf x) || return 3
+  REPO_STATE_BOUND_OUT=${REPO_STATE_BOUND_OUT%x}
+}
+
+review_read_output() {
+  local result=0
+  repo_state_run_bounded "$(repo_state_snapshot_limit dispatch-worker 120)" review_read_output_child "$1" 40>&- 41>&- 42>&- || result=$?
+  if [ "$result" != 0 ]; then
+    REPO_STATE_BOUND_OUT=''
+    if [ "$REVIEW" = 1 ]; then
+      REVIEW_OUTPUT_FAILED=1
+      REVIEW_STATE_CLASS=2
+      REVIEW_CHANGES="${REVIEW_CHANGES}"$'\nstate: runtime output missing or unreadable\n'
+      review_state_count
+    fi
+  fi
 }
 
 dispatch_codex() {
@@ -503,7 +603,7 @@ dispatch_codex() {
   # arbitrary dir, not an in-repo edit). Skip codex's git-repo-trust gate there — the
   # caller already opted into danger-full-access. A read-only/in-repo run keeps the check.
   [ "$CEREMONY" = "1" ] && [ "$REVIEW" != "1" ] && codex_flags+=(--skip-git-repo-check)
-  local errlog stdoutlog rc=0 produced=0
+  local errlog stdoutlog errtext stdouttext rc=0 produced=0
   local -a codex_args=(exec)
   if [ "${#codex_flags[@]}" -gt 0 ]; then codex_args+=("${codex_flags[@]}"); fi
   [ -n "$codex_cd_dir" ] && codex_args+=(-C "$codex_cd_dir")
@@ -511,6 +611,8 @@ dispatch_codex() {
   review_state_before_runtime || return $?
   errlog="$(mktemp -t dispatch-codex-out.XXXXXX)" || { echo "dispatch-worker: mktemp failed" >&2; return 1; }
   stdoutlog="$(mktemp -t dispatch-codex-stdout.XXXXXX)" || { rm -f "$errlog"; echo "dispatch-worker: mktemp failed" >&2; return 1; }
+  # Keep writers on owned descriptors if the runtime replaces either pathname.
+  exec 41<>"$errlog" 42<>"$stdoutlog"
   # Tee each stream through a waited pipeline: fd 3 sends stdout to its tee while
   # stderr goes through the inner tee. Both files are complete before either grep.
   # Keep the files separate; concatenation could split a banner while stderr is written.
@@ -522,11 +624,16 @@ dispatch_codex() {
   # including timeout rc; under pipefail, the group would otherwise return the inner
   # tee's rightmost non-zero status if that tee failed.
   REVIEW_RUNTIME_LAUNCHED=1
-  { run_with_timeout codex "${codex_args[@]}" < "$BRIEF" 2>&1 1>&3 3>&- \
-      | tee -a "$errlog" >&2 3>&-; exit "${PIPESTATUS[0]}"; } 3>&1 | tee -a "$stdoutlog"
+  if [ "$REVIEW_STATE_STATUS" = 'skipped(not-launched)' ]; then REVIEW_STATE_STATUS='skipped(not-checked)'; fi
+  { run_with_timeout codex "${codex_args[@]}" < "$BRIEF" 2>&1 1>&3 3>&- 40>&- 41>&- 42>&- \
+      | tee -a /dev/fd/41 >&2 3>&-; exit "${PIPESTATUS[0]}"; } 3>&1 | tee -a /dev/fd/42
   rc=${PIPESTATUS[0]}
+  exec 41>&- 42>&-
   review_state_after_runtime
-  if [ "$rc" -ne 0 ] && grep -qiE 'not supported when using Codex|with a ChatGPT account|no (supported )?models? (are )?available|all models? (were |are )?rejected' "$errlog" "$stdoutlog"; then
+  review_read_output "$errlog"; errtext=$REPO_STATE_BOUND_OUT
+  review_read_output "$stdoutlog"; stdouttext=$REPO_STATE_BOUND_OUT
+  if [ "$rc" -ne 0 ] && grep -qiE 'not supported when using Codex|with a ChatGPT account|no (supported )?models? (are )?available|all models? (were |are )?rejected' <<< "$errtext
+$stdouttext"; then
     echo "dispatch-worker: codex rejected the request at the auth/config layer (not a build failure) — every model was refused." >&2
     echo "dispatch-worker: fix codex auth/config, do NOT retry this as a build: run 'codex login' (ChatGPT) or set a valid OpenAI API key provider, and check ~/.codex/config.toml for a bad model_provider override or a stray Authorization header." >&2
     rm -f "$errlog" "$stdoutlog"
@@ -558,10 +665,11 @@ dispatch_codex() {
   #    for the other. DISPATCH_LIMIT_NOOP_BYTES exists for site-specific tuning.
   # Backstops for both: the rc 8 review byte floor, and coding-dispatch's empty-diff gate for
   # edit briefs. Closing them properly needs a captured real banner -- do not guess a pattern.
-  produced="$(wc -c < "$stdoutlog" 2>/dev/null | tr -d ' ')"
+  produced="$(printf '%s' "$stdouttext" | wc -c | tr -d ' ')"
   [ -n "$produced" ] || produced=0
   if [ "$produced" -lt "${DISPATCH_LIMIT_NOOP_BYTES:-200}" ] \
-     && grep -qiE 'usage limit|rate limit(ed)?|too many requests|you.?ve (hit|reached) your|reached (the|your) (usage|rate) limit|quota (exceeded|reached)|resets? (at|in)|try again (after|in|later)|limit will reset' "$errlog" "$stdoutlog"; then
+     && grep -qiE 'usage limit|rate limit(ed)?|too many requests|you.?ve (hit|reached) your|reached (the|your) (usage|rate) limit|quota (exceeded|reached)|resets? (at|in)|try again (after|in|later)|limit will reset' <<< "$errtext
+$stdouttext"; then
     echo "dispatch-worker: codex appears to have hit a usage/rate limit (not a build result) — a limit signature appeared and codex produced no substantive output (${produced}B)." >&2
     echo "dispatch-worker: do NOT accept this as a completed fix (codex can exit 0 with a zero-edit no-op on a limit). Wait for the reset time shown above, then re-dispatch. Treat as a BLOCKED phase." >&2
     rm -f "$errlog" "$stdoutlog"
@@ -622,14 +730,18 @@ $hit"
 }
 
 run_agy_review_attempt() {
+  # macOS /dev/fd opens duplicate the descriptor and ignore O_TRUNC. Reset the
+  # pinned file itself before each attempt, including the timeout retry.
+  perl -e 'truncate(STDOUT,0) or exit 1; seek(STDOUT,0,0) or exit 1' >&40 || return 3
   REVIEW_RUNTIME_LAUNCHED=1
+  if [ "$REVIEW_STATE_STATUS" = 'skipped(not-launched)' ]; then REVIEW_STATE_STATUS='skipped(not-checked)'; fi
   (
     cd "$review_path" || exit 1
     if [ "$REVIEW_HERMETIC" = "1" ]; then
       export GIT_CONFIG_GLOBAL="$REVIEW_STATE_DIR/global.gitconfig"
     fi
-    run_with_timeout agy "${model_args[@]}" < "$agy_brief"
-  ) | tee "$review_outfile"
+    run_with_timeout agy "${model_args[@]}" <<< "$agy_brief_text" 40>&- 41>&- 42>&-
+  ) | tee -a /dev/fd/40
   return "${PIPESTATUS[0]}"
 }
 
@@ -668,6 +780,10 @@ dispatch_agy() {
       return "$auth_rc"
       ;;
   esac
+  if [ "$REVIEW" = 1 ] && [ "$REVIEW_PROBE_INSIDE" = true ] && { [ "$_review_dirty_rc" != 0 ] || [ "$_review_dirty_seen" != 1 ]; }; then
+    echo "dispatch-worker: dirty status probe failed (dirty-rc=$_review_dirty_rc; dirty record=$_review_dirty_seen); no reviewer was launched" >&2
+    review_launch_failure 125
+  fi
   echo "dispatch-worker: agy model: $agy_model ($agy_role, $agy_source)" >&2
   if [ -n "$AGENT" ]; then
     local agent_roster agent_rc=0 roster_timeout=""
@@ -733,7 +849,7 @@ dispatch_agy() {
   local agy_workdir="${WORKDIR:-$PWD}"
   local review_path="$agy_workdir"
   local REVIEW_HERMETIC=0
-  local agy_brief
+  local agy_brief agy_brief_text review_text
   local review_outfile
   # Use caller-supplied path if set; otherwise mktemp (unpredictable, avoids symlink attack).
   # A path WE created is deleted on exit (see cleanup_dispatch_worker) — the review on stdout
@@ -747,9 +863,9 @@ dispatch_agy() {
   fi
   agy_brief="$(mktemp -t dispatch-agy-brief.XXXXXX)" || { echo "dispatch-worker: mktemp failed" >&2; return 1; }
   if [ "$REVIEW" = "1" ]; then
-    if git -C "$agy_workdir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-      REVIEW_SRC_TOP="$(git -C "$agy_workdir" rev-parse --show-toplevel)"
-      _review_dirty_status="$(git -C "$REVIEW_SRC_TOP" status --porcelain --untracked-files=all)"
+    if [ "$REVIEW_PROBE_INSIDE" = true ]; then
+      REVIEW_SRC_TOP=$REVIEW_PROBE_TOP
+      _review_dirty_status=$REVIEW_DIRTY_STATUS
       if [ -n "$_review_dirty_status" ]; then
         echo "dispatch-worker: review runs against committed HEAD in an isolated workspace; the real tree has uncommitted changes that are NOT included — commit them first or include the diff in the brief." >&2
         if [ "$ALLOW_DIRTY" != "1" ]; then
@@ -772,7 +888,7 @@ dispatch_agy() {
         if [ "$_review_parent_usable" = "1" ] && [ -w "$REVIEW_WT_PARENT" ]; then
           # Reap stale review workspaces; preserve fresh and foreign legacy worktrees.
           reap_stale_review_workspaces "$REVIEW_WT_PARENT"
-          git -C "$REVIEW_SRC_TOP" worktree prune 2>/dev/null || true
+          review_reap_prune
           REVIEW_WT="$(mktemp -d "$REVIEW_WT_PARENT/dispatch-review-wt.XXXXXX")" || REVIEW_WT=""
         else
           REVIEW_WT=""
@@ -794,7 +910,7 @@ dispatch_agy() {
             REVIEW_WT_PARENT="$_review_cache_parent"
             [ "$_review_cache_existed" = "0" ] && REVIEW_WT_PARENT_CREATED=1
             reap_stale_review_workspaces "$REVIEW_WT_PARENT"
-            git -C "$REVIEW_SRC_TOP" worktree prune 2>/dev/null || true
+            review_reap_prune
             REVIEW_WT="$(mktemp -d "$REVIEW_WT_PARENT/dispatch-review-wt.XXXXXX")" || REVIEW_WT=""
           esac
         fi
@@ -811,8 +927,12 @@ dispatch_agy() {
       fi
       REVIEW_WT_RM_PARENT="$(dirname "$REVIEW_WT")"
       local clone_rc=0
-      review_clone_build "$REVIEW_SRC_TOP" "$REVIEW_WT" || clone_rc=$?
+      repo_state_run_bounded "$(repo_state_snapshot_limit dispatch-worker 600 DISPATCH_CLONE_TIMEOUT_SECS)" review_clone_bounded_child "$SCRIPT_DIR/lib/review-clone.sh" "$REVIEW_SRC_TOP" "$REVIEW_WT" "$REVIEW_PROBE_HEAD" || clone_rc=$?
+      REVIEW_CLONE_SHA=${REPO_STATE_BOUND_OUT%%$'\n'*}
+      REVIEW_CLONE_SHA=${REVIEW_CLONE_SHA#sha }
+      REVIEW_CLONE_REASON=${REPO_STATE_BOUND_OUT#*$'\nreason '}
       case "$clone_rc" in
+        124|125) review_launch_failure "$clone_rc" DISPATCH_CLONE_TIMEOUT_SECS ;;
         0)
           review_path="$REVIEW_WT"
           REVIEW_HERMETIC=1 ;;
@@ -881,6 +1001,14 @@ dispatch_agy() {
       cat "$BRIEF"
     } > "$agy_brief"
   fi
+  local brief_rc=0
+  repo_state_run_bounded "$(repo_state_snapshot_limit dispatch-worker 120)" review_read_output_child "$agy_brief" || brief_rc=$?
+  if [ "$brief_rc" != 0 ]; then
+    echo 'dispatch-worker: could not read the runtime brief' >&2
+    if [ "$REVIEW" = 1 ]; then review_launch_failure "$brief_rc"; fi
+    return 3
+  fi
+  agy_brief_text=$REPO_STATE_BOUND_OUT
   local -a model_args=()
   [ -n "$agy_model" ] && model_args=(--model "$agy_model")
   [ -n "$AGENT" ] && model_args+=(--agent="$AGENT")
@@ -892,42 +1020,48 @@ dispatch_agy() {
     else
       echo "dispatch-worker: warning: review is running non-hermetically and therefore read-only; the lens may be unable to complete an execution-dependent method." >&2
     fi
-    REVIEW_STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/dispatch-review-state.XXXXXX")" || { echo "dispatch-worker: could not create the review state directory" >&2; return 3; }
-    REVIEW_SNAPSHOT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/dispatch-snapshots.XXXXXX")" || { echo "dispatch-worker: could not create the review snapshot directory" >&2; return 3; }
-    if [ "$REVIEW_HERMETIC" = "1" ]; then
-      local f="$REVIEW_STATE_DIR/global.gitconfig" record key value
-      (umask 077; : > "$f") || { echo "dispatch-worker: could not build the private global git config" >&2; return 3; }
-      local global_records="$REVIEW_STATE_DIR/global.records"
-      if ! git -C "$REPO_STATE_SRC" config --global --includes --list -z > "$global_records" 2>/dev/null; then
-        : > "$global_records" || { echo "dispatch-worker: could not build the private global git config" >&2; return 3; }
+    REVIEW_STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/dispatch-review-state.XXXXXX")" || { review_launch_failure 125; }
+    if [ "$REVIEW_HERMETIC" = 1 ]; then
+      # shellcheck disable=SC2034
+      local REPO_STATE_BOUND_VARS='REVIEW_GLOBAL_RECORDS REVIEW_STATE_DIR' config_rc=0
+      repo_state_run_bounded "$(repo_state_snapshot_limit dispatch-worker 120)" review_private_config || config_rc=$?
+      if [ "$config_rc" != 0 ]; then
+        echo 'dispatch-worker: could not build the private global git config' >&2
+        review_launch_failure "$config_rc"
       fi
-      while IFS= read -r -d '' record; do
-        case "$record" in
-          *$'\n'*) key="${record%%$'\n'*}"; value="${record#*$'\n'}" ;;
-          *) key="$record"; value=true ;;
-        esac
-        case "$key" in include.path|includeif.*) continue ;; esac
-        git config --file "$f" --add "$key" "$value" || { echo "dispatch-worker: could not build the private global git config" >&2; return 3; }
-      done < "$global_records"
     fi
     local agy_rc=0 cmp_rc=0 retry_skipped=0 state_checked=0
     if [ -z "$REPO_STATE_SRC" ]; then
       REVIEW_STATE_STATUS="skipped(not-a-git-repo)"
-    elif review_state_snapshot_bounded "$REPO_STATE_SRC" "$REVIEW_SNAPSHOT_DIR/before"; then
-      REVIEW_BEFORE_HASH=$(repo_state_digest < "$REVIEW_SNAPSHOT_DIR/before") || return 3
+    elif review_state_snapshot_bounded "$REPO_STATE_SRC"; then
+      REVIEW_BEFORE=$REPO_STATE_BOUND_OUT
       state_checked=1
     else
       REVIEW_STATE_STATUS="skipped(snapshot-failed)"
     fi
+    # Open only after setup, so setup failures cannot leak capture descriptors.
+    # Reject nonregular paths before opening; read-write also prevents a FIFO
+    # swapped in after this check from blocking. Each attempt truncates below.
+    if [ -L "$review_outfile" ] || { [ -e "$review_outfile" ] && [ ! -f "$review_outfile" ]; }; then
+      echo 'dispatch-worker: review output must be a regular file' >&2
+      return 3
+    fi
+    exec 40<>"$review_outfile" || return 3
+    # Compare fstat with lstat: macOS /dev/fd path stats do not identify the file.
+    if ! perl -e 'my @fd=stat(STDOUT); my @path=lstat($ARGV[0]); exit(!(@fd && @path && -f _ && $fd[0]==$path[0] && $fd[1]==$path[1]))' "$review_outfile" >&40; then
+      exec 40>&-
+      return 3
+    fi
     run_agy_review_attempt || agy_rc=$?
     if [ "$state_checked" = 1 ]; then
       REVIEW_STATE_STATUS='critical(incomplete)'
-      review_state_snapshot_bounded "$REPO_STATE_SRC" "$REVIEW_SNAPSHOT_DIR/interim" || repo_state_mark_unreadable "$REVIEW_SNAPSHOT_DIR/interim"
-      REVIEW_INTERIM_HASH=$(repo_state_digest < "$REVIEW_SNAPSHOT_DIR/interim") || REVIEW_INTERIM_HASH=''
-      review_state_compare_pinned "$REVIEW_SNAPSHOT_DIR/before" "$REVIEW_SNAPSHOT_DIR/interim" "$REVIEW_STATE_DIR/changes" || cmp_rc=$?
+      review_state_snapshot_bounded "$REPO_STATE_SRC" 40>&- 41>&- 42>&- || true
+      REVIEW_CURRENT=$REPO_STATE_BOUND_OUT
+      review_state_compare_bounded 40>&- 41>&- 42>&- || cmp_rc=$?
+      REVIEW_CHANGES=$REPO_STATE_BOUND_OUT
       case "$cmp_rc" in
         0|1|2) ;;
-        *) printf 'state: drift check could not complete (compare exit %s)\n' "$cmp_rc" >> "$REVIEW_STATE_DIR/changes"; cmp_rc=2 ;;
+        *) REVIEW_CHANGES="${REVIEW_CHANGES}"$'\nstate: drift check could not complete\n'; cmp_rc=2 ;;
       esac
       if [ "$cmp_rc" = 2 ] && { [ "$agy_rc" = 124 ] || [ "$agy_rc" = 137 ]; }; then
         retry_skipped=1
@@ -937,7 +1071,8 @@ dispatch_agy() {
     # Emit path and rc so callers can locate the file AND detect truncation (non-zero rc = partial).
     echo "REVIEW_OUTFILE=$review_outfile (rc=$agy_rc)" >&2
     local review_bytes
-    review_bytes="$(wc -c < "$review_outfile" 2>/dev/null | tr -d ' ')"
+    review_read_output "$review_outfile"; review_text=$REPO_STATE_BOUND_OUT
+    review_bytes="$(printf '%s' "$review_text" | wc -c | tr -d ' ')"
     review_bytes="${review_bytes:-0}"
     # TIMEOUT RETRY (hardened after a peer review of the first fix): this
     # used to also require `review_bytes <
@@ -955,27 +1090,33 @@ dispatch_agy() {
       agy_rc=0
       run_agy_review_attempt || agy_rc=$?
       echo "REVIEW_OUTFILE=$review_outfile (rc=$agy_rc) [retry]" >&2
-      review_bytes="$(wc -c < "$review_outfile" 2>/dev/null | tr -d ' ')"
+      review_read_output "$review_outfile"; review_text=$REPO_STATE_BOUND_OUT
+      review_bytes="$(printf '%s' "$review_text" | wc -c | tr -d ' ')"
       review_bytes="${review_bytes:-0}"
     fi
+    exec 40>&-
     if [ "$state_checked" = 1 ]; then
       REVIEW_STATE_STATUS='critical(incomplete)'
-      review_state_snapshot_bounded "$REPO_STATE_SRC" "$REVIEW_SNAPSHOT_DIR/after" || repo_state_mark_unreadable "$REVIEW_SNAPSHOT_DIR/after"
-      REVIEW_AFTER_HASH=$(repo_state_digest < "$REVIEW_SNAPSHOT_DIR/after") || REVIEW_AFTER_HASH=''
-      local after_rc=0
-      review_state_compare_pinned "$REVIEW_SNAPSHOT_DIR/before" "$REVIEW_SNAPSHOT_DIR/after" "$REVIEW_STATE_DIR/after-changes" || after_rc=$?
+      review_state_snapshot_bounded "$REPO_STATE_SRC" 40>&- 41>&- 42>&- || true
+      REVIEW_CURRENT=$REPO_STATE_BOUND_OUT
+      local after_rc=0 after_changes
+      review_state_compare_bounded || after_rc=$?
+      after_changes=$REPO_STATE_BOUND_OUT
       case "$after_rc" in
         0|1|2) ;;
-        *) printf 'state: drift check could not complete (compare exit %s)\n' "$after_rc" >> "$REVIEW_STATE_DIR/after-changes"; after_rc=2 ;;
+        *) after_changes="${after_changes}"$'\nstate: drift check could not complete\n'; after_rc=2 ;;
       esac
       # Preserve critical interim evidence even if concurrent work restored it.
       if [ "$cmp_rc" != 2 ] || [ "$after_rc" = 2 ]; then
-        cp "$REVIEW_STATE_DIR/after-changes" "$REVIEW_STATE_DIR/changes"
+        REVIEW_CHANGES=$after_changes
         cmp_rc=$after_rc
       fi
       REVIEW_STATE_CLASS=$cmp_rc
-      REVIEW_STATE_N=$(wc -l < "$REVIEW_STATE_DIR/changes" 2>/dev/null | tr -d ' ')
-      [ -n "$REVIEW_STATE_N" ] || REVIEW_STATE_N=1
+      if [ ! -d "$REVIEW_STATE_DIR" ]; then
+        REVIEW_CHANGES="${REVIEW_CHANGES}"$'\nstate: review state directory missing or unreadable\n'
+        REVIEW_STATE_CLASS=2
+      fi
+      review_state_count
     fi
     # Requirements-mode evidence: a PRD review's deliverable is the
     # per-row disposition table the brief itself asks for — a row ID (R<n>.<n> / E<n> /
@@ -986,7 +1127,7 @@ dispatch_agy() {
     # row-free prose in the same vocabulary ("Aligned rows: no objection") is neither.
     local _rowverdict='(^|[^[:alnum:]_])(R[0-9]+\.[0-9]+|[EM][0-9]+)([^[:alnum:]_]|$).*(^|[^[:alnum:]_])(ALIGN|OBJECT|ABSTAIN)([^[:alnum:]_]|$)'
     local has_rowverdict=0
-    if [ "$agy_rc" -eq 0 ] && grep -Eq "$_rowverdict" "$review_outfile"; then has_rowverdict=1; fi
+    if [ "$agy_rc" -eq 0 ] && grep -Eq "$_rowverdict" <<< "$review_text"; then has_rowverdict=1; fi
     if [ "$agy_rc" -eq 0 ] && [ "$review_bytes" -lt "$MIN_REVIEW_BYTES" ] && [ "$has_rowverdict" -eq 0 ]; then
       echo "dispatch-worker: REVIEW FAILED — output too short (${review_bytes}B < ${MIN_REVIEW_BYTES}B min). A rc=0-but-empty/short agy review is NOT a pass; do NOT accept it. Fall back to a LOCAL reviewer (Claude Agent-tool peer-*-reviewer, or Opus verify-the-reviewer) — do NOT retry the wedged agy." >&2
       agy_rc=8
@@ -994,7 +1135,7 @@ dispatch_agy() {
       local _sev='(^|\|)[[:blank:]]*((#{1,6}|[0-9]+[.)]|[-*])[[:blank:]]+)*(\*\*|\[)*((Blocker|Major|Minor|Nit|Critical|High|Medium|Low|Info)([[:blank:]]*(:|\]|\*\*|\||\))|[[:blank:]]+[-—][[:blank:]]+)|Severity:[[:blank:]]*(\*\*)?[[:blank:]]*(Blocker|Major|Minor|Nit|Critical|High|Medium|Low|Info)(([[:blank:]]*(:|\]|\*\*|\||\))|[[:blank:]]+[-—][[:blank:]]+)|[[:blank:]]*$))'
       local _pathslash='(^|[^[:alnum:]_./-])[[:alnum:]_.-]+/[[:alnum:]_./-]*[[:alnum:]_-]:[0-9]+'
       local _pathext='(^|[^[:alnum:]_./-])[[:alnum:]_-]+\.[[:alpha:]][[:alnum:]]*:[0-9]+'
-      if [ "$has_rowverdict" -eq 0 ] && ! grep -Eiq "$_sev" "$review_outfile" && ! grep -Eq "$_pathslash|$_pathext" "$review_outfile"; then
+      if [ "$has_rowverdict" -eq 0 ] && ! grep -Eiq "$_sev" <<< "$review_text" && ! grep -Eq "$_pathslash|$_pathext" <<< "$review_text"; then
         echo "dispatch-worker: REVIEW FAILED — review produced no labelled severity or file:line evidence (and no requirements-mode per-row ALIGN/OBJECT/ABSTAIN verdict) and is not a pass. Fall back to a LOCAL reviewer (Claude Agent-tool peer-*-reviewer, or Opus verify-the-reviewer) — do NOT retry the wedged agy." >&2
         agy_rc=8
       fi
@@ -1003,10 +1144,11 @@ dispatch_agy() {
       agy_rc=124
     fi
   else
-    run_with_timeout agy "${model_args[@]}" < "$agy_brief"
+    run_with_timeout agy "${model_args[@]}" <<< "$agy_brief_text" 40>&- 41>&- 42>&-
     local agy_rc=$?
   fi
   if [ "$REVIEW" = 1 ]; then REVIEW_ORIGINAL_RC=$agy_rc; fi
+  exec 40>&-
   rm -f "$agy_brief"
   return "$agy_rc"
 }
@@ -1037,6 +1179,7 @@ dispatch_claude() {
   local rc=0
   review_state_before_runtime || return $?
   REVIEW_RUNTIME_LAUNCHED=1
+  if [ "$REVIEW_STATE_STATUS" = 'skipped(not-launched)' ]; then REVIEW_STATE_STATUS='skipped(not-checked)'; fi
   run_with_timeout claude "${flags[@]}" < "$BRIEF" || rc=$?
   review_state_after_runtime
   return "$rc"
@@ -1070,15 +1213,7 @@ dispatch_a2a_endpoint() {
 }
 
 # Source repository stays pinned as an input even when clone setup falls back.
-REPO_STATE_SRC=""
 REVIEW_RUNTIME_LAUNCHED=0
-if [ "$REVIEW" = "1" ]; then
-  if [ "$RUNTIME" = claude ]; then
-    REPO_STATE_SRC="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null)" || REPO_STATE_SRC=""
-  else
-    REPO_STATE_SRC="$(git -C "${WORKDIR:-$PWD}" rev-parse --show-toplevel 2>/dev/null)" || REPO_STATE_SRC=""
-  fi
-fi
 : "$REPO_STATE_SRC" "$REVIEW_RUNTIME_LAUNCHED"
 rc=0
 case "$RUNTIME" in
@@ -1092,32 +1227,33 @@ esac
 
 if [ "$REVIEW" = 1 ]; then
   REVIEW_ORIGINAL_RC=${REVIEW_ORIGINAL_RC:-$rc}
-  if [ "${REVIEW_SNAPSHOT_TIMED_OUT:-0}" = 1 ]; then
+  if [ "$REVIEW_OUTPUT_FAILED" = 1 ]; then
     REVIEW_STATE_CLASS=2
-    REVIEW_STATE_N=1
-    printf '%s\n' 'drift snapshot timed out (possible hostile file such as a FIFO in the git dir)' >> "$REVIEW_STATE_DIR/changes"
-    rc=10
+    case "$REVIEW_CHANGES" in
+      *'state: runtime output missing or unreadable'*) ;;
+      *) REVIEW_CHANGES="${REVIEW_CHANGES}"$'\nstate: runtime output missing or unreadable\n' ;;
+    esac
+    review_state_count
   fi
   case "$REVIEW_STATE_CLASS" in
     0) REVIEW_STATE_STATUS=clean ;;
     1)
       REVIEW_STATE_STATUS="warn($REVIEW_STATE_N)"
       echo "dispatch-worker: warning: source repo moved during the review (may be concurrent work):" >&2 || true
-      sed 's/^/  /' "$REVIEW_STATE_DIR/changes" >&2 || true ;;
+      printf '%s\n' "$REVIEW_CHANGES" | sed '/^$/d; s/^/  /' >&2 || true ;;
     2)
       REVIEW_STATE_STATUS="critical($REVIEW_STATE_N)"
       if [ "$REVIEW_RUNTIME_LAUNCHED" = 1 ]; then rc=10; fi
       if [ "$REVIEW_RUNTIME_LAUNCHED" = 1 ]; then
         echo "dispatch-worker: SOURCE REPO CHANGED DURING THE REVIEW WINDOW (reviewer or a concurrent session; cause not attributed)." >&2 || true
         echo "Inspect and restore these before committing in that repo; the review body stands only if every change is known concurrent work:" >&2 || true
-        if [ -r "$REVIEW_STATE_DIR/changes" ]; then
-          sed 's/^/  /' "$REVIEW_STATE_DIR/changes" >&2 || true
-        else
-          echo '  state: review state directory missing or unreadable' >&2 || true
-        fi
+        printf '%s\n' "$REVIEW_CHANGES" | sed '/^$/d; s/^/  /' >&2 || true
         echo "(the run would otherwise have exited $REVIEW_ORIGINAL_RC)" >&2 || true
       fi ;;
     *)
+      if [ "$REVIEW_RUNTIME_LAUNCHED" = 1 ] && [ -z "$REPO_STATE_SRC" ]; then
+        REVIEW_STATE_STATUS='skipped(not-a-git-repo)'
+      fi
       if [ "$REVIEW_RUNTIME_LAUNCHED" = 1 ] || [ "$RUNTIME" = workflow ]; then
         if [ "$REVIEW_STATE_STATUS" = 'skipped(not-launched)' ]; then REVIEW_STATE_STATUS='skipped(not-checked)'; fi
       fi ;;

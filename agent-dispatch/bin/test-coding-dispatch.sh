@@ -147,6 +147,17 @@ PATH="$old_path"
 [ -f "$P_unpin/pin_guard_change.txt" ] || fail "#140 unpinned dispatch should keep the agent change"
 echo "test #140 unpinned dispatch still succeeds PASS"
 
+# A packaged caller without review-pin.sh retains the optional pin check.
+missing_pin_bin="$TMP/missing-pin-bin"; mkdir -p "$missing_pin_bin"
+cp "$CD" "$SELF_DIR/gate-run.sh" "$missing_pin_bin/"
+cp -R "$SELF_DIR/lib" "$missing_pin_bin/lib"
+[ ! -e "$missing_pin_bin/review-pin.sh" ] || fail "missing-pin fixture unexpectedly has helper"
+P_missing_pin="$TMP/missing_pin_parent"; new_parent "$P_missing_pin"
+CODING_DISPATCH_PREAMBLE="$SELF_DIR/../docs/dispatch-preamble.md" AGENT_INVOKED_FILE="$TMP/missing_pin.invoked" PATH="$TMP/pin_negative_bin:$PATH" bash "$missing_pin_bin/coding-dispatch.sh" codex "$P_missing_pin" "$TMP/prompt" true >"$TMP/out_missing_pin" 2>&1; rc=$?
+[ "$rc" -eq 0 ] || { cat "$TMP/out_missing_pin"; fail "missing review-pin.sh should proceed, got $rc"; }
+[ -e "$TMP/missing_pin.invoked" ] && [ -f "$P_missing_pin/pin_guard_change.txt" ] || fail "missing review-pin.sh should allow agent changes"
+echo "test missing review-pin.sh dispatch proceeds PASS"
+
 # #140 stale pins fall through: status removes the stale marker and dispatch proceeds.
 P_stale="$TMP/pin_stale_parent"; new_parent "$P_stale"
 stale_marker="$(review_pin_marker "$P_stale")"
@@ -431,7 +442,8 @@ echo "test early-window TERM removes empty worktree PASS"
 
 # Private PATH deliberately excludes timeout/gtimeout on every platform.
 mkdir -p "$TMP/no-timeout-bin"
-for utility in mkfifo tee git bash basename dirname tr cut mkdir rm sed paste mktemp cat cksum awk wc head sleep cp diff grep find date tail sort uniq touch jq; do
+# Bounded pin status must remain available on the timeout-free PATH.
+for utility in chmod mkfifo tee git bash basename dirname tr cut mkdir rm sed paste mktemp cat cksum awk wc head sleep cp diff grep find date tail sort uniq touch jq; do
   ln -s "$(command -v "$utility")" "$TMP/no-timeout-bin/$utility"
 done
 for utility in md5 md5sum openssl; do
@@ -727,6 +739,8 @@ echo "test #48 brief fingerprint content-derived PASS"
 mkdir -p "$TMP/timeoutbin"
 cat > "$TMP/timeoutbin/timeout" <<'STUB'
 #!/usr/bin/env bash
+# Let pin-status bounds run normally; only the agent invocation times out.
+if [ "${4:-}" = bash ]; then shift 3; exec "$@"; fi
 printf '%s\n' "$*" >> "$TIMEOUT_ARGS_FILE"
 exit 124
 STUB
@@ -1115,7 +1129,7 @@ echo "test #128a slow-gate warning suppressed when timeout explicit PASS"
 # (B3) rc=124 (the external timeout tripped) must say TIMEOUT explicitly and name the cap,
 # never a generic empty-diff fail.
 mkdir -p "$TMP/timeoutbin2"
-printf '#!/usr/bin/env bash\nexit 124\n' > "$TMP/timeoutbin2/timeout"; chmod +x "$TMP/timeoutbin2/timeout"
+printf '#!/usr/bin/env bash\nif [ "${4:-}" = bash ]; then shift 3; exec "$@"; fi\nexit 124\n' > "$TMP/timeoutbin2/timeout"; chmod +x "$TMP/timeoutbin2/timeout"
 P_rc124="$TMP/rc124_parent"; new_parent "$P_rc124"
 PATH="$TMP/timeoutbin2:$TMP/bin:$PATH" bash "$CD" codex "$P_rc124" "$TMP/prompt" "true" >"$TMP/out_rc124" 2>&1; rc=$?
 [ "$rc" -eq 1 ] || { cat "$TMP/out_rc124"; fail "#128a rc=124 should still fail (dispatch exit-1 contract), got $rc"; }
@@ -1779,7 +1793,7 @@ STUB
   path234="$TMP/bin:$PATH"
   if [ "$case234" = f ]; then
     mkdir -p "$TMP/timeout234"
-    printf '#!/usr/bin/env bash\nshift 3\n"$@"\nexit 124\n' > "$TMP/timeout234/timeout"
+    printf '#!/usr/bin/env bash\nif [ "${4:-}" = bash ]; then shift 3; exec "$@"; fi\nshift 3\n"$@"\nexit 124\n' > "$TMP/timeout234/timeout"
     chmod +x "$TMP/timeout234/timeout"
     path234="$TMP/timeout234:$path234"
   fi
