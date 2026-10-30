@@ -17,12 +17,8 @@ SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=lib/test-dispatch-worker-lib.sh
 . "$SELF_DIR/lib/test-dispatch-worker-lib.sh"
 
-# Prompt-only fixtures still need a readable status probe. A local filter selects
-# the documented non-hermetic path, and generated fixture data stays ignored.
-PROMPT_FIXTURE="$TMP/prompt-fixture"
-make_git_repo "$PROMPT_FIXTURE"
-git -C "$PROMPT_FIXTURE" config filter.fixture.clean cat
-export WORKDIR="$PROMPT_FIXTURE"
+# Prompt and model checks exercise supported non-git review targets.
+export WORKDIR="$TMP"
 
 # Missing review pin refuses dispatch; an offered override bypasses the dead pin.
 AGY_MISSING_REVIEW=1 TIMEOUT=0 "$DW" --runtime agy --review --brief "$BRIEF" >"$TMP/missing" 2>&1; rc=$?
@@ -35,7 +31,7 @@ grep -qF -- '--model custom-id' "$AGY_ARGS_FILE" || fail "override did not reach
 : > "$AGY_ARGS_FILE"
 
 # 1. agy --review → read-only preamble, no edit marker, no "IGNORED", brief preserved.
-OUT="$(TIMEOUT=0 "$DW" --runtime agy --review --brief "$BRIEF" --workdir "$PROMPT_FIXTURE" 2>/dev/null)"
+OUT="$(TIMEOUT=0 "$DW" --runtime agy --review --brief "$BRIEF" --workdir "$TMP" 2>/dev/null)"
 grep -q "READ-ONLY REVIEW MODE" <<<"$OUT"  || fail "agy --review missing the read-only preamble"
 grep -q "_coding-result.json"   <<<"$OUT"  && fail "agy --review leaked the edit-mode marker"
 grep -q "IGNORED"               <<<"$OUT"  && fail "agy --review kept 'narration ... IGNORED'"
@@ -86,7 +82,7 @@ echo "test 4b (codex --review threads workdir via -C) PASS"
 echo "test 5 (--help) PASS"
 
 # 6. agy --review defaults to the review model (Pro/High), multi-word name intact.
-TIMEOUT=0 "$DW" --runtime agy --review --brief "$BRIEF" --workdir "$PROMPT_FIXTURE" >/dev/null 2>&1
+TIMEOUT=0 "$DW" --runtime agy --review --brief "$BRIEF" --workdir "$TMP" >/dev/null 2>&1
 grep -qF -- "--model $AGY_MODEL_REVIEW_DEFAULT" <<<"$(agy_exec_args)" || fail "agy --review missing/!= review model (got: $(cat "$AGY_ARGS_FILE"))"
 echo "test 6 (agy review model default) PASS"
 
@@ -96,7 +92,7 @@ grep -qF -- "--model $AGY_MODEL_CODING_DEFAULT" <<<"$(agy_exec_args)" || fail "a
 echo "test 7 (agy edit model default) PASS"
 
 # 8. explicit --model overrides.
-TIMEOUT=0 "$DW" --runtime agy --review --model "GPT-OSS 120B (Medium)" --brief "$BRIEF" --workdir "$PROMPT_FIXTURE" >/dev/null 2>&1
+TIMEOUT=0 "$DW" --runtime agy --review --model "GPT-OSS 120B (Medium)" --brief "$BRIEF" --workdir "$TMP" >/dev/null 2>&1
 grep -qF -- "--model GPT-OSS 120B (Medium)" <<<"$(agy_exec_args)" || fail "--model override ignored"
 echo "test 8 (--model override) PASS"
 
@@ -591,9 +587,8 @@ grep -q "DO NOT write any files to disk" "$AGY_STDIN_FILE" && fail "hermetic rev
 grep -q "If a tool, command, or capability your method requires is unavailable or denied" "$AGY_STDIN_FILE" || fail "hermetic review preamble missing degradation clause"
 echo "test 17 (agy review runs hermetically) PASS"
 
-# 18. Unsuitable private-clone targets warn and still return read-only output.
-R18="$TMP/non-hermetic-review"; make_git_repo "$R18"
-git -C "$R18" config filter.fixture.clean cat
+# 18. Non-git review targets run non-hermetically but warn and still return output.
+R18="$TMP/non-git-review"; mkdir -p "$R18"
 cat > "$TMP/bin/agy" <<'STUB'
 #!/usr/bin/env bash
 # PERSONA_ROSTER_STUB
@@ -615,13 +610,25 @@ chmod +x "$TMP/bin/agy"
 TIMEOUT=0 "$DW" --runtime agy --review --brief "$BRIEF" --workdir "$R18" >"$TMP/t18.out" 2>"$TMP/t18.err"
 rc=$?
 [ "$rc" -eq 0 ] || fail "non-git review should return rc 0, got $rc"
-grep -q "unsuitable for a private clone" "$TMP/t18.err" || fail "non-git review did not print non-hermetic warning"
+grep -q "not a git work tree" "$TMP/t18.err" || fail "non-git review did not print non-hermetic warning"
 grep -q "non-hermetically and therefore read-only" "$TMP/t18.err" || fail "non-git review did not print the execution-method read-only warning"
 grep -qF -- "--dangerously-skip-permissions" <<<"$(agy_exec_args)" && fail "non-hermetic agy review bypassed command permissions"
 grep -q "Do NOT edit, create, or delete any files" "$AGY_STDIN_FILE" || fail "non-hermetic review preamble lost the original prohibition"
 grep -q "If a tool, command, or capability your method requires is unavailable or denied" "$AGY_STDIN_FILE" || fail "non-hermetic review preamble missing degradation clause"
 [ "$(wc -c < "$TMP/t18.out" | tr -d ' ')" -ge 1200 ] || fail "non-git review did not return substantive output"
 echo "test 18 (agy non-git review warns and returns output) PASS"
+
+# 18b. A Git repo is required here: a configured filter makes it unsuitable
+# for a private clone, exercising the separate live-workspace fallback.
+R18B="$TMP/non-hermetic-review"; make_git_repo "$R18B"
+git -C "$R18B" config filter.fixture.clean cat
+TIMEOUT=0 "$DW" --runtime agy --review --brief "$BRIEF" --workdir "$R18B" >"$TMP/t18b.out" 2>"$TMP/t18b.err"
+rc=$?
+[ "$rc" -eq 0 ] || fail "unsuitable private-clone review should return rc 0, got $rc"
+grep -q "unsuitable for a private clone" "$TMP/t18b.err" || fail "unsuitable repo did not print private-clone warning"
+grep -q "non-hermetically and therefore read-only" "$TMP/t18b.err" || fail "unsuitable repo did not print read-only warning"
+[ "$(wc -c < "$TMP/t18b.out" | tr -d ' ')" -ge 1200 ] || fail "unsuitable repo review did not return substantive output"
+echo "test 18b (agy unsuitable private-clone review warns and returns output) PASS"
 
 # 19. Missing agy auth still returns rc 7, distinct from short-review rc 8.
 R19="$TMP/repo19"; make_git_repo "$R19"

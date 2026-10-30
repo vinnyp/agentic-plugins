@@ -24,7 +24,9 @@ not select a partial gate. Use the full runner as the build gate.
 private global Git config; origin's fetch and push URLs point at a disabled path.
 Other remotes and the operator's credential helper remain reachable, so the drift check,
 not the clone, detects source changes. Unsuitable repos fall back to the live
-workspace with permissions enforced. Every runtime's review checks source state before and after;
+workspace with permissions enforced; non-git directories are also supported with a warning.
+Review output opens read-write to avoid blocking if a FIFO replaces the checked path;
+each attempt truncates output before capture. Every runtime's review checks source state before and after;
 critical drift exits 10 and stops the review gate. Inspect and restore the named changes before
 committing, then re-run. See [the command reference](docs/commands.md#dispatch-worker).
 
