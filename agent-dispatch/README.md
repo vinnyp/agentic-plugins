@@ -260,7 +260,10 @@ Review launch-time git setup fails closed with exit 3 before launching a reviewe
 `DISPATCH_CLONE_TIMEOUT_SECS` bounds clone creation (default 600 seconds);
 `DISPATCH_SNAPSHOT_TIMEOUT_SECS` bounds the launch probe and state checks.
 
-Review launch refuses when bounded setup or the agy dirty-status probe fails.
+Review launch refuses when bounded setup fails or the agy dirty-status probe fails
+inside a Git work tree. Non-Git agy targets continue to run non-hermetically.
+Agy review output replaces existing caller output and timeout attempts; capture
+descriptors are closed in reviewer children. Snapshot failures retain their diagnostic reason.
 Agy authentication refusals retain exit 7 before the dirty-status refusal.
 Drift diagnostics retain every change even when the reviewer removes its state
 directory, and omit empty change-list lines.
