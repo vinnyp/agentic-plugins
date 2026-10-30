@@ -102,16 +102,16 @@ assert_rc 0 "$rc" 'custom pane size'
 stop_session dcs_size
 echo 'PASS: custom pane size'
 
-# Give the new session a larger local value before the driver reads it.
-tmux new-session -d -s dcs_high_limit_host cat
-tmux set-hook -g after-new-session 'set-option -t =dcs_high_limit: history-limit 60000'
+# Give the new session a larger inherited value before the driver reads it.
+tmux new-session -d -s dcs_high_limit_host cat || fail 'history-limit host session'
+tmux set-option -g history-limit 60000 || fail 'set global history limit'
 write_inline 10
 run_case claude dcs_high_limit
 assert_rc 0 "$rc" 'larger session history limit'
 agent_pane="$(tmux display -p -t '=dcs_high_limit:' '#{pane_id}')"
 [[ "$(tmux display -p -t "$agent_pane" '#{history_limit}')" == '60000' ]] || fail 'larger agent pane history limit was lowered'
 stop_session dcs_high_limit
-tmux set-hook -gu after-new-session
+tmux set-option -gu history-limit || fail 'restore global history limit'
 stop_session dcs_high_limit_host
 echo 'PASS: larger session history limit preserved'
 

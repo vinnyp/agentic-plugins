@@ -918,7 +918,7 @@ permission prompt (claude/agy: `--dangerously-skip-permissions`; codex:
 `--dangerously-bypass-approvals-and-sandbox`) and best-effort accepts agy's folder-trust prompt.
 Env: `DCS_BOOT_MAX` (60), `DCS_SETTLE_MAX` (240), `DCS_STABLE` (3), `DCS_INTERVAL` (2),
 `DCS_COLS` (200), `DCS_ROWS` (200), `DCS_KILL=1` to kill the session after printing,
-`DCS_DEBUG=1` to print the alternate-screen state after boot. The agent pane history limit is at least 50000 lines;
+`DCS_DEBUG=1` to print the alternate-screen state after boot. The agent pane history limit is at least 50000 lines, preserving larger local or inherited limits;
 codex launches with `--no-alt-screen` and Claude Code with `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1`.
 Codex daemon-settings, update-choice, model-offer, and folder-trust screens, plus Claude folder-trust and bypass-permissions screens, stop before the prompt is pasted; the session stays up
 for a human to answer unless `DCS_KILL=1`.
