@@ -46,18 +46,45 @@ def run(runtime='codex', path=None, extra=None, cwd=None):
 def copy_worker(label, transform):
     dest=tmp/label; dest.mkdir(); shutil.copytree(root/'lib',dest/'lib')
     for name in ['review-pin.sh','agy-auth-probe.sh']: shutil.copy(root/name,dest/name)
-    path=dest/'dispatch-worker'; path.write_text(transform(worker.read_text())); path.chmod(0o755); return path
+    source=worker.read_text(); patched=transform(source)
+    assert patched != source, label+' patch did not change worker'
+    path=dest/'dispatch-worker'; path.write_text(patched); path.chmod(0o755); return path
 # The git failure must be handled before auth or runtime launch.
 stub('git', 'case " $* " in *" status "*) exit 128;; esac\nexec '+real_git+' "$@"')
 rc,err=run('agy'); check(rc==3 and not (tmp/'launched').exists() and 'dispatch-worker:' in err and 'dirty' in err, 'dirty status 128 must refuse launch with exit 3')
 (bin/'git').unlink()
 for label, transform, text in [
- ('probe-failure',lambda s:s.replace('review_launch_probe() {','review_launch_probe() {\n  return 3'), 'launch-time git setup could not complete'),
+ ('probe-failure',lambda s:s.replace('review_launch_probe() {','review_launch_probe() {\n  return 3'), 'dispatch-worker: launch-time git setup could not complete; no reviewer was launched (DISPATCH_SNAPSHOT_TIMEOUT_SECS)'),
  ('private-failure',lambda s:s.replace('review_private_config() (','review_private_config() (\n  return 3'), 'dispatch-worker: could not build the private global git config')]:
-    rc,err=run('agy',copy_worker(label,transform)); check(rc==3 and text in err and not (tmp/'launched').exists(),label+' must refuse with diagnostic')
+    rc,err=run('codex' if label=='probe-failure' else 'agy',copy_worker(label,transform)); check(rc==3 and text in err.splitlines() and not (tmp/'launched').exists(),label+' must refuse with diagnostic')
 stub('git', 'case "${1:-}" in clone) sleep 10;; esac\nexec '+real_git+' "$@"')
 rc,err=run('agy',extra={'DISPATCH_CLONE_TIMEOUT_SECS':'1'}); check(rc==3 and 'launch-time git setup timed out' in err and 'DISPATCH_CLONE_TIMEOUT_SECS' in err,'clone timeout launch refusal must name clone limit')
 (bin/'git').unlink()
+# Output must replace caller content and timed-out attempts on descriptor-based writers.
+original=(bin/'agy').read_text()
+outfile=tmp/'review.md'
+outfile.write_text('Blocker: src/x.sh:1 STALE '+('old '*600))
+stub('agy', 'case "${1:-}" in models) printf "%s\\tModel\\n" "$AGY_MODEL_REVIEW_DEFAULT"; exit 0;; esac\ncat >/dev/null')
+rc,err=run('agy',extra={'REVIEW_OUTFILE':str(outfile),'DISPATCH_MIN_REVIEW_BYTES':'1200'})
+check(rc==8 and outfile.read_text()=='', 'empty agy review must truncate stale caller output and exit 8')
+outfile.write_text('')
+retry='Minor: src/retry.sh:2 RETRY-BODY\n'
+stub('agy', 'case "${1:-}" in models) printf "%s\\tModel\\n" "$AGY_MODEL_REVIEW_DEFAULT"; exit 0;; esac\ncat >/dev/null\nif [ ! -f "$TMPDIR/attempt" ]; then touch "$TMPDIR/attempt"; printf FIRST-ATTEMPT; exit 124; fi\nprintf "Minor: src/retry.sh:2 RETRY-BODY\\n"')
+rc,err=run('agy',extra={'REVIEW_OUTFILE':str(outfile),'DISPATCH_MIN_REVIEW_BYTES':'1','DISPATCH_REVIEW_REQUIRE_EVIDENCE':'1'})
+check(rc==0 and outfile.read_text()==retry and '13B written before the kill' in err, 'agy retry must replace first attempt and validate only retry body: '+str(rc)+' '+repr(outfile.read_text()[:100])+' '+err)
+(bin/'agy').write_text(original)
+non_git=tmp/'non-git'; non_git.mkdir()
+rc,err=run('agy',cwd=non_git)
+check(rc==0 and 'non-hermetically' in err, 'non-git agy review must remain supported')
+path=copy_worker('before-failure',lambda s:s.replace('review_state_snapshot_bounded() {','review_state_snapshot_bounded() {\n  if [ "$REVIEW_RUNTIME_LAUNCHED" = 0 ]; then return 3; fi'))
+rc,err=run('agy',path)
+check(rc==0 and 'skipped(snapshot-failed)' in err, 'before snapshot failure must preserve snapshot-failed reason')
+for runtime in ['agy','codex']:
+    original=(bin/runtime).read_text()
+    stub(runtime, 'case "${1:-}" in models) printf "%s\\tModel\\n" "$AGY_MODEL_REVIEW_DEFAULT"; exit 0;; esac\ncat >/dev/null\nfor fd in 40 41 42; do if [ -e /dev/fd/$fd ]; then echo "inherited descriptor $fd" >&2; exit 97; fi; done\nprintf "Minor: src/main.sh:1 evidence\\n"')
+    rc,err=run(runtime)
+    check(rc==0 and 'inherited descriptor' not in err, runtime+' must not inherit capture descriptors')
+    (bin/runtime).write_text(original)
 # Exact source identity survives trailing whitespace and embedded tag-like lines.
 space=tmp/'repo '; shutil.copytree(repo,space)
 path=copy_worker('path-check', lambda s:s.replace('review_state_before_runtime() {','review_state_before_runtime() {\n  [ "$REPO_STATE_SRC" = "$WORKDIR" ] || { echo "source identity lost: <$REPO_STATE_SRC> versus <$WORKDIR>" >&2; return 91; }'))

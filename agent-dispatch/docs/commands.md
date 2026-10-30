@@ -788,8 +788,8 @@ concurrent dispatch can't move the code out from under the reviewer. The marker 
 while a pin is active, naming the pinned SHA, label, age, and the release command.
 `dispatch-worker --review` pins automatically and releases on exit. Its resolved-marker
 interface (`pin --marker ... --sha ...`) writes without running Git and records the
-invoking script PID. An agy review refuses with exit `3` if its dirty-status probe fails,
-including a target outside a Git repository.
+invoking script PID. An agy review refuses with exit `3` if its dirty-status probe fails inside a Git work tree.
+Targets outside Git repositories continue to run non-hermetically.
 
 Pins expire: `DISPATCH_REVIEW_PIN_TTL_SECS` (default 14400 = 4h). A stale pin is removed on the
 next `status`/`pin`, so a SIGKILLed review does not wedge the repo forever. Exit codes: `0` ok,

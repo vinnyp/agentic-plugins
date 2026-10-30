@@ -256,13 +256,8 @@ mkdir "$TMP/non-git"
 for runtime in codex agy; do
   actual=0
   TIMEOUT=0 "$DW" --runtime "$runtime" --review --brief "$BRIEF" --workdir "$TMP/non-git" > "$TMP/cfg.out" 2> "$TMP/cfg.err" || actual=$?
-  if [ "$runtime" = agy ]; then
-    [ "$actual" -eq 3 ] || fail "agy non-git dirty-status probe should refuse: $actual"
-    grep -qF 'dirty status probe failed' "$TMP/cfg.err" || fail 'agy non-git dirty-status diagnostic absent'
-  else
-    [ "$actual" -eq 0 ] || fail "$runtime non-git review failed: $actual"
-    grep -qF 'DISPATCH_REVIEW_STATE=skipped(not-a-git-repo)' "$TMP/cfg.err" || fail "$runtime non-git state absent"
-  fi
+  [ "$actual" -eq 0 ] || fail "$runtime non-git review failed: $actual"
+  grep -qF 'DISPATCH_REVIEW_STATE=skipped(not-a-git-repo)' "$TMP/cfg.err" || fail "$runtime non-git state absent"
 done
 "$DW" --help > "$TMP/help"
 grep -qF "10  --review: the source repo's config" "$TMP/help" || fail 'help missing exit 10'
