@@ -206,6 +206,10 @@ placeholder_window="$(tmux new-session -d -P -F '#{window_id}' -x "$pane_cols" -
   -s "$sess" -c "$workdir" 'cat')"
 session_created=1
 history_limit="$(tmux show-option -v -t "=$sess:" history-limit)"
+if [[ -z "$history_limit" ]]; then
+  history_limit="$(tmux show-option -gv history-limit)"
+fi
+[[ "$history_limit" =~ ^[0-9]+$ ]] || history_limit=0
 if (( history_limit < 50000 )); then
   tmux set-option -t "=$sess:" history-limit 50000
 fi
