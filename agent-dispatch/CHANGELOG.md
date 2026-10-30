@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.9.2](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.9.1...agent-dispatch-v1.9.2) (2026-10-30)
+
+
+### Bug Fixes
+
+* **agent-dispatch:** bound review launch-time git and keep repo-state verdicts in memory ([#79](https://github.com/vinnyp/agentic-plugins/issues/79)) ([2503510](https://github.com/vinnyp/agentic-plugins/commit/2503510ab0df65cd3fab3ee984ccaf5f1b519f92))
+* **agent-dispatch:** keep inherited tmux history limits; reap leaked test groups ([#77](https://github.com/vinnyp/agentic-plugins/issues/77)) ([0445541](https://github.com/vinnyp/agentic-plugins/commit/0445541bedc642e7984429ddb170e26dd282910b))
+
 ## [1.9.1](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.9.0...agent-dispatch-v1.9.1) (2026-10-29)
 
 
