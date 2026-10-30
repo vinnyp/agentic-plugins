@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+. "${BASH_SOURCE[0]%/*}/lib/timeout-bin.sh"
 # Hermetic probe and preflight coverage; never invokes a provider binary.
 set -uo pipefail
 BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -41,7 +42,8 @@ case "$BEHAVIOR" in
 esac
 STUB
 chmod +x "$TMP/bin/codex"
-REAL_TIMEOUT="$(command -v timeout || command -v gtimeout)"
+REAL_TIMEOUT=$(dispatch_timeout_bin) || { echo "FAIL: no usable timer" >&2; exit 1; }
+REAL_TIMEOUT=$(command -v "$REAL_TIMEOUT") || exit 1
 export REAL_TIMEOUT
 cat > "$TMP/bin/timeout" <<'SHIM'
 #!/usr/bin/env bash
@@ -187,13 +189,18 @@ done
 # A private PATH exposes exactly one digest tool, and no codex binary.
 mkdir -p "$TMP/isolated-bin" "$HOME/.local/bin"
 cp "$TMP/bin/codex" "$HOME/.local/bin/codex"
-for utility in bash cat sed mkdir stat id find mktemp git grep tail awk head tr dirname readlink rm; do
+for utility in bash cat sed mkdir stat id find mktemp git grep tail awk head tr dirname readlink rm perl; do
   ln -s "$(command -v "$utility")" "$TMP/isolated-bin/$utility"
 done
 ln -s "$TMP/bin/timeout" "$TMP/isolated-bin/timeout"
 export BEHAVIOR=copy
 for digest_tool in shasum sha256sum; do
-  digest_path="$(command -v "$digest_tool")"
+  digest_path="$(command -v "$digest_tool" || true)"
+  if [ -z "$digest_path" ]; then
+    digest_path="$TMP/sha256sum"
+    printf '#!/bin/bash\nexec "%s" -a 256 "$@"\n' "$(command -v shasum)" > "$digest_path"
+    chmod +x "$digest_path"
+  fi
   ln -s "$digest_path" "$TMP/isolated-bin/$digest_tool"
   PATH="$TMP/isolated-bin" bash "$BIN_DIR/coding-preflight.sh" codex > "$TMP/out" 2> "$TMP/err"
   rc=$?

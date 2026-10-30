@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+. "${BASH_SOURCE[0]%/*}/lib/timeout-bin.sh"
 # Source-able agy prompt-form version-drift probe. Defines agy_print_form_probe only.
 #
 # agy 1.1.22 rejects both `agy exec - < prompt` and
@@ -29,12 +30,10 @@ agy_print_form_probe() {
     return 2
   fi
 
-  if command -v timeout >/dev/null 2>&1; then
-    timeout_bin="timeout"
-  elif command -v gtimeout >/dev/null 2>&1; then
-    timeout_bin="gtimeout"
+  if timeout_bin=$(dispatch_timeout_bin); then
+    :
   else
-    printf '%s\n' "agy prompt-form probe: no timeout/gtimeout on PATH — SKIPPING (cannot bound the live prompt-form probe; install coreutils)" >&2
+    printf '%s\n' "agy prompt-form probe: no timeout/gtimeout on PATH — SKIPPING (cannot bound the live prompt-form probe; install coreutils); no perl helper was usable either" >&2
     return 2
   fi
 

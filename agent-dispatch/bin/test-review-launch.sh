@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+. "${BASH_SOURCE[0]%/*}/lib/timeout-bin.sh"
 set -eu
 SELF_DIR=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=lib/test-env-reset.sh
@@ -16,7 +17,7 @@ for runtime in codex agy claude; do
   chmod +x "$TASK_TMP/bin/$runtime"
 done
 REAL_GIT=$(command -v git)
-TIMER=$(command -v timeout || command -v gtimeout)
+TIMER=$(dispatch_timeout_bin) || { echo "FAIL: no usable timer" >&2; exit 1; }
 export LAUNCH_MARKER="$TASK_TMP/launched"
 export REAL_GIT RUN_ID="review-launch-$$-$RANDOM" RUN_PID_FILE="$TASK_TMP/pids"
 : > "$RUN_PID_FILE"

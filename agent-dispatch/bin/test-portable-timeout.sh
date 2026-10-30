@@ -26,11 +26,19 @@ export BASH_BIN
 # Independent outer guard, including for a timer that never forwards signals.
 cat > "$TASK_TMP/guard" <<'PERL'
 use strict;
-use POSIX qw(:sys_wait_h setpgid);
+use POSIX qw(:sys_wait_h);
 use Time::HiRes qw(time sleep);
 my $pid = fork();
 die "fork: $!" unless defined $pid;
-if (!$pid) { setpgid(0, 0); exec @ARGV; POSIX::_exit(125); }
+if (!$pid) {
+    exec $ENV{BASH_BIN}, '-c', q{
+      perl -e '$SIG{INT}=$SIG{QUIT}="DEFAULT"; exec @ARGV' "$@" <&0 &
+      timer=$!
+      echo "$timer" > "$TASK_TMP/timer-pid"
+      wait "$timer"
+    }, '--', @ARGV;
+    POSIX::_exit(125);
+}
 my $end = time() + 7;
 my $sent = 0;
 while (1) {
@@ -38,12 +46,17 @@ while (1) {
         exit(WIFSIGNALED($?) ? 128 + WTERMSIG($?) : WEXITSTATUS($?));
     }
     if ($ENV{SEND_SIGNAL} && !$sent && -f "$ENV{TASK_TMP}/ready") {
-        kill $ENV{SEND_SIGNAL}, $pid;
+        open my $fh, '<', "$ENV{TASK_TMP}/timer-pid" or die $!;
+        my $timer = <$fh>; chomp $timer;
+        kill $ENV{SEND_SIGNAL}, $timer;
         $sent = 1;
     }
     if (time() >= $end) {
         kill 'KILL', $pid;
-        kill 'KILL', -$pid;
+        if (open my $fh, '<', "$ENV{TASK_TMP}/timer-pid") {
+            my $timer = <$fh>; chomp $timer;
+            kill 'KILL', -$timer;
+        }
         waitpid($pid, 0);
         exit 125;
     }
@@ -89,7 +102,7 @@ fixture=("$BASH_BIN" -c 'exec -a "tagged-$RUN_ID" "$BASH_BIN" -c ". \"\$TASK_TMP
 check() {
   local name=$1 expected=$2 rc=0
   shift 2
-  rm -f "$TASK_TMP/ready" "$TASK_TMP/desc-ready" "$TASK_TMP/reached"
+  rm -f "$TASK_TMP/ready" "$TASK_TMP/desc-ready" "$TASK_TMP/reached" "$TASK_TMP/timer-pid"
   "$PERL" "$TASK_TMP/guard" "$@" > "$TASK_TMP/out" 2> "$TASK_TMP/err" || rc=$?
   if [ "$rc" != "$expected" ]; then
     cat "$TASK_TMP/err" >&2
@@ -111,6 +124,24 @@ assert_gone() {
 }
 conformance() {
   local timer=$1 signal
+  check group-leadership 0 "$timer" 3 "$BASH_BIN" -c '
+    while [ ! -s "$TASK_TMP/timer-pid" ]; do sleep .02; done
+    group=$(ps -p $$ -o pgid= | tr -d " ")
+    [ "$group" = "$(cat "$TASK_TMP/timer-pid")" ]'
+  check stopped-child 124 "$timer" 1 "$BASH_BIN" -c 'kill -STOP $$'
+  check sigchld-entry 7 "$PERL" -e '$SIG{CHLD}="IGNORE"; exec @ARGV' "$timer" 3 "$BASH_BIN" -c 'exit 7'
+  check no-rearm 137 "$BASH_BIN" -c '
+    "$@" <&0 &
+    timer=$!
+    while [ ! -f "$TASK_TMP/ready" ]; do sleep .02; done
+    start=$SECONDS
+    kill -TERM "$timer"
+    sleep 2
+    kill -TERM "$timer"
+    rc=0; wait "$timer" || rc=$?
+    [ "$((SECONDS - start))" -lt 5 ] || exit 125
+    exit "$rc"
+  ' -- "$timer" -k 3 0 "${fixture[@]}" ignore
   check exit-zero 0 "$timer" 3 "$BASH_BIN" -c 'exit 0'
   check exit-seven 7 "$timer" 3 "$BASH_BIN" -c 'exit 7'
   check expiry 124 "$timer" .2 "${fixture[@]}" catch
@@ -120,7 +151,9 @@ conformance() {
   SEND_SIGNAL=TERM check forwarded-five 5 "$timer" 3 "${fixture[@]}" five
   SEND_SIGNAL=TERM check forwarded-death 143 "$timer" 3 "${fixture[@]}" plain
   check not-executable 126 "$timer" 3 "$TASK_TMP/not-executable"
+  [ "$(wc -l < "$TASK_TMP/err" | tr -d ' ')" = 1 ] || { echo "FAIL: duplicate exec diagnostic"; exit 1; }
   check not-found 127 "$timer" 3 "$TASK_TMP/absent"
+  [ "$(wc -l < "$TASK_TMP/err" | tr -d ' ')" = 1 ] || { echo "FAIL: duplicate exec diagnostic"; exit 1; }
   check bad-duration 125 "$timer" bogus true
   check unknown-option 125 "$timer" --bogus 3 true
   check missing-command 125 "$timer" 3

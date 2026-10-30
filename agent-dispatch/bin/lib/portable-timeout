@@ -1,4 +1,5 @@
 #!/usr/bin/env perl
+# Portable process-group timer following GNU timeout's default mode.
 use strict;
 use warnings;
 use POSIX qw(:sys_wait_h :signal_h setpgid);
@@ -36,6 +37,7 @@ for my $signal (@signals) {
 $SIG{TTIN} = $SIG{TTOU} = 'IGNORE';
 # A failed group setup must never expose the caller's process group.
 setpgid(0, 0);
+$SIG{CHLD} = 'DEFAULT';
 my $child = fork();
 if (!defined $child) {
     print STDERR "portable-timeout: fork: $!\n";
@@ -44,6 +46,7 @@ if (!defined $child) {
 if (!$child) {
     $SIG{$_} = 'DEFAULT' for (@signals, qw(TTIN TTOU));
     sigprocmask(SIG_SETMASK, $previous);
+    no warnings 'exec';
     exec { $cmd } $cmd, @args or do {
         my $status = $!{ENOENT} ? 127 : 126;
         print STDERR "portable-timeout: exec $cmd: $!\n";

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+. "${BASH_SOURCE[0]%/*}/lib/timeout-bin.sh"
 # shellcheck disable=SC2181
 # test-mutation-verify.sh — TDD suite for mutation-verify.sh.
 #
@@ -601,7 +602,7 @@ echo "test bad args -> exit 2 with usage PASS"
 # loop spun forever. Wrapped in `timeout 15` so a regression fails loudly
 # (timeout's 124) instead of hanging the whole suite.
 # ---------------------------------------------------------------------------
-timeout 15 bash "$MV" --file >"$TMP/out_trailing_flag" 2>&1
+"$(dispatch_timeout_bin)" 15 bash "$MV" --file >"$TMP/out_trailing_flag" 2>&1
 rc=$?
 [ "$rc" -ne 124 ] || { cat "$TMP/out_trailing_flag"; fail "value-less trailing --file: HUNG (timeout 124) — BLOCKER 2 regression"; }
 [ "$rc" -eq 2 ] || { cat "$TMP/out_trailing_flag"; fail "value-less trailing --file: expected exit 2, got $rc"; }

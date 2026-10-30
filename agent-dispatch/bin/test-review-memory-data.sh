@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+. "${BASH_SOURCE[0]%/*}/lib/timeout-bin.sh"
 set -eu
 SELF_DIR=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=lib/test-env-reset.sh
@@ -11,7 +12,7 @@ mkdir "$TASK_TMP/bin" "$TASK_TMP/state" "$TASK_TMP/repo"
 git -C "$TASK_TMP/repo" init -q
 git -C "$TASK_TMP/repo" -c user.name=test -c user.email=test@example.invalid commit -q --allow-empty -m initial
 printf review > "$TASK_TMP/brief"
-TIMER=$(command -v timeout || command -v gtimeout)
+TIMER=$(dispatch_timeout_bin) || { echo "FAIL: no usable timer" >&2; exit 1; }
 export SOURCE_REPO="$TASK_TMP/repo" REAL_MEMORY_GIT
 REAL_MEMORY_GIT=$(command -v git)
 cat > "$TASK_TMP/bin/git" <<'STUB'

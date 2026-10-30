@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+. "${BASH_SOURCE[0]%/*}/lib/timeout-bin.sh"
 SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=lib/test-dispatch-worker-lib.sh
 . "$SELF_DIR/lib/test-dispatch-worker-lib.sh"
@@ -393,17 +394,13 @@ esac
 printf 'DISPATCHED\n'
 STUB
 chmod +x "$TMP/bin/agy"
-timeout_cmd="$(command -v timeout || command -v gtimeout || true)"
-if [ -n "$timeout_cmd" ]; then
+timeout_cmd=$(dispatch_timeout_bin) || { echo "FAIL: no usable timer" >&2; exit 1; }
   set +e
   ( sleep 10 ) | "$timeout_cmd" 6s env TIMEOUT=0 "$DW" --runtime agy --agent peer-security-reviewer --brief "$BRIEF" --workdir /repo/x >"$TMP/t41b.out" 2>"$TMP/t41b.err"
   rc=$?
   set -e
   [ "$rc" -ne 124 ] || fail "agy persona roster probe hung on inherited stdin"
   [ "$rc" -eq 2 ] || fail "empty detached roster should fail closed with rc 2, got rc $rc"
-else
-  fail "test 41b requires timeout or gtimeout"
-fi
 echo "test 41b (agy persona roster probe detaches stdin) PASS"
 
 install_cfg_agy_stub

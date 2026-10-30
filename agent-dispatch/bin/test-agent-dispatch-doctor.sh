@@ -452,13 +452,14 @@ else
 fi
 
 # A partial installation must diagnose every required review helper.
-for missing_helper in repo-state.sh review-clone.sh; do
+for missing_helper in repo-state.sh review-clone.sh timeout-bin.sh; do
   fake_install="$TMP/missing-$missing_helper"
   mkdir -p "$fake_install/lib"
   fake_install="$(cd "$fake_install" && pwd -P)"
   cp "$DOCTOR_BIN" "$fake_install/agent-dispatch-doctor"
+  cp "$(dirname "$DOCTOR_BIN")/lib/portable-timeout" "$(dirname "$DOCTOR_BIN")/lib/portable-stat.sh" "$fake_install/lib/"
   cp "$(dirname "$DOCTOR_BIN")/lib/agy-models.sh" "$fake_install/lib/agy-models.sh"
-  for helper in repo-state.sh review-clone.sh; do
+  for helper in repo-state.sh review-clone.sh timeout-bin.sh; do
     if [ "$helper" != "$missing_helper" ]; then
       cp "$(dirname "$DOCTOR_BIN")/lib/$helper" "$fake_install/lib/$helper"
     fi
@@ -471,6 +472,16 @@ for missing_helper in repo-state.sh review-clone.sh; do
     fail "missing $missing_helper was not diagnosed: $missing_out"
   fi
 done
+
+cp "$(dirname "$DOCTOR_BIN")/lib/timeout-bin.sh" "$fake_install/lib/"
+chmod -x "$fake_install/lib/portable-timeout"
+missing_rc=0
+missing_out="$(bash "$fake_install/agent-dispatch-doctor" 2>&1)" || missing_rc=$?
+if [ "$missing_rc" = 1 ] && printf '%s\n' "$missing_out" | grep -qF 'FAIL broken install: helper is not executable'; then
+  pass 'nonexecutable timer helper fails installation check'
+else
+  fail "nonexecutable timer helper was not diagnosed: $missing_out"
+fi
 
 # ---------------------------------------------------------------------------
 # Summary

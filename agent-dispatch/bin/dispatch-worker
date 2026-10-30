@@ -37,6 +37,8 @@ done
 SCRIPT_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 [ -r "$SCRIPT_DIR/lib/agy-models.sh" ] || { echo "dispatch-worker: broken install: cannot read $SCRIPT_DIR/lib/agy-models.sh" >&2; exit 3; }
 # shellcheck disable=SC1091
+[ -r "$SCRIPT_DIR/lib/timeout-bin.sh" ] || { echo "dispatch-worker: broken install: cannot read $SCRIPT_DIR/lib/timeout-bin.sh" >&2; exit 3; }
+. "$SCRIPT_DIR/lib/timeout-bin.sh"
 . "$SCRIPT_DIR/lib/agy-models.sh"
 [ -r "$SCRIPT_DIR/lib/review-clone.sh" ] || { echo "dispatch-worker: broken install: cannot read $SCRIPT_DIR/lib/review-clone.sh" >&2; exit 3; }
 # shellcheck disable=SC1091
@@ -225,7 +227,7 @@ from a real build failure and NOT retry it as a build):
                      \$D/_coding-result.json so agy doesn't write it to a sandbox cwd the
                      orchestrator can't find. Env-var: WORKDIR. Default: the current dir.
   --timeout T        External wall-clock bound on a peer-agent exec (codex/agy),
-                     passed to coreutils \`timeout\` (e.g. 15m, 600s). A peer agent's
+                     passed to the external timer (e.g. 15m, 600s). A peer agent's
                      OWN --print-timeout is NOT a trustworthy bound (agy 2026-05-31:
                      hung 6.5h past a 15m setting, retry hung past 8m), so the
                      dispatch path imposes an EXTERNAL one. A timeout kill surfaces
@@ -406,25 +408,40 @@ verify_required_deps() {
 # run_with_timeout — impose an EXTERNAL wall-clock bound on a peer-agent exec.
 # NEVER trust a peer agent's own --print-timeout: agy 2026-05-31 hung 6.5h past a
 # 15m setting (and a retry hung past 8m) with 0 bytes of output. The dispatch path
-# must own the bound. Uses coreutils `timeout -k $KILL_AFTER $TIMEOUT` when present;
-# `gtimeout` on macOS-with-coreutils; degrades to a raw call (with a warning) only
-# when no timeout binary is available. A timeout kill returns 124, which the caller
+# must own the bound. Discovers a GNU timer or the portable Perl helper;
+# degrades to a raw call (with a warning) only when neither is usable. A timeout kill returns 124, which the caller
 # surfaces as a blocked phase and which the post-dispatch dep gate skips (rc != 0).
 run_with_timeout() {
   local t="$TIMEOUT" tcmd=""
   if [ "$t" = "0" ] || [ "$t" = "none" ] || [ -z "$t" ]; then
     "$@"; return $?
   fi
-  if command -v timeout >/dev/null 2>&1; then
-    tcmd="timeout"
-  elif command -v gtimeout >/dev/null 2>&1; then
-    tcmd="gtimeout"
+  if tcmd=$(dispatch_timeout_bin); then
+    :
   else
-    echo "dispatch-worker: no 'timeout'/'gtimeout' on PATH — running peer agent UNBOUNDED (a hang will not be auto-killed; install coreutils)" >&2
+    echo "dispatch-worker: no 'timeout'/'gtimeout' on PATH — running peer agent UNBOUNDED (a hang will not be auto-killed; install coreutils); no perl helper was usable either" >&2
     "$@"; return $?
   fi
-  "$tcmd" -k "$KILL_AFTER" "$t" "$@"
-  local rc=$?
+  local timer_pid rc=0 wait_rc=0 caught=0 old_int old_term old_hup
+  old_int=$(trap -p INT); old_term=$(trap -p TERM); old_hup=$(trap -p HUP)
+  "$tcmd" -k "$KILL_AFTER" "$t" "$@" <&0 &
+  timer_pid=$!
+  # Background jobs may ignore INT; TERM always forwards and arms the kill stage.
+  trap 'caught=130; kill -TERM "$timer_pid" 2>/dev/null || :' INT
+  trap 'caught=143; kill -TERM "$timer_pid" 2>/dev/null || :' TERM
+  trap 'caught=129; kill -TERM "$timer_pid" 2>/dev/null || :' HUP
+  while :; do
+    wait_rc=0
+    wait "$timer_pid" || wait_rc=$?
+    if kill -0 "$timer_pid" 2>/dev/null; then continue; fi
+    rc=$wait_rc
+    break
+  done
+  if [ "$caught" -ne 0 ]; then exit "$caught"; fi
+  trap - INT TERM HUP
+  [ -z "$old_int" ] || eval "$old_int"
+  [ -z "$old_term" ] || eval "$old_term"
+  [ -z "$old_hup" ] || eval "$old_hup"
   if [ "$rc" -eq 124 ]; then
     echo "dispatch-worker: peer agent exceeded the external $t bound and was killed — treat as a BLOCKED phase, not a result (the agent's own --print-timeout is not a trustworthy bound)" >&2
   fi
@@ -787,16 +804,12 @@ dispatch_agy() {
   echo "dispatch-worker: agy model: $agy_model ($agy_role, $agy_source)" >&2
   if [ -n "$AGENT" ]; then
     local agent_roster agent_rc=0 roster_timeout=""
-    if command -v timeout >/dev/null 2>&1; then
-      roster_timeout="timeout"
-    elif command -v gtimeout >/dev/null 2>&1; then
-      roster_timeout="gtimeout"
-    fi
+    roster_timeout=$(dispatch_timeout_bin) || roster_timeout=""
     set +e
     if [ -n "$roster_timeout" ]; then
       agent_roster="$("$roster_timeout" 5s agy agent </dev/null 2>&1)"
     else
-      echo "dispatch-worker: no timeout binary — agy persona roster probe is unbounded" >&2
+      echo "dispatch-worker: no timeout binary — agy persona roster probe is unbounded; no perl helper was usable either" >&2
       agent_roster="$(agy agent </dev/null 2>&1)"
     fi
     agent_rc=$?

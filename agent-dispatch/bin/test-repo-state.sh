@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+. "${BASH_SOURCE[0]%/*}/lib/timeout-bin.sh"
 set -euo pipefail
 BIN=$(cd "$(dirname "$0")" && pwd)
 TMP=$(set -eu; scratch=$(mktemp -d "${TMPDIR:-/tmp}/repo-state-test.XXXXXX"); [ -n "$scratch" ]; printf '%s\n' "$scratch")
@@ -38,7 +39,7 @@ check_key() {
 # deadline fires when BOTH the watchdog redirect and its cancellation kill are removed.
 snapshot_performance() {
   local timer mode rc
-  timer=$(command -v timeout || command -v gtimeout) || { echo "SKIP snapshot performance: no timeout/gtimeout"; return 0; }
+  timer=$(dispatch_timeout_bin) || return 1
   fixture
   sed -n '/^review_state_snapshot_bounded() {$/,/^}$/p' "$BIN/dispatch-worker" > "$TMP/bounded.sh"
   cat > "$TMP/performance.sh" <<'PERF'
@@ -78,8 +79,7 @@ PERF
 }
 snapshot_performance
 [ "${1:-}" != --snapshot-performance-only ] || exit 0
-timer=$(command -v timeout || command -v gtimeout) || timer=''
-if [ -n "$timer" ]; then
+timer=$(dispatch_timeout_bin) || exit 1
 # Keep the fallback's hostile-file path covered as well as coreutils timeout.
 mkfifo "$R/.gitignore"
 for mode in timeout no-timeout; do
@@ -104,11 +104,7 @@ for mode in timeout no-timeout; do
 done
 rm "$R/.git/objects/info/alternates"
 echo 'nonregular diagnostic survives timed-out ref read PASS'
-else
-  echo "SKIP hostile snapshot fallback: no timeout/gtimeout"
-fi
 # Pin the compare watchdog independently of the nonregular metadata sweep.
-if [ -n "$timer" ]; then
   sed -n '/^review_state_compare_bounded() {$/,/^}$/p' "$BIN/dispatch-worker" >> "$TMP/bounded.sh"
   cat > "$TMP/compare-bound.sh" <<'COMPARE'
 set -eu
@@ -137,9 +133,6 @@ COMPARE
   for mode in timeout no-timeout; do
     rc_is 0 "$timer" -k 1 9 bash "$TMP/compare-bound.sh" "$BIN" "$TMP/bounded.sh" "$TMP" "$mode"
   done
-else
-  echo "SKIP compare bound: no timeout/gtimeout"
-fi
 # CLI failures distinguish critical after-state loss from invalid input.
 fixture
 snap "$TMP/before"
@@ -559,6 +552,13 @@ snap "$TMP/after"
 # A failing shasum must retry the same bytes with sha256sum.
 (
   expected=$(printf fixture | _repo_state_sha256)
+  if ! command -v sha256sum >/dev/null 2>&1; then
+    mkdir "$TMP/digest-bin"
+    real_shasum=$(command -v shasum)
+    printf '#!/bin/bash\nexec "%s" -a 256 "$@"\n' "$real_shasum" > "$TMP/digest-bin/sha256sum"
+    chmod +x "$TMP/digest-bin/sha256sum"
+    PATH="$TMP/digest-bin:$PATH"
+  fi
   shasum() { cat >/dev/null; return 1; }
   [ "$(printf fixture | _repo_state_sha256)" = "$expected" ]
 )
@@ -657,10 +657,7 @@ git -C "$R" config credential.helper SECRET
   printf SECRET | _repo_state_sha256 >/dev/null
 )
 # Final drift regressions: bound snapshots even for hostile metadata types.
-TIMEOUT=$(command -v timeout || command -v gtimeout || true)
-if [ -z "$TIMEOUT" ]; then
-  echo "SKIP hostile metadata types: timeout/gtimeout unavailable"
-else
+TIMEOUT=$(dispatch_timeout_bin) || { echo "FAIL: no usable timer" >&2; exit 1; }
 for shape in fifo zero dangling; do
   fixture
   snap "$TMP/before"
@@ -677,7 +674,6 @@ for shape in fifo zero dangling; do
   [ "$shape" != fifo ] || path=info/exclude
   grep -qx "metadata $path: <changed>" "$TMP/changes" || { echo "metadata $shape missed" >&2; exit 1; }
 done
-fi
 fixture
 snap "$TMP/before"
 git -C "$R" -c user.name=Foreign -c user.email=foreign@example.invalid commit -qm injected --allow-empty

@@ -89,6 +89,7 @@ fi
 # function that no test executes leaves the test command green, but that is
 # NOT evidence of a survivor. It must be reported as MUTANT-UNREACHABLE.
 # ---------------------------------------------------------------------------
+if command -v go >/dev/null 2>&1; then
 GO23="$TMP/go_unreachable"; mkdir -p "$GO23"
 cat > "$GO23/go.mod" <<'EOF'
 module example.com/mutationverify/unreachable
@@ -224,6 +225,9 @@ grep -q "coverage unavailable" "$TMP/out25" || { cat "$TMP/out25"; fail "--cover
 grep -q "MUTANT-UNREACHABLE" "$TMP/out25" && { cat "$TMP/out25"; fail "--cover-check compile-breaking mutant: must not report unreachable"; }
 [ "$(cat "$GO25/target.go")" = "$before25" ] || fail "--cover-check compile-breaking mutant: file not byte-identical after restore"
 echo "test --cover-check compile-breaking mutant -> CAUGHT PASS"
+else
+  echo "SKIP: go not installed"
+fi
 
 # ---------------------------------------------------------------------------
 # Test 26: the restored file must look NEWER than anything built from the
@@ -356,6 +360,7 @@ echo "test --expect-fail-output does not wait for a background child PASS"
 # 40: --expect-fail-output with --cover-check keeps both checks: the mutated
 # run must still carry -coverprofile (reachability verified), and a reachable
 # survivor stays NOT caught, never MUTANT-UNREACHABLE.
+if command -v go >/dev/null 2>&1; then
 GO40="$TMP/go_cause_cover"; mkdir -p "$GO40"
 printf 'module example.com/mutationverify/causecover\n\ngo 1.21\n' > "$GO40/go.mod"
 printf 'package causecover\n\nfunc Value() int {\n\treturn 1\n}\n' > "$GO40/target.go"
@@ -448,6 +453,9 @@ rc=$?
 grep -F -q "deselection shown by one fewer '=== RUN ' line) removed the expected text" "$TMP/out79b" || { cat "$TMP/out79b"; fail "go exact knock-out, hazard catches: verdict must quote the delta line"; }
 [ "$(cat "$GO79/target.go")" = "$before79" ] || fail "go exact knock-out positive control: file not byte-identical after restore"
 echo "test a go exact knock-out attributes a hazard-only catch PASS"
+else
+  echo "SKIP: go not installed"
+fi
 
 # 87: the round-8 cargo case on the real runner (skipped without cargo): an
 # unanchored --skip removes the sibling too and prints "11 filtered out"; the
@@ -511,6 +519,7 @@ fi
 # table skipped as '^Name$' removes every row -> refused; one row skipped as
 # '^Name$/^row$' removes one RUN line -> accepted, and the sibling row that
 # really catches the mutant keeps the text -> TEXT PERSISTS.
+if command -v go >/dev/null 2>&1; then
 GO89="$TMP/go_delta"; mkdir -p "$GO89"
 printf 'module example.com/mutationverify/delta\n\ngo 1.21\n' > "$GO89/go.mod"
 printf 'package delta\n\nfunc Parse(s string) int {\n\tif s == "" {\n\t\treturn 0\n\t}\n\treturn len(s)\n}\n' > "$GO89/target.go"
@@ -613,6 +622,9 @@ grep -q "KNOCK-OUT SCOPE UNPROVEN ON THE MUTANT — lines starting with '=== RUN
 grep -q "mutation CAUGHT" "$TMP/out91b" && { cat "$TMP/out91b"; fail "go knock-out crashing on the mutant: must not report CAUGHT"; }
 [ "$(cat "$GO91/target.go")" = "$before91b" ] || fail "go knock-out crashing on the mutant: file not byte-identical after restore"
 echo "test a go knock-out that crashes on the mutant -> exit 2 PASS"
+else
+  echo "SKIP: go not installed"
+fi
 
 # 93b: the same on real cargo (skipped without cargo): the weak hazard test and
 # the real catcher are the only two tests; with "-- --nocapture" in the test

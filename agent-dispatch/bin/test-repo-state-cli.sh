@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+. "${BASH_SOURCE[0]%/*}/lib/timeout-bin.sh"
 set -uo pipefail
 SUITE_PGID=$(ps -p "$$" -o pgid= | tr -d '[:space:]')
 BIN=$(cd "$(dirname "$0")" && pwd)
@@ -30,10 +31,7 @@ fixture() {
 # Existing cases above stay intact. Every case runs under its own outer bound,
 # in both timer modes (coreutils timeout, and the process-group watchdog).
 # ---------------------------------------------------------------------------
-BCASE_TIMER=$(command -v timeout || command -v gtimeout || true)
-if [ -z "$BCASE_TIMER" ]; then
-  echo 'SKIP standalone bound cases: no timeout/gtimeout for the outer bound'
-else
+BCASE_TIMER=$(dispatch_timeout_bin) || { echo "FAIL: no usable timer" >&2; exit 1; }
 RUN_ID="rsb$$x$RANDOM"
 RUN_PID_FILE="$TMP/run-pids"
 REAL_GIT=$(command -v git)
@@ -1073,5 +1071,4 @@ for bcase_mode in ${REPO_STATE_CLI_MODES:-timeout}; do
   run_bcase case_12b_timer_claims_success 40 "$bcase_mode"
   run_bcase case_13_hostile_output_path 40 "$bcase_mode"
 done
-fi
 echo 'repo-state CLI tests passed'
