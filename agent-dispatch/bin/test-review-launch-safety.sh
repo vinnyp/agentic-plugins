@@ -60,6 +60,12 @@ for label, transform, text in [
 stub('git', 'case "${1:-}" in clone) sleep 10;; esac\nexec '+real_git+' "$@"')
 rc,err=run('agy',extra={'DISPATCH_CLONE_TIMEOUT_SECS':'1'}); check(rc==3 and 'launch-time git setup timed out' in err and 'DISPATCH_CLONE_TIMEOUT_SECS' in err,'clone timeout launch refusal must name clone limit')
 (bin/'git').unlink()
+# Swap the checked regular file for a FIFO immediately before the open. The
+# read-write open must return promptly and the descriptor identity check reject it.
+fifo_output=tmp/'swapped-review.md'; fifo_output.write_text('old')
+path=copy_worker('fifo-swap', lambda s:s.replace('    exec 40', '    rm -f "$review_outfile"\n    mkfifo "$review_outfile"\n    exec 40', 1))
+rc,err=run('agy',path,extra={'REVIEW_OUTFILE':str(fifo_output)})
+check(rc==3 and not (tmp/'launched').exists(), 'FIFO swapped before output open must refuse without blocking or launching')
 # Output must replace caller content and timed-out attempts on descriptor-based writers.
 original=(bin/'agy').read_text()
 outfile=tmp/'review.md'

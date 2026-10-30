@@ -1040,12 +1040,13 @@ dispatch_agy() {
       REVIEW_STATE_STATUS="skipped(snapshot-failed)"
     fi
     # Open only after setup, so setup failures cannot leak capture descriptors.
-    # Reject nonregular paths before opening: a FIFO open could block indefinitely.
+    # Reject nonregular paths before opening; read-write also prevents a FIFO
+    # swapped in after this check from blocking. Each attempt truncates below.
     if [ -L "$review_outfile" ] || { [ -e "$review_outfile" ] && [ ! -f "$review_outfile" ]; }; then
       echo 'dispatch-worker: review output must be a regular file' >&2
       return 3
     fi
-    exec 40>"$review_outfile" || return 3
+    exec 40<>"$review_outfile" || return 3
     # Compare fstat with lstat: macOS /dev/fd path stats do not identify the file.
     if ! perl -e 'my @fd=stat(STDOUT); my @path=lstat($ARGV[0]); exit(!(@fd && @path && -f _ && $fd[0]==$path[0] && $fd[1]==$path[1]))' "$review_outfile" >&40; then
       exec 40>&-
