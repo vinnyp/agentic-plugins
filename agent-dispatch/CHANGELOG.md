@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.9.3](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.9.2...agent-dispatch-v1.9.3) (2026-10-31)
+
+
+### Bug Fixes
+
+* **agent-dispatch:** bound agent runs and tests on stock macOS ([#81](https://github.com/vinnyp/agentic-plugins/issues/81)) ([c7c9ada](https://github.com/vinnyp/agentic-plugins/commit/c7c9ada98cedb86d9dc549a098f0973b39200897))
+* **agent-dispatch:** state exceptions, not scopes, in preamble clauses ([2617ce3](https://github.com/vinnyp/agentic-plugins/commit/2617ce388d08acb34756a3d45fe96a797ed44eb8))
+* **agent-dispatch:** stop build-phase task blocks at level-2 headings ([18bc5bb](https://github.com/vinnyp/agentic-plugins/commit/18bc5bb8c6de253a1760c2b77c6b3f0afc6d2493))
+
 ## [1.9.2](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.9.1...agent-dispatch-v1.9.2) (2026-10-30)
 
 
