@@ -107,7 +107,7 @@ tmp="$(mktemp -d)"
 # state, so an unclosed fence or heredoc still stops at the next task. A heredoc opened inside a
 # fence hides what follows up to its end word: a quoted document's own fences and headings are not
 # the plan's. Detection leans towards opening, because a missed heredoc cuts a task mid-document
-# while a false one only leaks a section, as before #261, and warns. A quoted or backslashed word
+# while a false one leaks later sections up to the next task, and warns. A quoted or backslashed word
 # opens at any spacing; a bare word needs a blank before "<<" and, after any blank, upper case, so
 # "a << b" reads as a shift. Both ways a section can be lost or leak are reported on stderr: the
 # heading that stopped a block, and a block ending inside an open fence or heredoc.
@@ -146,7 +146,7 @@ extract_task() {
     }
     f {print}
     END {
-      if (heredoc != "") print "coding-build-phase: task " id " ends inside a heredoc that never reached " heredoc ", so later sections may have reached the worker; check the plan" > "/dev/stderr"
+      if (heredoc != "") print "coding-build-phase: task " id " ends inside a heredoc that never reached " heredoc ": a quoted ### Task line may have cut it short, or later sections may have reached the worker; check the plan" > "/dev/stderr"
       else if (fence != "") print "coding-build-phase: task " id " ends inside an open code fence, so later sections may have reached the worker; check the plan for a stray fence" > "/dev/stderr"
     }
   ' "$plan"

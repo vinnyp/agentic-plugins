@@ -356,7 +356,7 @@ printf '%s\n' '### Task 1: heredoc variants' '```' 'cat <<-"END"' '```' '## Dash
 run_261() { # <plan> <task id>
   rm -f "$CTX_DIR"/*
   out="$(PATH="$TMP/ctxbin:$PATH" "$SELF_DIR/coding-build-phase.sh" codex "$1" "$repo261" "$2" --build-cmd true 2>&1)"; rc=$?
-  [ "$rc" -eq 0 ] || { echo "$out"; echo "FAIL: #261 $1 phase should exit 0, got $rc"; exit 1; }
+  [ "$rc" -eq 0 ] && [ -f "$CTX_DIR/1" ] || { echo "$out"; echo "FAIL: #261 $1 phase should dispatch and exit 0, got $rc"; exit 1; }
 }
 run_261 "$TMP/plan-261-closers.md" 1
 expect_261 "$CTX_DIR/1" want '## Phase 1 quoted' '## Self-Review quoted' '## Info not a closer' AFTER-INFO '## Longer closer' AFTER-LONG '## Indented fence' '## Four spaces not a closer' AFTER-INDENT
@@ -387,17 +387,23 @@ heredoc_261 "cat <<'END-OF-DOC'" END-OF-DOC
 heredoc_261 "cat <<'plan.md'" plan.md
 heredoc_261 "cat <<'END DOC'" 'END DOC'
 heredoc_261 "   cat <<'EOF'" '   EOF'
+heredoc_261 'cat <<-EOF' "$(printf '\tEOF')"
+heredoc_261 'cat <<- EOF' "$(printf '\tEOF')"
+heredoc_261 'python3 - <<PY' PY
+heredoc_261 'cat <<MY_END2' MY_END2
 # The end word must match the whole line.
 printf '%s\n' '### Task 1: exact word' '```' "cat <<'EOF'" 'EOFISH' '```' '## Still quoted' 'EOF' '```' 'EXACT-AFTER' '## Trailing' 'EXACT-TRAILING' > "$TMP/plan-261-exact.md"
 run_261 "$TMP/plan-261-exact.md" 1
 expect_261 "$CTX_DIR/1" want '## Still quoted' EXACT-AFTER
 expect_261 "$CTX_DIR/1" deny EXACT-TRAILING
-printf '### Task 1: crlf heredoc\r\n```\r\ncat <<EOF\r\n## Quoted\r\nEOF\r\n```\r\nCRLF-DOC-AFTER\r\n## Trailing\r\nCRLF-DOC-TRAILING\r\n' > "$TMP/plan-261-crlf2.md"
-run_261 "$TMP/plan-261-crlf2.md" 1
-expect_261 "$CTX_DIR/1" want '## Quoted' CRLF-DOC-AFTER
-expect_261 "$CTX_DIR/1" deny CRLF-DOC-TRAILING
+for opener261 in 'cat <<EOF' 'cat << EOF'; do
+  printf '%s\r\n' '### Task 1: crlf heredoc' '```' "$opener261" '```sh' 'inner' '```' '## Quoted' 'EOF' '```' 'CRLF-DOC-AFTER' '## Trailing' 'CRLF-DOC-TRAILING' > "$TMP/plan-261-crlf2.md"
+  run_261 "$TMP/plan-261-crlf2.md" 1
+  expect_261 "$CTX_DIR/1" want '## Quoted' CRLF-DOC-AFTER
+  expect_261 "$CTX_DIR/1" deny CRLF-DOC-TRAILING
+done
 # Text that only resembles a heredoc opens nothing, so the closing section stays out, silently.
-printf '%s\n' '### Task 1: not heredocs' '```' 'x = a << b' 'y = 1<<n' 'std::cout <<endl;' '# prefer cat <<EOF over echo' 'cat <<<word' 'cat <<< "$x"' "cat <<<'word'" '```' 'NOT-AFTER' '## Trailing' 'NOT-TRAILING' > "$TMP/plan-261-not.md"
+printf '%s\n' '### Task 1: not heredocs' '```' 'x = a << b' 'y = 1<<n' 'std::cout <<endl;' '# prefer cat <<EOF over echo' '  # prefer cat <<EOF here' 'cat <<<word' 'cat <<< "$x"' "cat <<<'word'" '```' 'NOT-AFTER' '## Trailing' 'NOT-TRAILING' > "$TMP/plan-261-not.md"
 run_261 "$TMP/plan-261-not.md" 1
 expect_261 "$CTX_DIR/1" want NOT-AFTER
 expect_261 "$CTX_DIR/1" deny NOT-TRAILING
