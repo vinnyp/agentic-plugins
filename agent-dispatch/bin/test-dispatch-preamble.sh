@@ -40,14 +40,21 @@ C_GATE="$(printf '%s\n'    "$CLAUSES" | grep -o 'You do not run the long gate'  
 # words but drops `timeout -k` or "gone before you return" must turn this red.
 C_LOAD="Bound any load generator you start (\`yes\`, \`node -e 'for(;;);'\`, a spin loop) with \`timeout -k\`, and make sure it is gone before you return: a burner left behind holds a shared machine's cores for hours."
 C_SCRATCH="Scratch repos fail closed"
-for c in "$C_CLEANUP" "$C_DIRTY" "$C_GATE" "$(printf '%s\n' "$CLAUSES" | grep -oF -- "$C_LOAD" | head -1)" "$(printf '%s\n' "$CLAUSES" | grep -o "$C_SCRATCH" | head -1)"; do
+# foundry#262: a worker must not read the cleanup clause as forbidding its own declared files,
+# or the scratch clause as forbidding a suite's fixtures. Whole sentences, for the same reason as
+# C_LOAD. The scratch requirements stay pinned beside the new scope: scoping the clause must not
+# soften what it demands of a repo an agent creates by hand.
+C_DECLARED="A file your task declares is yours to edit, even if it already exists."
+C_SCOPE="This clause governs repos you create by hand. A new case in an existing test suite follows that suite's fixture idiom, inside that suite's own temporary directory."
+C_SCRATCH_RULES="Create a throwaway repo only under an absolute \`mktemp -d \"\${TMPDIR:-/tmp}/<name>.XXXXXX\"\`, in a script running \`set -eu\`, and abort if the path is empty. Every \`git config\`, \`checkout\`, \`branch\`, \`merge\`, \`commit\` or \`push\` in it carries \`-C <that path>\`. Pass an identity per command (\`-c user.name=… -c user.email=…\`, or \`GIT_AUTHOR_*\`/\`GIT_COMMITTER_*\` env), never with \`git config\`, and never \`--global\`."
+for c in "$C_CLEANUP" "$C_DIRTY" "$C_GATE" "$(printf '%s\n' "$CLAUSES" | grep -oF -- "$C_LOAD" | head -1)" "$(printf '%s\n' "$CLAUSES" | grep -o "$C_SCRATCH" | head -1)" "$(printf '%s\n' "$CLAUSES" | grep -oF -- "$C_DECLARED" | head -1)" "$(printf '%s\n' "$CLAUSES" | grep -oF -- "$C_SCOPE" | head -1)" "$(printf '%s\n' "$CLAUSES" | grep -oF -- "$C_SCRATCH_RULES" | head -1)"; do
   if [ -z "$c" ]; then
     bad "a required clause is missing from the shipped block — the rest of this suite cannot discriminate"
     echo "pass=$pass fail=$fail"
     exit 1
   fi
 done
-ok "all four clauses, and clause 3's full load-generator sentence, are present in the shipped block"
+ok "all four clauses, and their pinned full sentences, are present in the shipped block"
 
 # Nothing private may ship in a public repository. The vendored block came from
 # a private source, so this asserts the copy carries none of that source's
@@ -94,6 +101,9 @@ if [ "$dispatch_rc" -eq 0 ] && [ -s "$CAPTURE" ]; then
   grep -qF -- "$C_GATE"    "$CAPTURE" || miss="$miss long-gate"
   grep -qF -- "$C_LOAD"    "$CAPTURE" || miss="$miss load-generator"
   grep -qF -- "$C_SCRATCH" "$CAPTURE" || miss="$miss scratch"
+  grep -qF -- "$C_DECLARED" "$CAPTURE" || miss="$miss declared-files"
+  grep -qF -- "$C_SCOPE" "$CAPTURE" || miss="$miss scratch-scope"
+  grep -qF -- "$C_SCRATCH_RULES" "$CAPTURE" || miss="$miss scratch-rules"
   if [ -z "$miss" ]; then ok "the generated brief carries every clause"
   else bad "the generated brief is missing:$miss"; fi
   if grep -qF '{{DIRTY_PATHS}}' "$CAPTURE"; then
@@ -167,6 +177,9 @@ grep -qF -- "$C_DIRTY"   "$SKILL" || miss="$miss dirty-paths"
 grep -qF -- "$C_GATE"    "$SKILL" || miss="$miss long-gate"
 grep -qF -- "$C_LOAD"    "$SKILL" || miss="$miss load-generator"
 grep -qF -- "$C_SCRATCH" "$SKILL" || miss="$miss scratch"
+grep -qF -- "$C_DECLARED" "$SKILL" || miss="$miss declared-files"
+grep -qF -- "$C_SCOPE" "$SKILL" || miss="$miss scratch-scope"
+grep -qF -- "$C_SCRATCH_RULES" "$SKILL" || miss="$miss scratch-rules"
 if [ -z "$miss" ]; then ok "running-the-peer-review-gate carries every clause"
 else bad "running-the-peer-review-gate is missing:$miss"; fi
 if grep -qF 'docs/dispatch-preamble.md' "$SKILL"; then
