@@ -101,14 +101,22 @@ fi
 tmp="$(mktemp -d)"
 
 # extract_task <id>: print the plan block from "### Task <id>:" up to (not incl.) the next
-# "### Task ", "## Phase", "## Self-Review", or any other level-2 heading, so a plan's closing
-# sections never reach the worker (vinnyp/foundry#261). Anchored colon distinguishes 13 from 13b.
-# A "## " line inside a code fence is task content, not a heading: plans quote whole documents.
-# Only the generic terminator is fence-aware, so an unclosed fence still stops at the next task.
+# "### Task " or level-2 heading, so a plan's closing sections never reach the worker
+# (vinnyp/foundry#261). Anchored colon distinguishes 13 from 13b. A "## " line inside a code fence
+# is task content, not a heading: plans quote whole documents. Only "### Task " ignores fence
+# state, so an unclosed fence still stops at the next task. A heredoc opened inside a fence hides
+# everything to its end word: a quoted document's own fences and headings are not the plan's, and
+# cutting a task mid-document costs more than leaking a section. Both ways a section can be lost
+# or leak are reported on stderr: the heading that stopped a block, and a block ending in open fence.
 extract_task() {
-  awk -v t="^### Task ${1}:" '
+  awk -v t="^### Task ${1}:" -v id="$1" '
     $0 ~ t {f=1; print; next}
-    f && (/^### Task /||/^## Phase/||/^## Self-Review/) {exit}
+    f && /^### Task / {exit}
+    f && heredoc != "" {
+      line=$0; sub(/\r$/, "", line); sub(/^\t+/, "", line)
+      if (line == heredoc) heredoc=""
+      print; next
+    }
     f && /^ ? ? ?(```|~~~)/ {
       line=$0; sub(/^ +/, "", line)
       match(line, /^(`+|~+)/); mark=substr(line, 1, RLENGTH); rest=substr(line, RLENGTH + 1)
@@ -118,8 +126,18 @@ extract_task() {
         fence=""
       }
     }
-    f && fence == "" && /^## / {exit}
+    f && fence != "" && match($0, /[ \t]<<-?[\047"]?[A-Za-z_][A-Za-z0-9_]*[\047"]?/) {
+      heredoc=substr($0, RSTART, RLENGTH); gsub(/[ \t<\047"-]/, "", heredoc)
+    }
+    f && fence == "" && /^## / {
+      line=$0; sub(/\r$/, "", line)
+      print "coding-build-phase: task " id " stops at heading: " line > "/dev/stderr"
+      exit
+    }
     f {print}
+    END {
+      if (fence != "") print "coding-build-phase: task " id " ends inside an open code fence, so later sections may have reached the worker; check the plan for a stray fence" > "/dev/stderr"
+    }
   ' "$plan"
 }
 

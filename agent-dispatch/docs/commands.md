@@ -154,8 +154,10 @@ coding-build-phase.sh <codex|agy> <plan.md> <repo-dir> <task-id...> [--worktree]
 Drives a coding agent through a set of plan tasks. For each id it extracts that task's block
 verbatim from `### Task <id>:` up to the next `### Task ` or level-2 (`## `) heading, wraps it in
 the delegation contract, dispatches it, and commits on success. A `## ` line inside a code fence
-is task content and does not end the block, so a section after the last task stays out of the
-prompt while a task that quotes a whole document keeps it. Every task prompt also
+is task content and does not end the block, so a task can quote a whole document while a section
+after the last task stays out of the prompt. Plan-wide rules therefore belong above the first
+task. A block that stops at a `## ` heading names it on stderr, and a block that ends inside an
+open fence warns, because a stray fence lets later sections through. Every task prompt also
 carries the plan's preamble (everything above the first `### Task ` heading: goal, spec path,
 global constraints) under a `PLAN CONTEXT` banner ahead of the task spec, so plan-wide rules
 reach the worker without being restated per task. The superpowers `> **For agentic workers:**`
