@@ -76,6 +76,9 @@ while [ -L "$_src" ]; do
   case "$_src" in /*) ;; *) _src="$_dir/$_src" ;; esac
 done
 SCRIPT_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
+[ -r "$SCRIPT_DIR/lib/timeout-bin.sh" ] || { echo "coding-dispatch.sh: broken install: cannot read $SCRIPT_DIR/lib/timeout-bin.sh" >&2; exit 3; }
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/lib/timeout-bin.sh"
 # shellcheck disable=SC1091
 . "$SCRIPT_DIR/lib/agy-models.sh"
 # shellcheck disable=SC1091  # dynamic source path ($SCRIPT_DIR); resolved at runtime
@@ -138,11 +141,7 @@ check_worktree_base_freshness() {
     merge_ref="$(git config --get "branch.$branch.merge" || true)"
   fi
 
-  if command -v timeout >/dev/null 2>&1; then
-    timeout_bin="timeout"
-  elif command -v gtimeout >/dev/null 2>&1; then
-    timeout_bin="gtimeout"
-  fi
+  timeout_bin=$(dispatch_timeout_bin) || timeout_bin=""
   if [ -n "$timeout_bin" ] && [ -n "$remote" ] && [ "$remote" != "." ] \
      && [ -n "$merge_ref" ] && [ -n "$upstream_full" ]; then
     "$timeout_bin" 5s git fetch --quiet "$remote" "$merge_ref:$upstream_full" </dev/null
@@ -536,7 +535,7 @@ else
 fi
 note "▶ brief fingerprint: $_brief_hash ($(wc -c < "$prompt_file" | tr -d ' ')B); first line: $(head -1 "$prompt_file")"
 
-TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
+TIMEOUT_BIN="$(dispatch_timeout_bin || true)"
 target="$PWD"   # the worktree in --worktree mode, else == $workdir (we cd'd there above)
 # Child-environment hook: CODING_DISPATCH_CHILD_ENV is a whitespace-separated list of
 # KEY=VALUE pairs exported into the dispatched agent's environment. Use it when the target
@@ -748,7 +747,7 @@ case "$agent" in
       "$TIMEOUT_BIN" -k 30s "$TIMEOUT" codex exec --dangerously-bypass-approvals-and-sandbox -C "$target" - < "$_effective_prompt" >&6 2>&8 5<&- 6>&- 7<&- 8>&- &
       child=$!
     else
-      note "⚠ no timeout/gtimeout binary — codex hang cannot be externally bounded (brew install coreutils)"
+      note "⚠ no timeout/gtimeout binary — codex hang cannot be externally bounded (brew install coreutils); no perl helper was usable either"
       codex exec --dangerously-bypass-approvals-and-sandbox -C "$target" - < "$_effective_prompt" >&6 2>&8 5<&- 6>&- 7<&- 8>&- &
       child=$!
     fi
@@ -766,7 +765,7 @@ case "$agent" in
       "$TIMEOUT_BIN" -k 30s "$TIMEOUT" agy --model "$agy_model" --dangerously-skip-permissions --add-dir "$target" < "$_effective_prompt" >&6 2>&8 5<&- 6>&- 7<&- 8>&- &
       child=$!
     else
-      note "⚠ no timeout/gtimeout binary — agy hang cannot be externally bounded (brew install coreutils)"
+      note "⚠ no timeout/gtimeout binary — agy hang cannot be externally bounded (brew install coreutils); no perl helper was usable either"
       agy --model "$agy_model" --dangerously-skip-permissions --add-dir "$target" < "$_effective_prompt" >&6 2>&8 5<&- 6>&- 7<&- 8>&- &
       child=$!
     fi
@@ -776,6 +775,9 @@ esac
 exec 5<&- 6>&- 7<&- 8>&-
 wait "$child"
 agent_rc=$?
+if [ -n "$TIMEOUT_BIN" ] && { [ "$agent_rc" -eq 124 ] || [ "$agent_rc" -eq 137 ]; }; then
+  kill -KILL -- "-$child" 2>/dev/null || :
+fi
 wait "$_tee_out" "$_tee_err" 2>/dev/null || true
 child=""
 _tee_out=""

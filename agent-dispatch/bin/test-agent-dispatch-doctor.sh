@@ -70,6 +70,8 @@ assert_registry_complete() {
   # are executable but not installed. agy-* probes are sourced internal helpers
   # and are intentionally not executable, so they do not need opt-outs.
   local opt_out=(
+    audit-test-skips.sh    # repo-local kept-log audit, not an installed operator command
+    run-stock-gate.sh      # repo-local stock environment gate, not an installed operator command
     run-tests.sh           # repo-local aggregate gate invoked as bin/run-tests.sh, not an installed operator command
     ensure-review-gate.sh  # build glue for the review-gate CLI, invoked by the skill via $CLAUDE_PLUGIN_ROOT, not by bare name
   )
@@ -452,13 +454,14 @@ else
 fi
 
 # A partial installation must diagnose every required review helper.
-for missing_helper in repo-state.sh review-clone.sh; do
+for missing_helper in repo-state.sh review-clone.sh timeout-bin.sh; do
   fake_install="$TMP/missing-$missing_helper"
   mkdir -p "$fake_install/lib"
   fake_install="$(cd "$fake_install" && pwd -P)"
   cp "$DOCTOR_BIN" "$fake_install/agent-dispatch-doctor"
+  cp "$(dirname "$DOCTOR_BIN")/lib/portable-timeout" "$(dirname "$DOCTOR_BIN")/lib/portable-stat.sh" "$fake_install/lib/"
   cp "$(dirname "$DOCTOR_BIN")/lib/agy-models.sh" "$fake_install/lib/agy-models.sh"
-  for helper in repo-state.sh review-clone.sh; do
+  for helper in repo-state.sh review-clone.sh timeout-bin.sh; do
     if [ "$helper" != "$missing_helper" ]; then
       cp "$(dirname "$DOCTOR_BIN")/lib/$helper" "$fake_install/lib/$helper"
     fi
@@ -471,6 +474,16 @@ for missing_helper in repo-state.sh review-clone.sh; do
     fail "missing $missing_helper was not diagnosed: $missing_out"
   fi
 done
+
+cp "$(dirname "$DOCTOR_BIN")/lib/timeout-bin.sh" "$fake_install/lib/"
+chmod -x "$fake_install/lib/portable-timeout"
+missing_rc=0
+missing_out="$(bash "$fake_install/agent-dispatch-doctor" 2>&1)" || missing_rc=$?
+if [ "$missing_rc" = 1 ] && printf '%s\n' "$missing_out" | grep -qF 'FAIL broken install: helper is not executable'; then
+  pass 'nonexecutable timer helper fails installation check'
+else
+  fail "nonexecutable timer helper was not diagnosed: $missing_out"
+fi
 
 # ---------------------------------------------------------------------------
 # Summary

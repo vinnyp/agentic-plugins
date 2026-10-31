@@ -13,7 +13,7 @@ start at the [README](../README.md); before pointing any of these at code you di
 | `git` | every dispatch command | the snapshot/revert net is git-based |
 | `jq` | `coding-dispatch.sh`, `dispatch-worker --runtime workflow` | `coding-dispatch.sh` exits 2 without it |
 | `python3` | `run-long-gate.sh` (launch mode) | used to detach the gate into its own session |
-| `timeout` or `gtimeout` | bounding any agent run | GNU coreutils. **Without it agent runs are unbounded** and the scripts say so loudly. macOS: `brew install coreutils` |
+| `timeout`, `gtimeout`, or `perl` | bounding agent runs | The bundled Perl helper supplies a bound without coreutils. Runs are unbounded only if none is usable. |
 | `codex` | codex dispatches | optional; the doctor WARNs if absent |
 | `agy` | agy dispatches and agy reviews | optional; the doctor WARNs if absent |
 | `claude` | `dispatch-worker --runtime claude` | optional |
@@ -352,7 +352,10 @@ Every review snapshot, and every `repo-state-check` snapshot or compare, has a
 wall-clock bound, overridden with `DISPATCH_SNAPSHOT_TIMEOUT_SECS` (1-86400 decimal
 seconds; anything else uses the default with a warning). The default is 120 seconds
 for the dispatcher and 60 for `repo-state-check`. The dispatcher uses
-`timeout -k` or `gtimeout -k`, with a watchdog fallback when neither is installed.
+`timeout -k`, `gtimeout -k`, or the bundled `perl` helper; bounded state operations
+also retain a watchdog fallback. Agent runs are unbounded only if no timer is usable.
+Group signals, including Ctrl-C, reach the agent on every path within `KILL_AFTER`.
+On the codex and `agy --review` pipeline paths, a pid-only TERM waits for the time limit.
 Launch-time setup, including the before snapshot, fails closed with exit 3 on timeout
 or inability to complete; `DISPATCH_REVIEW_STATE=skipped(not-launched)` is emitted.
 The single launch probe runs before runtime temporary files or auth checks.
@@ -1022,6 +1025,21 @@ Exit codes, in **both** verify and `--install` mode: `0` all pass, `1` any FAIL,
 FAIL. So an `--install` that skipped an entrypoint (a foreign symlink it refused to replace) exits
 2, not 0 — an installer script must not read that as "done". If `~/.local/bin` is not on your
 `PATH`, `--install` tells you and prints the line to add to your shell profile.
+
+## run-stock-gate.sh
+
+Runs the full test gate and audits kept logs against `bin/lib/stock-skip-manifest.txt`.
+Requires Bash 3 and stock tools with neither GNU timer on PATH. From the repository root:
+
+```bash
+stock_home="$(mktemp -d)"
+env -i HOME="$stock_home" TMPDIR="$TMPDIR" PATH=/usr/bin:/bin \
+  /bin/bash agent-dispatch/bin/run-stock-gate.sh
+```
+
+The gate prints the kept run directory and audits it even when tests fail. Exit 1
+means an environment, test, or audit failure. `test-audit-test-skips.sh` exercises
+the audit's kept-log fixtures and validates the manifest.
 
 ## run-tests.sh
 

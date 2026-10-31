@@ -12,6 +12,12 @@
 # regression, so an unbounded attempt here could still wedge preflight itself,
 # which is exactly the failure this probe exists to prevent.
 
+_probe_source=${BASH_SOURCE[0]}
+case "$_probe_source" in */*) _probe_dir=${_probe_source%/*} ;; *) _probe_dir=. ;; esac
+# shellcheck disable=SC1091
+. "$_probe_dir/lib/timeout-bin.sh"
+unset _probe_source _probe_dir
+
 agy_print_form_probe() {
   local agy_bin="${AGY_BIN:-agy}"
   # Default calibrated from live agy 1.1.15 single-turn latency (~12-18s observed);
@@ -29,12 +35,10 @@ agy_print_form_probe() {
     return 2
   fi
 
-  if command -v timeout >/dev/null 2>&1; then
-    timeout_bin="timeout"
-  elif command -v gtimeout >/dev/null 2>&1; then
-    timeout_bin="gtimeout"
+  if timeout_bin=$(dispatch_timeout_bin); then
+    :
   else
-    printf '%s\n' "agy prompt-form probe: no timeout/gtimeout on PATH — SKIPPING (cannot bound the live prompt-form probe; install coreutils)" >&2
+    printf '%s\n' "agy prompt-form probe: no timeout/gtimeout on PATH — SKIPPING (cannot bound the live prompt-form probe; install coreutils); no perl helper was usable either" >&2
     return 2
   fi
 

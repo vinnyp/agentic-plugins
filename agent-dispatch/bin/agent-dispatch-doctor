@@ -29,6 +29,10 @@ BIN_DIR="$(resolve_self)"
 [ -r "$BIN_DIR/lib/repo-state.sh" ] || { echo "FAIL broken install: cannot read $BIN_DIR/lib/repo-state.sh"; exit 1; }
 [ -r "$BIN_DIR/lib/review-clone.sh" ] || { echo "FAIL broken install: cannot read $BIN_DIR/lib/review-clone.sh"; exit 1; }
 [ -r "$BIN_DIR/lib/portable-stat.sh" ] || { echo "FAIL broken install: cannot read $BIN_DIR/lib/portable-stat.sh"; exit 1; }
+[ -r "$BIN_DIR/lib/timeout-bin.sh" ] || { echo "FAIL broken install: cannot read $BIN_DIR/lib/timeout-bin.sh"; exit 1; }
+[ -x "$BIN_DIR/lib/portable-timeout" ] || { echo "FAIL broken install: helper is not executable"; exit 1; }
+# shellcheck disable=SC1091
+. "$BIN_DIR/lib/timeout-bin.sh"
 # shellcheck disable=SC1091
 . "$BIN_DIR/lib/agy-models.sh"
 LIB_DIR="$(cd "$BIN_DIR/../lib" 2>/dev/null && pwd || echo "$BIN_DIR/../lib")"
@@ -256,15 +260,14 @@ fi
 
 # Check 5: if agy present, probe 'agy models' and verify default model names exist
 if [ "$AGY_PRESENT" -eq 1 ]; then
-  # Use gtimeout (macOS Homebrew coreutils) or timeout (Linux) if available
-  TIMEOUT_CMD=""
-  if command -v gtimeout >/dev/null 2>&1; then
-    TIMEOUT_CMD="gtimeout 20"
-  elif command -v timeout >/dev/null 2>&1; then
-    TIMEOUT_CMD="timeout 20"
-  fi
+  # Use a GNU timer or the bundled Perl helper when usable.
+  TIMEOUT_BIN=$(dispatch_timeout_bin) || TIMEOUT_BIN=""
 
-  agy_models_out="$($TIMEOUT_CMD agy models 2>&1)" && agy_models_ok=1 || agy_models_ok=0
+  if [ -n "$TIMEOUT_BIN" ]; then
+    agy_models_out="$("$TIMEOUT_BIN" 20 agy models 2>&1)" && agy_models_ok=1 || agy_models_ok=0
+  else
+    agy_models_out="$(agy models 2>&1)" && agy_models_ok=1 || agy_models_ok=0
+  fi
   if [ "$agy_models_ok" -eq 1 ]; then
     report PASS "5. agy models: OK"
     # Catch renamed role defaults before they fail loudly at dispatch time.

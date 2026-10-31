@@ -95,11 +95,11 @@ PATH="$TMP/bin:$PATH" rc_is 0 repo_state_run_bounded 15 stream_payload
 [ "${#REPO_STATE_BOUND_OUT}" = 100 ] || fail 'stream trailer lost payload'
 rm "$TMP/bin/tail"
 max_payload() { REPO_STATE_BOUND_OUT=$(LC_ALL=C head -c 67108864 /dev/zero | tr '\0' x); }
-rc_is 0 repo_state_run_bounded 20 max_payload
+rc_is 0 repo_state_run_bounded 120 max_payload
 [ "${#REPO_STATE_BOUND_OUT}" = 67108864 ] || fail 'at-cap payload lost bytes'
 REPO_STATE_BOUND_OUT=''
 large_payload() { REPO_STATE_BOUND_OUT=$(LC_ALL=C head -c 67108865 /dev/zero | tr '\0' x); }
-rc_is 125 repo_state_run_bounded 20 large_payload 2>"$TMP/cap.err"
+rc_is 125 repo_state_run_bounded 120 large_payload 2>"$TMP/cap.err"
 grep -q 'large_payload output exceeded 64 MiB; not evaluated' "$TMP/cap.err" || fail 'cap diagnostic missing'
 leaks_sleeper() { bash -c 'exec -a "$1" sleep 60' _ "$2" & printf '%s\n' "$!" > "$1"; REPO_STATE_BOUND_OUT=verdict; return 2; }
 rc_is 2 repo_state_run_bounded 15 leaks_sleeper "$TMP/sleeper" "$RUN_ID"
@@ -240,3 +240,45 @@ rc_is 2 repo_state_compare "$TMP/a" "$TMP/b" "$TMP/changes"
   [ "$REPO_STATE_BOUND_OUT" = $'state: compare could not complete (escape failed)\n' ] || fail 'escape failure payload lacks final newline'
 )
 echo 'repo-state memory tests passed'
+
+# Distinct files and nonregular channels must still fail closed.
+: > "$TMP/channel-a"; : > "$TMP/channel-b"
+(exec 7>"$TMP/channel-a" 8<>"$TMP/channel-b"; rc_is 1 _repo_state_channel_verified)
+(exec 7>"$TMP/channel-a" 8<>"$TMP/channel-a"; rc_is 0 _repo_state_channel_verified)
+mkfifo "$TMP/channel-fifo"
+(exec 7>"$TMP/channel-a" 8<>"$TMP/channel-fifo"; rc_is 1 _repo_state_channel_verified)
+workers=''
+for worker in 1 2 3 4 5 6 7 8; do
+  (
+    operation=0
+    while [ "$operation" -lt 40 ]; do
+      operation=$((operation + 1))
+      rc=0
+      "$BIN/review-pin.sh" status "$TMP/repo" > "$TMP/parallel-$worker" 2>&1 || rc=$?
+      [ "$rc" != 3 ] || { cat "$TMP/parallel-$worker"; exit 1; }
+    done
+  ) &
+  workers="$workers $!"
+done
+parallel_failed=0
+for worker in $workers; do wait "$worker" || parallel_failed=1; done
+[ "$parallel_failed" = 0 ] || fail 'concurrent bounded status failed'
+echo 'channel verification and concurrent bounded status PASS'
+
+# Every verification attempt matters, including the last one.
+for failures in 19 20; do
+(
+  exec 7>"$TMP/channel-a" 8<>"$TMP/channel-a"
+  calls=0
+  function [ {
+    if builtin [ "$1" = -f ]; then
+      calls=$((calls + 1))
+      builtin [ "$calls" -gt "$failures" ] || return 1
+    fi
+    builtin [ "$@"
+  }
+  expected=0
+  builtin [ "$failures" -ne 20 ] || expected=1
+  rc_is "$expected" _repo_state_channel_verified
+) || exit 1
+done

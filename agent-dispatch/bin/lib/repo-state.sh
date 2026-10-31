@@ -732,6 +732,17 @@ _repo_state_close_channel() {
   REPO_STATE_BOUND_SAVE7='' REPO_STATE_BOUND_SAVE8='' REPO_STATE_BOUND_CHANNEL_ACTIVE=0
 }
 
+# macOS can transiently fail stat on shared fd numbers across processes.
+_repo_state_channel_verified() {
+  local attempt=0
+  while [ "$attempt" -lt 20 ]; do
+    [ -f /dev/fd/8 ] && [ /dev/fd/7 -ef /dev/fd/8 ] && return 0
+    attempt=$((attempt + 1))
+    [ "$attempt" -eq 20 ] || { sleep 0.01 2>/dev/null || :; }
+  done
+  return 1
+}
+
 # Pipe the script into bash so private state appears in neither argv nor a script file.
 repo_state_run_bounded() {
   local limit=$1 operation=$2 private script_text marker name tcmd='' result=0
@@ -759,7 +770,7 @@ repo_state_run_bounded() {
   [ "$noclobber" = 1 ] || set +C
   if [ "$result" = 0 ]; then
     if ! { exec 8<>"$private/channel"; } ||
-       ! [ -f /dev/fd/8 ] || ! [ /dev/fd/7 -ef /dev/fd/8 ] ||
+       ! _repo_state_channel_verified ||
        ! rm -f "$private/channel"; then result=125; fi
   fi
   if [ "$result" != 0 ]; then

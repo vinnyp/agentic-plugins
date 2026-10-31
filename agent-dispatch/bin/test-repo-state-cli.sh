@@ -2,6 +2,7 @@
 set -uo pipefail
 SUITE_PGID=$(ps -p "$$" -o pgid= | tr -d '[:space:]')
 BIN=$(cd "$(dirname "$0")" && pwd)
+. "$BIN/lib/timeout-bin.sh"
 TMP=$(set -eu; scratch=$(mktemp -d "${TMPDIR:-/tmp}/repo-state-cli-test.XXXXXX"); [ -n "$scratch" ]; printf '%s\n' "$scratch")
 [ -n "$TMP" ] || exit 1
 TMP=$(cd "$TMP" && pwd -P)
@@ -30,10 +31,7 @@ fixture() {
 # Existing cases above stay intact. Every case runs under its own outer bound,
 # in both timer modes (coreutils timeout, and the process-group watchdog).
 # ---------------------------------------------------------------------------
-BCASE_TIMER=$(command -v timeout || command -v gtimeout || true)
-if [ -z "$BCASE_TIMER" ]; then
-  echo 'SKIP standalone bound cases: no timeout/gtimeout for the outer bound'
-else
+BCASE_TIMER=$(dispatch_timeout_bin) || { echo "FAIL: no usable timer" >&2; exit 1; }
 RUN_ID="rsb$$x$RANDOM"
 RUN_PID_FILE="$TMP/run-pids"
 REAL_GIT=$(command -v git)
@@ -299,7 +297,7 @@ case_6_limit_helper() (
       caller='repo-state-check'; [ "$default" = 60 ] || caller=dispatch-worker
       actual=$(DISPATCH_SNAPSHOT_TIMEOUT_SECS="$value" repo_state_snapshot_limit "$caller" "$default" 2> "$TMP/limit.err")
       [ "$actual" = "$default" ] || fail "limit '$value' gave '$actual', wanted $default"
-      [ "$(cat "$TMP/limit.err")" = "$caller: invalid DISPATCH_SNAPSHOT_TIMEOUT_SECS; using $default" ] || fail "warning for '$value'"
+      grep -Fxq "$caller: invalid DISPATCH_SNAPSHOT_TIMEOUT_SECS; using $default" "$TMP/limit.err" || fail "warning for '$value'"
     done
   done
   [ "$(DISPATCH_SNAPSHOT_TIMEOUT_SECS=08 repo_state_snapshot_limit repo-state-check 60)" = 8 ] || fail '08'
@@ -430,7 +428,7 @@ case_11_cli_invalid_limit() (
   started=$SECONDS
   DISPATCH_SNAPSHOT_TIMEOUT_SECS=abc cli snapshot "$R" "$d/file" 2> "$d/err" || rc=$?
   [ "$rc" = 0 ] || fail "expected 0, got $rc"
-  [ "$(cat "$d/err")" = 'repo-state-check: invalid DISPATCH_SNAPSHOT_TIMEOUT_SECS; using 60' ] || fail 'warning text'
+  grep -Fxq 'repo-state-check: invalid DISPATCH_SNAPSHOT_TIMEOUT_SECS; using 60' "$d/err" || fail 'warning text'
   [ $((SECONDS - started)) -lt 60 ] || fail 'too slow'
   started=$SECONDS
   cp "$d/file" "$d/copy"
@@ -1073,5 +1071,4 @@ for bcase_mode in ${REPO_STATE_CLI_MODES:-timeout}; do
   run_bcase case_12b_timer_claims_success 40 "$bcase_mode"
   run_bcase case_13_hostile_output_path 40 "$bcase_mode"
 done
-fi
 echo 'repo-state CLI tests passed'

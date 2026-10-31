@@ -1,0 +1,96 @@
+#!/usr/bin/env perl
+# Portable process-group timer following GNU timeout's default mode.
+use strict;
+use warnings;
+use POSIX qw(:sys_wait_h :signal_h setpgid);
+use Time::HiRes qw(clock_gettime CLOCK_MONOTONIC sleep);
+
+sub usage {
+    print STDERR "usage: portable-timeout [-k DURATION] DURATION COMMAND [ARG]...\n";
+    exit 125;
+}
+sub duration {
+    my ($value) = @_;
+    usage() unless defined($value) && $value =~ /\A(\d+(?:\.\d*)?|\.\d+)([smhd]?)\z/;
+    my %scale = ('' => 1, s => 1, m => 60, h => 3600, d => 86400);
+    return $1 * $scale{$2};
+}
+my $grace = 0;
+if (@ARGV && $ARGV[0] eq '-k') {
+    shift @ARGV;
+    $grace = duration(shift @ARGV);
+}
+my $limit = duration(shift @ARGV);
+usage() unless @ARGV;
+my ($cmd, @args) = @ARGV;
+my @signals = qw(TERM INT HUP QUIT);
+my $blocked = POSIX::SigSet->new(SIGTERM, SIGINT, SIGHUP, SIGQUIT);
+my $previous = POSIX::SigSet->new();
+if (!sigprocmask(SIG_BLOCK, $blocked, $previous)) {
+    print STDERR "portable-timeout: sigprocmask: $!\n";
+    exit 125;
+}
+my @pending;
+for my $signal (@signals) {
+    $SIG{$signal} = sub { push @pending, $signal };
+}
+$SIG{TTIN} = $SIG{TTOU} = 'IGNORE';
+# A failed group setup must never expose the caller's process group.
+setpgid(0, 0);
+$SIG{CHLD} = 'DEFAULT';
+my $child = fork();
+if (!defined $child) {
+    print STDERR "portable-timeout: fork: $!\n";
+    exit 125;
+}
+if (!$child) {
+    $SIG{$_} = 'DEFAULT' for (@signals, qw(TTIN TTOU));
+    sigprocmask(SIG_SETMASK, $previous);
+    no warnings 'exec';
+    exec { $cmd } $cmd, @args or do {
+        my $status = $!{ENOENT} ? 127 : 126;
+        print STDERR "portable-timeout: exec $cmd: $!\n";
+        POSIX::_exit($status);
+    };
+}
+sigprocmask(SIG_SETMASK, $previous);
+my $deadline = $limit ? clock_gettime(CLOCK_MONOTONIC) + $limit : undef;
+my $kill_at;
+my $expired = 0;
+sub forward {
+    my ($signal) = @_;
+    kill $signal, $child;
+    if (getpgrp() == $$) {
+        local $SIG{$signal} = 'IGNORE';
+        kill $signal, -$$;
+    }
+    kill 'CONT', $child;
+    kill 'CONT', -$$ if getpgrp() == $$;
+}
+while (1) {
+    my $done = waitpid($child, WNOHANG);
+    if ($done == $child) {
+        my $status = $?;
+        exit($expired ? 124 : WIFSIGNALED($status) ? 128 + WTERMSIG($status) : WEXITSTATUS($status));
+    }
+    if ($done == -1) {
+        next if $!{EINTR};
+        print STDERR "portable-timeout: waitpid: $!\n";
+        exit 125;
+    }
+    my $now = clock_gettime(CLOCK_MONOTONIC);
+    if (defined($kill_at) && $now >= $kill_at) {
+        kill 'KILL', $child;
+        kill 'KILL', -$$ if getpgrp() == $$;
+    }
+    if (defined($deadline) && $now >= $deadline) {
+        $expired = 1;
+        undef $deadline;
+        push @pending, 'TERM';
+    }
+    while (@pending) {
+        forward(shift @pending);
+        $kill_at = $now + $grace if $grace && !defined($kill_at);
+    }
+    sleep(0.05);
+}

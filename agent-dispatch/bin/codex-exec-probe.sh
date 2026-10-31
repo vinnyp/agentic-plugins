@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 # Source-able shell-tool readiness probe. The last stdout line is the reason;
 # diagnostics stay on stderr. Subshell traps cannot overwrite the caller's traps.
+_probe_source=${BASH_SOURCE[0]}
+case "$_probe_source" in */*) _probe_dir=${_probe_source%/*} ;; *) _probe_dir=. ;; esac
+# shellcheck disable=SC1091
+. "$_probe_dir/lib/timeout-bin.sh"
+unset _probe_source _probe_dir
+
 codex_exec_probe() (
   local codex_bin="${CODEX_BIN:-codex}"
   local probe_timeout="${CODEX_EXEC_PROBE_TIMEOUT-75s}"
@@ -20,12 +26,10 @@ codex_exec_probe() (
     printf '%s\n' "codex exec probe: '$codex_bin' not found — cannot probe"
     return 2
   fi
-  if command -v timeout >/dev/null 2>&1; then
-    timeout_bin=timeout
-  elif command -v gtimeout >/dev/null 2>&1; then
-    timeout_bin=gtimeout
+  if timeout_bin=$(dispatch_timeout_bin); then
+    :
   else
-    printf '%s\n' 'codex exec probe: no timeout/gtimeout — install coreutils to bound the probe'
+    printf '%s\n' 'codex exec probe: no timeout/gtimeout — install coreutils to bound the probe; no perl helper was usable either'
     return 2
   fi
   if command -v shasum >/dev/null 2>&1; then

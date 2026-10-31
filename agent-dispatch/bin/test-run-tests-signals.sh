@@ -2,6 +2,7 @@
 # shellcheck disable=SC2034,SC2154
 # Shared fixture setup and assertions; helper is intentionally not executable.
 TEST_BIN="$(cd "$(dirname "$0")" && pwd)"
+. "$TEST_BIN/lib/timeout-bin.sh"
 # shellcheck source=lib/run-tests-testlib.sh
 . "$TEST_BIN/lib/run-tests-testlib.sh"
 test_groups="portable accounting signals fallback direct cleanup parent wave2 straggler leak nops ownership grace inherited bash3 interrupt"
@@ -45,8 +46,8 @@ check test "$rc" = 1
 check grep -qFx FIRST-LOG-LINE "$TMP/out"
 # A timeout shim records the public default and creates the sentinel in the
 # post-launch window without scheduler-dependent sleeps.
-real_timeout=$(command -v timeout || command -v gtimeout || :)
-if [ -n "$real_timeout" ]; then
+real_timeout=$(dispatch_timeout_bin) || { echo "FAIL: no usable timer" >&2; exit 1; }
+real_timeout=$(command -v "$real_timeout") || exit 1
  probe="$TMP/timeout-probe"; mkdir "$probe"
  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" > "$TMPDIR/timeout-args"\nexec "%s" "$@"\n' "$real_timeout" > "$probe/timeout"
  chmod +x "$probe/timeout"
@@ -65,7 +66,7 @@ if [ -n "$real_timeout" ]; then
  check test "$(cat "$rd/bin__test-x.sh.rc")" = not-run
  check test ! -e "$rd/bin__test-x.sh.pid"
  if [ -e "$TMP/window.pid" ]; then check bash -c '! kill -0 "$1" 2>/dev/null' _ "$(cat "$TMP/window.pid")"; fi
-else echo 'SKIP timeout shim: timeout unavailable'; fi
+echo 'timeout shim defaults and launch sentinel PASS'
 if /bin/bash --version | grep -q 'version 3\.'; then
  bash3shim="$TMP/portable-bash3-shim"; mkdir -p "$bash3shim"
  ln -s /bin/bash "$bash3shim/bash"

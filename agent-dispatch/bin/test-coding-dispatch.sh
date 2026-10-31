@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -uo pipefail
+# Gate stubs read stdin to EOF, so an inherited open stdin would hang them.
+exec </dev/null
 unset RUN_TESTS_JOBS RUN_TESTS_TIMEOUT RUN_TESTS_KEEP_LOGS RUN_TESTS__PS_AVAILABLE
 for run_tests_hook in ${!RUN_TESTS__TEST_@}; do unset "$run_tests_hook"; done
 unset run_tests_hook
@@ -481,6 +483,12 @@ while [ $# -gt 0 ]; do
   if [ "$1" = -C ]; then wd="$2"; shift 2; else shift; fi
 done
 cd "$wd" || exit 1
+if [ "${SIGNAL_STUBBORN:-0}" = 4 ]; then
+  trap 'exit 0' TERM
+  bash -c 'trap "" TERM INT HUP; echo "$$" > "$SIGNAL_HELPER_FILE"; while :; do sleep .1; done' &
+  echo "$$" > "$SIGNAL_PID_FILE"
+  while :; do sleep .1; done
+fi
 echo interrupted > signal-work.txt
 if [ "${SIGNAL_COMMIT:-0}" = 1 ]; then
   git add signal-work.txt
@@ -734,6 +742,43 @@ fp_a="$(sed -n 's/.*brief fingerprint: \([0-9a-f]\{12\}\).*/\1/p' "$TMP/out_fp_a
 fp_b="$(sed -n 's/.*brief fingerprint: \([0-9a-f]\{12\}\).*/\1/p' "$TMP/out_fp_b" | head -1)"
 [ -n "$fp_a" ] && [ -n "$fp_b" ] && [ "$fp_a" != "$fp_b" ] || fail "#48 different briefs should produce different fingerprints"
 echo "test #48 brief fingerprint content-derived PASS"
+
+# A timed-out parent must not leave pipe-holding descendants alive.
+mkdir -p "$TMP/helper-timer-bin"
+ln -s "$(command -v perl)" "$TMP/helper-timer-bin/perl"
+for timer_mode in GNU helper; do
+  timed_path="$TMP/signalbin:$PATH"
+  if [ "$timer_mode" = helper ]; then timed_path="$TMP/signalbin:$TMP/helper-timer-bin:$TMP/no-timeout-bin"; fi
+  if [ "$timer_mode" = GNU ] && ! command -v timeout >/dev/null 2>&1 && ! command -v gtimeout >/dev/null 2>&1; then
+    echo 'SKIP: GNU timer not installed'
+    continue
+  fi
+  P="$TMP/timed-$timer_mode"; new_parent "$P"
+  rm -f "$TMP/helper.pid" "$TMP/worker.pid"
+  started_at=$SECONDS
+  PATH="$timed_path" SIGNAL_STUBBORN=4 SIGNAL_HELPER_FILE="$TMP/helper.pid" SIGNAL_PID_FILE="$TMP/worker.pid" CODING_DISPATCH_TIMEOUT=2 \
+    bash "$CD" codex "$P" "$TMP/prompt" true > "$TMP/timed.out" 2>&1 &
+  disp_pid=$!
+  while kill -0 "$disp_pid" 2>/dev/null; do
+    if [ "$((SECONDS - started_at))" -gt 15 ]; then
+      kill -KILL "$disp_pid" 2>/dev/null || true
+      for pid_file in "$TMP/helper.pid" "$TMP/worker.pid"; do
+        [ ! -s "$pid_file" ] || kill -KILL "$(cat "$pid_file")" 2>/dev/null || true
+      done
+      wait "$disp_pid" 2>/dev/null
+      fail "$timer_mode timed descendant hung"
+    fi
+    sleep .1
+  done
+  wait "$disp_pid"; rc=$?
+  [ "$rc" = 1 ] && grep -q TIMEOUT "$TMP/timed.out" || fail "$timer_mode timeout verdict rc=$rc"
+  [ "$((SECONDS - started_at))" -lt 10 ] || fail "$timer_mode timeout too slow"
+  [ -s "$TMP/helper.pid" ] || fail 'timed descendant did not start'
+  pid=$(cat "$TMP/helper.pid")
+  state=$(ps -o stat= -p "$pid" 2>/dev/null || true)
+  case "$state" in ''|*Z*) ;; *) kill -KILL "$pid" 2>/dev/null || true; fail 'timed descendant survived' ;; esac
+  echo "$timer_mode timed descendant cleanup PASS"
+done
 
 # #20: agy gets 25m default, explicit timeout wins, and timeout hint is agy-only.
 mkdir -p "$TMP/timeoutbin"

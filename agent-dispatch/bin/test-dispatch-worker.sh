@@ -14,6 +14,7 @@
 #   - codex --review forces a read-only sandbox even when --ceremony is also passed.
 
 SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SELF_DIR/lib/timeout-bin.sh"
 # shellcheck source=lib/test-dispatch-worker-lib.sh
 . "$SELF_DIR/lib/test-dispatch-worker-lib.sh"
 
@@ -372,23 +373,17 @@ rc=$?
 echo "test 13l (auth phrases in successful answer rc0) PASS"
 
 # 13m. The external bound must propagate through the waited codex pipelines.
-if command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1; then
-  cat > "$TMP/bin/codex" <<'STUB'
+cat > "$TMP/bin/codex" <<'STUB'
 #!/usr/bin/env bash
 sleep 5
 STUB
-  chmod +x "$TMP/bin/codex"
-  TIMEOUT=1 KILL_AFTER=1 "$DW" --runtime codex --brief "$BRIEF" >"$TMP/t13m.out" 2>"$TMP/t13m.err"
-  rc=$?
-  [ "$rc" -eq 124 ] || fail "codex external timeout should return rc 124, got $rc"
-  grep -qF 'exceeded the external 1 bound and was killed' "$TMP/t13m.err" \
-    || fail "codex external timeout bound message was missing"
-  echo "test 13m (codex external timeout rc124) PASS"
-elif [ "${CI:-}" = true ]; then
-  fail "CI requires timeout or gtimeout for the codex external timeout case"
-else
-  echo "SKIP test 13m (timeout and gtimeout unavailable)"
-fi
+chmod +x "$TMP/bin/codex"
+TIMEOUT=1 KILL_AFTER=1 "$DW" --runtime codex --brief "$BRIEF" >"$TMP/t13m.out" 2>"$TMP/t13m.err"
+rc=$?
+[ "$rc" -eq 124 ] || fail "codex external timeout should return rc 124, got $rc"
+grep -qF 'exceeded the external 1 bound and was killed' "$TMP/t13m.err" \
+  || fail "codex external timeout bound message was missing"
+echo "test 13m (codex external timeout rc124) PASS"
 
 cat > "$TMP/bin/codex" <<'STUB'
 #!/usr/bin/env bash
@@ -975,6 +970,21 @@ echo "test 31c-d (both file:line evidence alternatives pass independently) PASS"
 
 restore_default_agy_stub
 assert_no_review_residue
+# An unusable helper keeps the explicit unbounded warning reachable.
+real_perl=$(command -v perl)
+mkdir "$TMP/no-timer-case"
+for utility_path in "$TMP/bin/"* /usr/bin/* /bin/*; do
+  [ -x "$utility_path" ] && [ ! -d "$utility_path" ] || continue
+  utility=${utility_path##*/}
+  case "$utility" in timeout|gtimeout|perl) continue ;; esac
+  [ -e "$TMP/no-timer-case/$utility" ] || ln -s "$utility_path" "$TMP/no-timer-case/$utility"
+done
+printf '#!/bin/bash\nif [ "$#" = 4 ] && [ "$1" = -MPOSIX ] && [ "$2" = -MTime::HiRes ] && [ "$3" = -e ] && [ "$4" = 1 ]; then exit 1; fi\nexec "%s" "$@"\n' "$real_perl" > "$TMP/no-timer-case/perl"
+chmod +x "$TMP/no-timer-case/perl"
+PATH="$TMP/no-timer-case" TIMEOUT=1 "$DW" --runtime codex --brief "$BRIEF" > "$TMP/unbounded.out" 2> "$TMP/unbounded.err"
+grep -q UNBOUNDED "$TMP/unbounded.err" || { echo 'FAIL: unbounded warning missing'; exit 1; }
+echo 'unusable helper warning PASS'
+
 if [ "$FAILS" -ne 0 ]; then
   echo "$FAILS TEST(S) FAILED"
   exit 1

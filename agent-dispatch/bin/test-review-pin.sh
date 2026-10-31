@@ -2,6 +2,7 @@
 # test-review-pin.sh — acceptance tests for review-pin.sh.
 set -uo pipefail
 SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SELF_DIR/lib/timeout-bin.sh"
 TMP="$(cd "$(mktemp -d)" && pwd -P)"
 trap 'chmod -R u+w "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT
 # shellcheck disable=SC1091
@@ -176,7 +177,8 @@ git -C "$TMP/unborn" init -q
 bash "$RP" pin "$TMP/unborn" > "$TMP/unborn.out" 2>&1
 [ "$?" = 2 ] || fail 'unborn HEAD must exit 2'
 grep -q 'could not resolve HEAD' "$TMP/unborn.out" || fail 'unborn HEAD diagnostic missing'
-TIMER=$(command -v timeout || command -v gtimeout)
+TIMER=$(dispatch_timeout_bin) || { echo "FAIL: no usable timer" >&2; exit 1; }
+[ -n "$TIMER" ] && "$TIMER" 1 true || fail "timer unavailable"
 mkfifo "$REPO3/.git/objects/info/alternates"
 probe_rc=0
 "$TIMER" -k 1 1 git -C "$REPO3" rev-parse --verify HEAD > /dev/null 2>&1 || probe_rc=$?

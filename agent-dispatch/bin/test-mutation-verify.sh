@@ -18,6 +18,7 @@
 set -uo pipefail
 unset MUTATION_VERIFY_COPY_ROOT MUTATION_VERIFY_FILE MUTATION_VERIFY_SWEEP_JOBS
 SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SELF_DIR/lib/timeout-bin.sh"
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/test-mv-core.XXXXXX")
 [ -n "$TMP" ] || exit 1
 TMP=$(cd "$TMP" && pwd -P)
@@ -601,7 +602,7 @@ echo "test bad args -> exit 2 with usage PASS"
 # loop spun forever. Wrapped in `timeout 15` so a regression fails loudly
 # (timeout's 124) instead of hanging the whole suite.
 # ---------------------------------------------------------------------------
-timeout 15 bash "$MV" --file >"$TMP/out_trailing_flag" 2>&1
+"$(dispatch_timeout_bin)" 15 bash "$MV" --file >"$TMP/out_trailing_flag" 2>&1
 rc=$?
 [ "$rc" -ne 124 ] || { cat "$TMP/out_trailing_flag"; fail "value-less trailing --file: HUNG (timeout 124) — BLOCKER 2 regression"; }
 [ "$rc" -eq 2 ] || { cat "$TMP/out_trailing_flag"; fail "value-less trailing --file: expected exit 2, got $rc"; }

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SELF_DIR/lib/timeout-bin.sh"
 # shellcheck source=lib/test-dispatch-worker-lib.sh
 . "$SELF_DIR/lib/test-dispatch-worker-lib.sh"
 
@@ -23,28 +24,11 @@ cp "$SRC/.git/config" "$TMP/state-config.before"
 # Snapshot bounds apply to git internals and worktree ignore reads.
 # Bound the suite's own child even when the implementation bound regresses.
 run_hostile_review() (
-  local timer='' child guard rc=0
-  timer=$(command -v timeout || command -v gtimeout) || timer=''
-  if [ -n "$timer" ]; then
-    export DW TMP BRIEF
-    export -f run_cfg_review
-    "$timer" -k 5 60 bash -c 'run_cfg_review "$1"' _ "$SRC" || rc=$?
-  else
-    set -m
-    run_cfg_review "$SRC" &
-    child=$!
-    (
-      set +m
-      sleep 60
-      kill -TERM -- "-$child" 2>/dev/null || true
-      sleep 5
-      kill -KILL -- "-$child" 2>/dev/null || true
-    ) </dev/null >/dev/null 2>&1 &
-    guard=$!
-    wait "$child" || rc=$?
-    kill -TERM -- "-$guard" 2>/dev/null || true
-    wait "$guard" 2>/dev/null || true
-  fi
+  local timer='' rc=0
+  timer=$(dispatch_timeout_bin) || exit 1
+  export DW TMP BRIEF
+  export -f run_cfg_review
+  "$timer" -k 5 60 bash -c 'run_cfg_review "$1"' _ "$SRC" || rc=$?
   case "$rc" in
     124|137|143) fail "hostile $hostile: review hung (snapshot or pin-release unbounded)" ;;
   esac
@@ -118,7 +102,7 @@ hostile='before-FETCH_HEAD'
 # Termination inside the after-snapshot window must leave a pessimistic EXIT status.
 mkdir -p "$TMP/sentinel/bin/lib"
 cp "$DW" "$TMP/sentinel/bin/dispatch-worker"
-cp "$SELF_DIR/lib/"*.sh "$TMP/sentinel/bin/lib/"
+cp "$SELF_DIR/lib/portable-timeout" "$SELF_DIR/lib/"*.sh "$TMP/sentinel/bin/lib/"
 cp "$SELF_DIR/review-pin.sh" "$SELF_DIR/agy-auth-probe.sh" "$TMP/sentinel/bin/"
 # Inject only into the test-owned copy, before the bounded helper does any work.
 sed '/^review_state_snapshot_bounded() {$/a\

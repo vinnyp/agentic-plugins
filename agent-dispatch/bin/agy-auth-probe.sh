@@ -1,24 +1,26 @@
 #!/usr/bin/env bash
 # Source-able agy OAuth freshness probe; retains successful output for model checks.
 
+_probe_source=${BASH_SOURCE[0]}
+case "$_probe_source" in */*) _probe_dir=${_probe_source%/*} ;; *) _probe_dir=. ;; esac
+# shellcheck disable=SC1091
+. "$_probe_dir/lib/timeout-bin.sh"
+unset _probe_source _probe_dir
+
 agy_auth_probe() {
   AGY_AUTH_PROBE_OUTPUT=""
   local agy_bin="${AGY_BIN:-agy}"
   local output rc timeout_bin output_file
 
   timeout_bin=""
-  if command -v timeout >/dev/null 2>&1; then
-    timeout_bin="timeout"
-  elif command -v gtimeout >/dev/null 2>&1; then
-    timeout_bin="gtimeout"
-  fi
+  timeout_bin=$(dispatch_timeout_bin) || timeout_bin=""
 
   output_file="$(mktemp)" || return 2
   if [ -n "$timeout_bin" ]; then
     "$timeout_bin" -k 2s 5s "$agy_bin" models </dev/null >"$output_file" 2>&1
     rc=$?
   else
-    printf '%s\n' 'agy auth probe: no timeout binary — probe is unbounded' >&2
+    printf '%s\n' 'agy auth probe: no timeout binary — probe is unbounded; no perl helper was usable either' >&2
     "$agy_bin" models </dev/null >"$output_file" 2>&1
     rc=$?
   fi
