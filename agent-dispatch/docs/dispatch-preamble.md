@@ -19,10 +19,10 @@ brackets. The assembling path replaces it with the paths `git status
 inert, so an assembling path substitutes it or does not ship the brief.
 
 <!-- PREAMBLE:START -->
-- **Never touch a file you did not create.** `rm`, `git checkout`, `git restore`, `git reset`, `git clean` and `git stash` are forbidden against any path outside your task's declared files. Treat unknown files as foreign and leave them. This binds every dispatched agent — a coding worker, a reviewer, a research or archival subagent, any runtime — not only a `coding-dispatch.sh` run. A file your task declares is yours to edit, even if it already exists.
+- **Never touch a file you did not create.** `rm`, `git checkout`, `git restore`, `git reset`, `git clean` and `git stash` are forbidden against any path outside your task's declared files. Treat unknown files as foreign and leave them. This binds every dispatched agent — a coding worker, a reviewer, a research or archival subagent, any runtime — not only a `coding-dispatch.sh` run. If your task is to change files, the files it declares are yours to edit, even if they already exist, unless the next clause lists them.
 - **These paths are already dirty and are not yours:** {{DIRTY_PATHS}}. Reverting or deleting one of them is the failure this rule exists to prevent.
 - **You do not run the long gate.** Run every command in the foreground and let it finish. A subagent cannot receive a completion notification, so a backgrounded command hangs forever with nothing to wake it; if you catch yourself writing "I'll wait for the notification", that IS the violation. Never kill or signal a process you did not start. Bound any load generator you start (`yes`, `node -e 'for(;;);'`, a spin loop) with `timeout -k`, and make sure it is gone before you return: a burner left behind holds a shared machine's cores for hours.
-- **Scratch repos fail closed.** Create a throwaway repo only under an absolute `mktemp -d "${TMPDIR:-/tmp}/<name>.XXXXXX"`, in a script running `set -eu`, and abort if the path is empty. Every `git config`, `checkout`, `branch`, `merge`, `commit` or `push` in it carries `-C <that path>`. Pass an identity per command (`-c user.name=… -c user.email=…`, or `GIT_AUTHOR_*`/`GIT_COMMITTER_*` env), never with `git config`, and never `--global`. `git -C ""` silently runs in the current directory, and in a linked worktree `git config` rewrites the shared repository's config. This clause governs repos you create by hand. A new case in an existing test suite follows that suite's fixture idiom, inside that suite's own temporary directory.
+- **Scratch repos fail closed.** Create a throwaway repo only under an absolute `mktemp -d "${TMPDIR:-/tmp}/<name>.XXXXXX"`, in a script running `set -eu`, and abort if the path is empty. Every `git config`, `checkout`, `branch`, `merge`, `commit` or `push` in it carries `-C <that path>`. Pass an identity per command (`-c user.name=… -c user.email=…`, or `GIT_AUTHOR_*`/`GIT_COMMITTER_*` env), never with `git config`, and never `--global`. `git -C ""` silently runs in the current directory, and in a linked worktree `git config` rewrites the shared repository's config. One exception: a new case in an existing test suite may follow that suite's fixture idiom, inside that suite's own temporary directory. Everything else stays under this clause, whether typed or scripted.
 <!-- PREAMBLE:END -->
 
 ## Who concatenates it
@@ -44,9 +44,9 @@ could never do that.
    uncommitted files it believed it had created. The prohibition existed, but
    every mechanism naming it was a coding-dispatch run, so a reviewer or a
    research subagent found no hook.
-   The lead sentence is broader than the rule, and a worker twice stopped with an
-   empty diff on a task whose declared files already existed, so the clause says
-   those files are the task's to edit (`vinnyp/foundry#262`).
+   The lead sentence is broader than the rule, and a worker stopped with an empty
+   diff on a task whose declared files already existed, so the clause says those
+   files are the task's to edit (`vinnyp/foundry#262`).
 2. **Dirty paths.** The prohibition above is unenforceable if the agent cannot
    tell which files were already there. Naming them turns a rule into a check
    the agent can actually perform.
@@ -56,4 +56,4 @@ could never do that.
    this rule — that the orchestrator drives long gates itself — is the
    caller's, and is not part of the dispatched brief. Its last sentence covers load generators: a reviewer checking a timeout or contention path has a real reason to start a CPU burner, and once eight orphaned burners from dispatched agents held 8 of 18 cores for about 8.5 hours on a machine that is also a CI runner, causing two false CI timeouts.
 
-4. **Scratch repos.** An empty scratch path once turned a reviewer's experiment into a write to the shared repository's identity; every later commit by any session took the throwaway author. A worker also read the clause as forbidding a new test that follows its suite's fixtures, so the clause names what it governs (`vinnyp/foundry#262`).
+4. **Scratch repos.** An empty scratch path once turned a reviewer's experiment into a write to the shared repository's identity; every later commit by any session took the throwaway author. A worker also read the clause as forbidding a new test that follows its suite's fixtures, so the clause states that one exception and keeps everything else, typed or scripted, under the rule (`vinnyp/foundry#262`).
