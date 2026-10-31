@@ -3,12 +3,17 @@
 #
 # Two correct rules were unreachable because every mechanism naming them was a
 # citation, and the next path that assembled a brief did not join the citation
-# register. So this suite extracts the clauses from the shipped block and asserts
-# they appear in what coding-dispatch.sh actually hands the agent — which means
-# deleting a clause from docs/dispatch-preamble.md turns this red at once.
+# register. So this suite pins the clauses as literals and asserts they appear in
+# what coding-dispatch.sh and the review skill actually hand the agent — which
+# means changing a clause in docs/dispatch-preamble.md turns this red at once.
 set -uo pipefail
+# A suite launched from a git hook inherits these and would write to the caller's repository.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/lib/test-env-reset.sh"
+reset_dispatch_env  # neutralize any operator-exported dispatch vars before the suite runs
 PLUGIN_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CD="$SCRIPT_DIR/coding-dispatch.sh"
 BLOCK="$PLUGIN_ROOT/docs/dispatch-preamble.md"
@@ -31,23 +36,37 @@ CLAUSES="$(sed -n '/<!-- PREAMBLE:START -->/,/<!-- PREAMBLE:END -->/p' "$BLOCK" 
 if [ -n "$CLAUSES" ]; then ok "the preamble block is delimited and non-empty"
 else bad "the preamble block is empty or its markers moved"; fi
 
-# Extracted from the single source, so a clause deleted there fails every
-# assertion below rather than silently narrowing what is checked.
-C_CLEANUP="$(printf '%s\n' "$CLAUSES" | grep -o 'Never touch a file you did not create' | head -1)"
-C_DIRTY="$(printf '%s\n'   "$CLAUSES" | grep -o 'already dirty and are not yours'      | head -1)"
-C_GATE="$(printf '%s\n'    "$CLAUSES" | grep -o 'You do not run the long gate'         | head -1)"
-# The whole load-generator sentence, not a prefix: a copy that keeps the opening
-# words but drops `timeout -k` or "gone before you return" must turn this red.
-C_LOAD="Bound any load generator you start (\`yes\`, \`node -e 'for(;;);'\`, a spin loop) with \`timeout -k\`, and make sure it is gone before you return: a burner left behind holds a shared machine's cores for hours."
-C_SCRATCH="Scratch repos fail closed"
-for c in "$C_CLEANUP" "$C_DIRTY" "$C_GATE" "$(printf '%s\n' "$CLAUSES" | grep -oF -- "$C_LOAD" | head -1)" "$(printf '%s\n' "$CLAUSES" | grep -o "$C_SCRATCH" | head -1)"; do
-  if [ -z "$c" ]; then
-    bad "a required clause is missing from the shipped block — the rest of this suite cannot discriminate"
-    echo "pass=$pass fail=$fail"
-    exit 1
-  fi
-done
-ok "all four clauses, and clause 3's full load-generator sentence, are present in the shipped block"
+# Literals, independent of the block, so a clause changed there cannot rewrite its own
+# expectation. A changed clause stops the suite here, naming it, before any brief runs.
+# foundry#262: every clause is a whole line, because each carries a rule a fragment would not
+# hold. Bindery's snapshot reads the vault copy, not this file, so nothing else guards them here.
+# read, not $(cat <<...): bash 3.2 cannot parse a heredoc inside a command substitution.
+IFS= read -r C_CLAUSE1 <<'CLAUSE'
+- **Never touch a file you did not create.** `rm`, `git checkout`, `git restore`, `git reset`, `git clean` and `git stash` are forbidden against any path outside your task's declared files. Treat unknown files as foreign and leave them. This binds every dispatched agent — a coding worker, a reviewer, a research or archival subagent, any runtime — not only a `coding-dispatch.sh` run. If your task is to change files, the files it declares are yours to edit, even if they already exist, unless the next clause lists them.
+CLAUSE
+IFS= read -r C_CLAUSE2 <<'CLAUSE'
+- **These paths are already dirty and are not yours:** {{DIRTY_PATHS}}. Reverting or deleting one of them is the failure this rule exists to prevent.
+CLAUSE
+IFS= read -r C_CLAUSE3 <<'CLAUSE'
+- **You do not run the long gate.** Run every command in the foreground and let it finish. A subagent cannot receive a completion notification, so a backgrounded command hangs forever with nothing to wake it; if you catch yourself writing "I'll wait for the notification", that IS the violation. Never kill or signal a process you did not start. Bound any load generator you start (`yes`, `node -e 'for(;;);'`, a spin loop) with `timeout -k`, and make sure it is gone before you return: a burner left behind holds a shared machine's cores for hours.
+CLAUSE
+IFS= read -r C_CLAUSE4 <<'CLAUSE'
+- **Scratch repos fail closed.** Create a throwaway repo only under an absolute `mktemp -d "${TMPDIR:-/tmp}/<name>.XXXXXX"`, in a script running `set -eu`, and abort if the path is empty. Every `git config`, `checkout`, `branch`, `merge`, `commit` or `push` in it carries `-C <that path>`. Pass an identity per command (`-c user.name=… -c user.email=…`, or `GIT_AUTHOR_*`/`GIT_COMMITTER_*` env), never with `git config`, and never `--global`. `git -C ""` silently runs in the current directory, and in a linked worktree `git config` rewrites the shared repository's config. One exception: a new case in an existing test suite may follow that suite's fixture idiom, inside that suite's own temporary directory. Everything else stays under this clause, whether typed or scripted.
+CLAUSE
+C_DIRTY='already dirty and are not yours'
+require_clause() { # <label> <whole line>
+  printf '%s\n' "$CLAUSES" | grep -qxF -- "$2" && return 0
+  bad "the shipped block has changed the $1 clause"; echo "pass=$pass fail=$fail"; exit 1
+}
+require_clause cleanup "$C_CLAUSE1"
+require_clause dirty-paths "$C_CLAUSE2"
+require_clause long-gate "$C_CLAUSE3"
+require_clause scratch "$C_CLAUSE4"
+if [ "$(printf '%s\n' "$CLAUSES" | grep -c .)" -eq 4 ] && [ "$(printf '%s\n' "$CLAUSES" | grep -c '^- \*\*')" -eq 4 ]; then
+  ok "the shipped block is exactly four clauses, each pinned as a whole line"
+else
+  bad "the shipped block is not exactly four clause lines"
+fi
 
 # Nothing private may ship in a public repository. The vendored block came from
 # a private source, so this asserts the copy carries none of that source's
@@ -59,6 +78,13 @@ if grep -nE '(/Users/|\$HOME|FOUNDRY_HOME|BINDERY_ROOT|Documents/Obsidian)' "$BL
 else
   ok "the vendored preamble references no private path or root"
 fi
+
+clauses_above_body() { # <brief> <body text>
+  local top bottom
+  top=$(grep -nxF -- "$C_CLAUSE4" "$1" | head -1 | cut -d: -f1)
+  bottom=$(grep -nF -- "$2" "$1" | head -1 | cut -d: -f1)
+  [ -n "$top" ] && [ -n "$bottom" ] && [ "$top" -lt "$bottom" ]
+}
 
 # --- The generated brief ----------------------------------------------------
 # A codex stub that captures the brief on stdin, which is exactly how
@@ -89,11 +115,10 @@ dispatch_rc=$?
 if [ "$dispatch_rc" -eq 0 ] && [ -s "$CAPTURE" ]; then
   ok "the dispatch reached the agent and the brief was captured"
   miss=""
-  grep -qF -- "$C_CLEANUP" "$CAPTURE" || miss="$miss cleanup"
-  grep -qF -- "$C_DIRTY"   "$CAPTURE" || miss="$miss dirty-paths"
-  grep -qF -- "$C_GATE"    "$CAPTURE" || miss="$miss long-gate"
-  grep -qF -- "$C_LOAD"    "$CAPTURE" || miss="$miss load-generator"
-  grep -qF -- "$C_SCRATCH" "$CAPTURE" || miss="$miss scratch"
+  grep -qxF -- "$C_CLAUSE1" "$CAPTURE" || miss="$miss cleanup"
+  grep -qF -- "$C_DIRTY"    "$CAPTURE" || miss="$miss dirty-paths"
+  grep -qxF -- "$C_CLAUSE3" "$CAPTURE" || miss="$miss long-gate"
+  grep -qxF -- "$C_CLAUSE4" "$CAPTURE" || miss="$miss scratch"
   if [ -z "$miss" ]; then ok "the generated brief carries every clause"
   else bad "the generated brief is missing:$miss"; fi
   if grep -qF '{{DIRTY_PATHS}}' "$CAPTURE"; then
@@ -101,9 +126,11 @@ if [ "$dispatch_rc" -eq 0 ] && [ -s "$CAPTURE" ]; then
   else
     ok "{{DIRTY_PATHS}} was substituted in the generated brief"
   fi
-  # The caller's own prompt must survive alongside the preamble.
+  # The caller's own prompt must survive alongside the preamble, below it.
   if grep -qF 'do the thing' "$CAPTURE"; then ok "the caller's prompt is still in the brief"
   else bad "the caller's prompt was lost"; fi
+  if clauses_above_body "$CAPTURE" 'do the thing'; then ok "the preamble sits above the caller's prompt"
+  else bad "the preamble is not above the caller's prompt"; fi
 else
   bad "the dispatch exited $dispatch_rc without a captured brief (output: $(tail -3 "$TMP/dispatch.out"))"
 fi
@@ -161,18 +188,56 @@ else
 fi
 
 # --- The peer-review gate skill carries the clauses -------------------------
-miss=""
-grep -qF -- "$C_CLEANUP" "$SKILL" || miss="$miss cleanup"
-grep -qF -- "$C_DIRTY"   "$SKILL" || miss="$miss dirty-paths"
-grep -qF -- "$C_GATE"    "$SKILL" || miss="$miss long-gate"
-grep -qF -- "$C_LOAD"    "$SKILL" || miss="$miss load-generator"
-grep -qF -- "$C_SCRATCH" "$SKILL" || miss="$miss scratch"
-if [ -z "$miss" ]; then ok "running-the-peer-review-gate carries every clause"
-else bad "running-the-peer-review-gate is missing:$miss"; fi
+# The list is compared exactly, so a stale extra line or a reordered clause fails too.
+awk '/The four clauses are:/ {on=1; next} on && /^$/ {next} on && /^- / {print; next} on {exit}' "$SKILL" > "$TMP/skill-clauses"
+printf '%s\n' "$CLAUSES" > "$TMP/block-clauses"
+if cmp -s "$TMP/skill-clauses" "$TMP/block-clauses"; then ok "the skill's clause list matches the shipped block exactly"
+else bad "the skill's clause list differs from the shipped block"; fi
 if grep -qF 'docs/dispatch-preamble.md' "$SKILL"; then
   ok "the skill points at the shipped block as the source to concatenate"
 else
   bad "the skill does not name the shipped block"
+fi
+
+# --- The reviewer route: run the skill's own snippet ------------------------
+# Real reviewer briefs come from this snippet, not from the prose above. Its /tmp glob is pointed
+# at a private directory, and the run is refused unless that rewrite took, so running it cannot
+# touch another session's briefs. The tree is dirty on purpose: this is the one route where
+# clause 2 carries a real value, and clause 1's permission rests on that list.
+RB="$TMP/reviewer-briefs"; mkdir -p "$RB"
+printf 'REVIEWER-BRIEF-BODY\n' > "$RB/brief-one.md"
+SNIP_REPO="$TMP/snippet-repo"; mkdir -p "$SNIP_REPO"
+git -C "$SNIP_REPO" init -q
+printf 'seed\n' > "$SNIP_REPO/seed.txt"
+git -C "$SNIP_REPO" add -A
+git -C "$SNIP_REPO" -c user.name=t -c user.email=t@example.invalid commit -qm seed
+printf 'mine\n' > "$SNIP_REPO/dirty-on-purpose.txt"
+RENDERED_DIRTY="$(printf '%s\n' "$C_CLAUSE2" | sed 's/{{DIRTY_PATHS}}/`dirty-on-purpose.txt`/')"
+awk '
+  /^```bash$/ {buf=""; inside=1; next}
+  /^```$/ {if (inside && buf ~ /PREAMBLE:START/) {printf "%s", buf; exit} inside=0; next}
+  inside {buf=buf $0 "\n"}
+' "$SKILL" | sed "s#/tmp/brief-#$RB/brief-#g" > "$TMP/reviewer-snippet.sh"
+if ! grep -qF 'PREAMBLE:START' "$TMP/reviewer-snippet.sh"; then
+  bad "the skill's preamble snippet could not be extracted"
+elif ! grep -qF "for b in $RB/brief-" "$TMP/reviewer-snippet.sh" ||
+     sed "s#$RB##g" "$TMP/reviewer-snippet.sh" | grep -qF '/tmp/'; then
+  bad "the skill's snippet still reaches outside the private directory; it was not run"
+elif (cd "$SNIP_REPO" && CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash -eu "$TMP/reviewer-snippet.sh") > "$TMP/snippet.out" 2>&1; then
+  rendered=0
+  for line in "$C_CLAUSE1" "$RENDERED_DIRTY" "$C_CLAUSE3" "$C_CLAUSE4"; do
+    grep -qxF -- "$line" "$RB/brief-one.md" || rendered=$((rendered + 1))
+  done
+  if [ "$rendered" -eq 0 ]; then ok "the skill's snippet renders every clause into a reviewer brief, naming the dirty path"
+  else bad "the skill's snippet dropped or changed $rendered clause(s) in a reviewer brief"; fi
+  if grep -qF 'REVIEWER-BRIEF-BODY' "$RB/brief-one.md"; then ok "the reviewer brief keeps its own body"
+  else bad "the skill's snippet lost the reviewer brief's body"; fi
+  if clauses_above_body "$RB/brief-one.md" 'REVIEWER-BRIEF-BODY'; then ok "the preamble sits above the reviewer brief"
+  else bad "the preamble is not above the reviewer brief"; fi
+  if grep -qF '{{DIRTY_PATHS}}' "$RB/brief-one.md"; then bad "the reviewer brief still carries {{DIRTY_PATHS}}"
+  else ok "the skill's snippet leaves no {{DIRTY_PATHS}} token"; fi
+else
+  bad "the skill's snippet failed: $(tail -2 "$TMP/snippet.out")"
 fi
 
 echo "pass=$pass fail=$fail"; [ "$fail" -eq 0 ]
