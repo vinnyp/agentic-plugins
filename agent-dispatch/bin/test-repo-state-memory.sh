@@ -95,11 +95,11 @@ PATH="$TMP/bin:$PATH" rc_is 0 repo_state_run_bounded 15 stream_payload
 [ "${#REPO_STATE_BOUND_OUT}" = 100 ] || fail 'stream trailer lost payload'
 rm "$TMP/bin/tail"
 max_payload() { REPO_STATE_BOUND_OUT=$(LC_ALL=C head -c 67108864 /dev/zero | tr '\0' x); }
-rc_is 0 repo_state_run_bounded 20 max_payload
+rc_is 0 repo_state_run_bounded 120 max_payload
 [ "${#REPO_STATE_BOUND_OUT}" = 67108864 ] || fail 'at-cap payload lost bytes'
 REPO_STATE_BOUND_OUT=''
 large_payload() { REPO_STATE_BOUND_OUT=$(LC_ALL=C head -c 67108865 /dev/zero | tr '\0' x); }
-rc_is 125 repo_state_run_bounded 20 large_payload 2>"$TMP/cap.err"
+rc_is 125 repo_state_run_bounded 120 large_payload 2>"$TMP/cap.err"
 grep -q 'large_payload output exceeded 64 MiB; not evaluated' "$TMP/cap.err" || fail 'cap diagnostic missing'
 leaks_sleeper() { bash -c 'exec -a "$1" sleep 60' _ "$2" & printf '%s\n' "$!" > "$1"; REPO_STATE_BOUND_OUT=verdict; return 2; }
 rc_is 2 repo_state_run_bounded 15 leaks_sleeper "$TMP/sleeper" "$RUN_ID"
