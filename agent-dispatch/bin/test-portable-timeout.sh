@@ -56,6 +56,7 @@ while (1) {
         if (open my $fh, '<', "$ENV{TASK_TMP}/timer-pid") {
             my $timer = <$fh>; chomp $timer;
             kill 'KILL', -$timer;
+            kill 'KILL', $timer;
         }
         waitpid($pid, 0);
         exit 125;
@@ -125,15 +126,26 @@ assert_gone() {
 conformance() {
   local timer=$1 signal
   check group-leadership 0 "$timer" 3 "$BASH_BIN" -c '
-    while [ ! -s "$TASK_TMP/timer-pid" ]; do sleep .02; done
+    tries=0
+    while [ ! -s "$TASK_TMP/timer-pid" ]; do
+      tries=$((tries + 1))
+      [ "$tries" -lt 300 ] || exit 125
+      sleep .02
+    done
     group=$(ps -p $$ -o pgid= | tr -d " ")
     [ "$group" = "$(cat "$TASK_TMP/timer-pid")" ]'
   check stopped-child 124 "$timer" 1 "$BASH_BIN" -c 'kill -STOP $$'
+  check stopped-catcher 124 "$timer" 1 "$BASH_BIN" -c 'trap "exit 5" TERM; kill -STOP $$; sleep 3'
   check sigchld-entry 7 "$PERL" -e '$SIG{CHLD}="IGNORE"; exec @ARGV' "$timer" 3 "$BASH_BIN" -c 'exit 7'
   check no-rearm 137 "$BASH_BIN" -c '
     "$@" <&0 &
     timer=$!
-    while [ ! -f "$TASK_TMP/ready" ]; do sleep .02; done
+    tries=0
+    while [ ! -f "$TASK_TMP/ready" ]; do
+      tries=$((tries + 1))
+      [ "$tries" -lt 300 ] || { kill -KILL "$timer" 2>/dev/null; exit 125; }
+      sleep .02
+    done
     start=$SECONDS
     kill -TERM "$timer"
     sleep 2

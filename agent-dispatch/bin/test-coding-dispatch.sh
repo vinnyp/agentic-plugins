@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -uo pipefail
+# Gate stubs read stdin to EOF, so an inherited open stdin would hang them.
+exec </dev/null
 unset RUN_TESTS_JOBS RUN_TESTS_TIMEOUT RUN_TESTS_KEEP_LOGS RUN_TESTS__PS_AVAILABLE
 for run_tests_hook in ${!RUN_TESTS__TEST_@}; do unset "$run_tests_hook"; done
 unset run_tests_hook

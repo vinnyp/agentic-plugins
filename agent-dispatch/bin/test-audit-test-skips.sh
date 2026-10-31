@@ -85,4 +85,51 @@ while IFS= read -r row || [ -n "$row" ]; do
   case "$kind" in skip|require) ;; *) exit 1 ;; esac
   [ -f "$SELF_DIR/../$suite" ] || { echo "FAIL unknown suite $suite"; exit 1; }
 done < "$SELF_DIR/lib/stock-skip-manifest.txt"
+mkdir -p "$TASK_TMP/gate/lib" "$TASK_TMP/gate-run" "$TASK_TMP/timers"
+cp "$SELF_DIR/run-stock-gate.sh" "$TASK_TMP/gate/run-stock-gate.sh"
+: > "$TASK_TMP/gate/lib/stock-skip-manifest.txt"
+cat > "$TASK_TMP/gate/run-tests.sh" <<'STUB'
+#!/bin/bash
+touch "$STUB_MARK.tests"
+printf 'Run dir: %s/gate-run\n' "$HOME"
+exit "$STUB_TESTS_RC"
+STUB
+cat > "$TASK_TMP/gate/audit-test-skips.sh" <<'STUB'
+#!/bin/bash
+touch "$STUB_MARK.audit"
+exit "$STUB_AUDIT_RC"
+STUB
+printf '#!/bin/bash\nexit 0\n' > "$TASK_TMP/timers/timeout"
+chmod +x "$TASK_TMP/timers/timeout"
+path="$TASK_TMP/timers:/usr/bin:/bin"
+rc=0
+env -i HOME="$TASK_TMP" TMPDIR="$TASK_TMP" PATH="$path" STUB_MARK="$TASK_TMP/refusal" STUB_TESTS_RC=0 STUB_AUDIT_RC=0 /bin/bash "$TASK_TMP/gate/run-stock-gate.sh" > "$TASK_TMP/gate-out" 2>&1 || rc=$?
+[ "$rc" = 1 ] && grep -Fxq 'stock gate: timeout must not resolve' "$TASK_TMP/gate-out" && [ ! -e "$TASK_TMP/refusal.tests" ] || { cat "$TASK_TMP/gate-out"; echo 'FAIL stock gate refusal'; exit 1; }
+echo 'stock gate refusal PASS'
+path=/usr/bin:/bin
+if env -i PATH="$path" /bin/bash -c '
+  [ "${BASH_VERSINFO[0]}" = 3 ] || exit 1
+  for timer in timeout gtimeout; do
+    ! command -v "$timer" >/dev/null 2>&1 || exit 1
+  done
+  for utility in perl shasum git jq; do
+    command -v "$utility" >/dev/null 2>&1 || exit 1
+  done
+'; then
+  for statuses in 0:0 1:0 0:1; do
+    IFS=: read -r tests_rc audit_rc <<< "$statuses"
+    mark="$TASK_TMP/status-$tests_rc-$audit_rc"
+    rc=0
+    env -i HOME="$TASK_TMP" TMPDIR="$TASK_TMP" PATH="$path" STUB_MARK="$mark" STUB_TESTS_RC="$tests_rc" STUB_AUDIT_RC="$audit_rc" /bin/bash "$TASK_TMP/gate/run-stock-gate.sh" > "$TASK_TMP/gate-out" 2>&1 || rc=$?
+    if [ "$statuses" = 0:0 ]; then
+      [ "$rc" = 0 ] || { cat "$TASK_TMP/gate-out"; echo 'FAIL stock gate success'; exit 1; }
+    else
+      [ "$rc" != 0 ] || { echo "FAIL stock gate status $statuses"; exit 1; }
+    fi
+    [ "$statuses" != 1:0 ] || [ -f "$mark.audit" ] || { echo 'FAIL stock gate audit missing'; exit 1; }
+  done
+  echo 'stock gate fixtures PASS'
+else
+  echo 'stock gate fixtures SKIP (not a stock host)'
+fi
 echo 'audit-test-skips fixtures and real manifest PASS'

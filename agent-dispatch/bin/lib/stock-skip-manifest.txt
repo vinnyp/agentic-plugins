@@ -41,3 +41,4 @@ bin/test-portable-timeout.sh	require	descendant-kill (helper) PASS
 bin/test-portable-timeout.sh	require	descendant-TERM (helper) PASS
 bin/test-portable-timeout.sh	require	descendant-INT (helper) PASS
 bin/test-portable-timeout.sh	require	descendant-HUP (helper) PASS
+bin/test-audit-test-skips.sh	require	stock gate fixtures PASS

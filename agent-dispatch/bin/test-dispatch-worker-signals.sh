@@ -29,6 +29,7 @@ if [ "${SIGNAL_DESCENDANT:-0}" = 1 ]; then
   while [ ! -s "$SIGNAL_DESC_PID" ]; do sleep .02; done
 fi
 [ "$SIGNAL_IGNORE" != 1 ] || trap '' TERM
+[ "${SIGNAL_DRAIN:-0}" != 1 ] || trap 'sleep .3; : > "$SIGNAL_DRAINED"; exit 0' TERM
 : > "$SIGNAL_READY"
 while :; do sleep .05; done
 STUB
@@ -109,6 +110,14 @@ for timer_mode in GNU helper; do
     done
   done
   unset SIGNAL_DESCENDANT
+  export SIGNAL_NAME=TERM SIGNAL_SCOPE=pid SIGNAL_IGNORE=0 SIGNAL_DRAIN=1 SIGNAL_DRAINED="$TMP/drained"
+  rm -f "$SIGNAL_READY" "$SIGNAL_DRAINED"
+  rc=0
+  TIMEOUT=60 KILL_AFTER=5 "$REAL_PERL" "$TMP/signal-guard" "$DW" --runtime agy --brief "$BRIEF" > "$TMP/out" 2> "$TMP/err" || rc=$?
+  [ "$rc" = 143 ] || fail "$timer_mode signal drain status $rc"
+  [ -f "$SIGNAL_DRAINED" ] || fail "$timer_mode signal drain missing"
+  unset SIGNAL_DRAIN
+  echo "$timer_mode signal drain PASS"
   if [ "$timer_mode" = helper ]; then
     started=$SECONDS
     rc=0
