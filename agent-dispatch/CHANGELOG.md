@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.3](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.9.2...agent-dispatch-v1.9.3) (2026-10-31)
+
+
+### Bug Fixes
+
+* **agent-dispatch:** bound agent runs and tests on stock macOS ([#81](https://github.com/vinnyp/agentic-plugins/issues/81)) ([c7c9ada](https://github.com/vinnyp/agentic-plugins/commit/c7c9ada98cedb86d9dc549a098f0973b39200897))
+
 ## [1.9.2](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.9.1...agent-dispatch-v1.9.2) (2026-10-30)
 
 
