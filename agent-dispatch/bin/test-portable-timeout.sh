@@ -137,6 +137,7 @@ conformance() {
   check stopped-child 124 "$timer" 1 "$BASH_BIN" -c 'kill -STOP $$'
   check stopped-catcher 124 "$timer" 1 "$BASH_BIN" -c 'trap "exit 5" TERM; kill -STOP $$; sleep 3'
   check sigchld-entry 7 "$PERL" -e '$SIG{CHLD}="IGNORE"; exec @ARGV' "$timer" 3 "$BASH_BIN" -c 'exit 7'
+  check child-job-signals 0 "$timer" 3 "$PERL" -e 'exit(($SIG{TTIN} // q()) eq q(IGNORE) || ($SIG{TTOU} // q()) eq q(IGNORE))'
   check no-rearm 137 "$BASH_BIN" -c '
     "$@" <&0 &
     timer=$!
@@ -191,7 +192,8 @@ conformance() {
     SEND_SIGNAL=$signal check "descendant-$signal" 0 "$timer" 3 "${fixture[@]}" reach
   done
   if [ "$timer" = "$HELPER" ]; then
-    SEND_SIGNAL=INT check ignored-entry 130 "$PERL" -e '$SIG{INT}="IGNORE"; exec @ARGV' "$timer" 3 "${fixture[@]}" plain
+    # bash ignores INT if a foreground child exits normally as it arrives.
+    SEND_SIGNAL=INT check ignored-entry 130 "$PERL" -e '$SIG{INT}="IGNORE"; exec @ARGV' "$timer" 3 "$PERL" -e 'open my $f, ">", "$ENV{TASK_TMP}/ready" or die; close $f; sleep 30'
   fi
   : > "$TASK_TMP/pids"
   check detached-return 0 "$timer" 3 "${fixture[@]}" detach
