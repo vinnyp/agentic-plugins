@@ -775,6 +775,9 @@ esac
 exec 5<&- 6>&- 7<&- 8>&-
 wait "$child"
 agent_rc=$?
+if [ -n "$TIMEOUT_BIN" ] && { [ "$agent_rc" -eq 124 ] || [ "$agent_rc" -eq 137 ]; }; then
+  kill -KILL -- "-$child" 2>/dev/null || :
+fi
 wait "$_tee_out" "$_tee_err" 2>/dev/null || true
 child=""
 _tee_out=""

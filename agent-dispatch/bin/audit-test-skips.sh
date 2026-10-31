@@ -43,7 +43,7 @@ while :; do
     done
     if printf '%s\n' "$line" | grep -Eq '(^|[^[:alnum:]_])(SKIP|SKIPPED)([^[:alnum:]_]|$)'; then
       allowed=0
-      while IFS=$'\t' read -r owner kind pattern; do
+      while IFS=$'\t' read -r owner kind pattern || [ -n "$owner$kind$pattern" ]; do
         [ "$owner" = "$suite" ] && [ "$kind" = skip ] || continue
         if printf '%s\n' "$line" | grep -Exq -- "$pattern"; then allowed=1; break; fi
       done < "$manifest"
@@ -51,7 +51,7 @@ while :; do
     fi
   done < "$log"
 done < "$rundir/suites"
-while IFS=$'\t' read -r owner kind pattern; do
+while IFS=$'\t' read -r owner kind pattern || [ -n "$owner$kind$pattern" ]; do
   [ "$kind" = require ] || continue
   key=${owner//\//__}
   grep -Fq -- "$pattern" "$rundir/$key.log" 2>/dev/null || bad "$owner: missing required line: $pattern"

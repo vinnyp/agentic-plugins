@@ -2,6 +2,8 @@
 bin/test-drive-cold-session.sh	skip	^SKIP: tmux not installed$
 bin/test-run-tests.sh	skip	^SKIP shellcheck failure$
 bin/test-dispatch-worker-signals.sh	skip	^SKIP: GNU timer not installed$
+bin/test-coding-dispatch.sh	skip	^SKIP: GNU timer not installed$
+bin/test-dispatch-env-reset.sh	skip	^SKIP: GNU timer not installed$
 bin/test-portable-timeout.sh	skip	^SKIP oracle leg: no GNU timeout$
 bin/test-mutation-verify-slow.sh	skip	^SKIP: go not installed$
 bin/test-mutation-verify-slow.sh	skip	^SKIP: (cargo knock-out|cargo two-binary knock-out|real cargo double-dash knock-out) \(cargo absent\)$

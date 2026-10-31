@@ -429,7 +429,7 @@ run_with_timeout() {
   # Background jobs may ignore INT; TERM forwards and arms the kill stage.
   trap 'caught=130; [ -z "$timer_pid" ] || kill -TERM "$timer_pid" 2>/dev/null || :' INT
   trap 'caught=143; [ -z "$timer_pid" ] || kill -TERM "$timer_pid" 2>/dev/null || :' TERM
-  trap 'caught=129; [ -z "$timer_pid" ] || kill -TERM "$timer_pid" 2>/dev/null || :' HUP
+  trap 'caught=143; [ -z "$timer_pid" ] || kill -TERM "$timer_pid" 2>/dev/null || :' HUP
   "$tcmd" -k "$KILL_AFTER" "$t" "$@" <&0 &
   timer_pid=$!
   if [ "$caught" -ne 0 ]; then kill -TERM "$timer_pid" 2>/dev/null || :; fi
@@ -440,6 +440,9 @@ run_with_timeout() {
     rc=$wait_rc
     break
   done
+  if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ] || [ "$caught" -ne 0 ]; then
+    kill -KILL -- "-$timer_pid" 2>/dev/null || :
+  fi
   if [ "$caught" -ne 0 ]; then exit "$caught"; fi
   trap - INT TERM HUP
   [ -z "$old_int" ] || eval "$old_int"
@@ -638,7 +641,7 @@ dispatch_codex() {
   # Keep the files separate; concatenation could split a banner while stderr is written.
   # A codex descendant that escapes the process group and holds either stream open can
   # keep these waited pipelines alive past the external timeout; same-group children
-  # are killed by timeout's group kill.
+  # are killed by run_with_timeout after a timeout or signal.
   # The brace group is a pipeline element, so it runs in a forked subshell: exit ends
   # only that subshell. Explicitly exiting with PIPESTATUS[0] preserves codex's rc,
   # including timeout rc; under pipefail, the group would otherwise return the inner

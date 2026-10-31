@@ -275,3 +275,8 @@ Temporary output reads are bounded even if a runtime replaces their paths with F
 Edit dispatch and build phases refuse when review pin status returns exit 3
 (the bounded check timed out or could not complete). Other nonzero statuses,
 including a missing or non-executable review-pin helper, allow edits to proceed.
+
+After an agent timeout or interruption, dispatch kills remaining descendants in
+the timer's process group before waiting for output readers. Normal exits preserve
+background children. Descendants that escape the group can still hold streams open.
+The stock gate streams its output while retaining a copy for the skip audit.

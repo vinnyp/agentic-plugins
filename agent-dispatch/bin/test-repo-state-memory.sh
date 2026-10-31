@@ -264,3 +264,21 @@ parallel_failed=0
 for worker in $workers; do wait "$worker" || parallel_failed=1; done
 [ "$parallel_failed" = 0 ] || fail 'concurrent bounded status failed'
 echo 'channel verification and concurrent bounded status PASS'
+
+# Every verification attempt matters, including the last one.
+for failures in 19 20; do
+(
+  exec 7>"$TMP/channel-a" 8<>"$TMP/channel-a"
+  calls=0
+  function [ {
+    if builtin [ "$1" = -f ]; then
+      calls=$((calls + 1))
+      builtin [ "$calls" -gt "$failures" ] || return 1
+    fi
+    builtin [ "$@"
+  }
+  expected=0
+  builtin [ "$failures" -ne 20 ] || expected=1
+  rc_is "$expected" _repo_state_channel_verified
+) || exit 1
+done

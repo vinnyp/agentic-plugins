@@ -354,8 +354,8 @@ seconds; anything else uses the default with a warning). The default is 120 seco
 for the dispatcher and 60 for `repo-state-check`. The dispatcher uses
 `timeout -k`, `gtimeout -k`, or the bundled `perl` helper; bounded state operations
 also retain a watchdog fallback. Agent runs are unbounded only if no timer is usable.
-INT, TERM and HUP sent to `dispatch-worker` reach the agent within `KILL_AFTER`.
-On the codex path, TERM sent only to the worker pid is not forwarded.
+Group signals, including Ctrl-C, reach the agent on every path within `KILL_AFTER`.
+On the codex and `agy --review` pipeline paths, a pid-only TERM waits for the time limit.
 Launch-time setup, including the before snapshot, fails closed with exit 3 on timeout
 or inability to complete; `DISPATCH_REVIEW_STATE=skipped(not-launched)` is emitted.
 The single launch probe runs before runtime temporary files or auth checks.

@@ -51,6 +51,31 @@ rm "$TASK_TMP/run/bin__test-a.sh.rc"
 printf 'SKIPPED unexpected\nUNBOUNDED\n' > "$TASK_TMP/run/bin__test-a.sh.log"
 check 1
 [ "$(wc -l < "$TASK_TMP/out" | tr -d ' ')" = 4 ] || { echo 'FAIL audit stopped at first violation'; exit 1; }
+# Invalid rows must report their specific validation failure.
+for row in $'bin/test-a.sh\tskip' $'bin/test-a.sh\tskip\tx\textra' $'bin/test-a.sh\tbogus\tx' $'bin/test-a.sh\tskip\t'; do
+  fixture
+  printf '%s\n' "$row" > "$TASK_TMP/manifest"
+  check 1
+  message='invalid manifest row:'
+  case "$row" in *bogus*) message='unknown manifest kind: bogus' ;; esac
+  grep -Fq "$message" "$TASK_TMP/out" || { echo 'FAIL missing validation message'; exit 1; }
+done
+fixture
+printf 'bin/test-a.sh\tskip\t^SKIP: tmux not installed$\n' > "$TASK_TMP/manifest"
+printf 'prefix SKIP: tmux not installed suffix\n' >> "$TASK_TMP/run/bin__test-a.sh.log"
+check 1
+# Full-line matching must also reject an unanchored substring pattern.
+printf 'bin/test-a.sh\tskip\tSKIP: tmux not installed\n' > "$TASK_TMP/manifest"
+check 1
+fixture
+printf 'bin/test-a.sh\tskip\t^SKIP: tmux missing$' > "$TASK_TMP/manifest"
+printf 'SKIP: tmux missing\n' >> "$TASK_TMP/run/bin__test-a.sh.log"
+check 0
+printf 'bin/test-a.sh\trequire\tmissing line' > "$TASK_TMP/manifest"
+check 1
+printf 'bin/test-a.sh\tbogus\tx' > "$TASK_TMP/manifest"
+check 1
+grep -Fq 'unknown manifest kind: bogus' "$TASK_TMP/out" || exit 1
 while IFS= read -r row || [ -n "$row" ]; do
   case "$row" in ''|'#'*) continue ;; esac
   fields=$(printf '%s\n' "$row" | awk -F '\t' '{print NF}')

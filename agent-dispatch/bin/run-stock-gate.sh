@@ -14,11 +14,9 @@ done
 output=$(mktemp "${TMPDIR:-/tmp}/stock-gate.XXXXXX") || exit 1
 [ -n "$output" ] || exit 1
 trap 'rm -f "$output"' EXIT
-rc=0
-RUN_TESTS_KEEP_LOGS=1 bash "$BIN/run-tests.sh" > "$output" 2>&1 || rc=$?
-cat "$output"
+RUN_TESTS_KEEP_LOGS=1 bash "$BIN/run-tests.sh" 2>&1 | tee "$output"
+rc=${PIPESTATUS[0]}
 rundir=$(sed -n 's/^Run dir: //p' "$output" | tail -n 1)
-printf 'Run dir: %s\n' "$rundir"
 [ -n "$rundir" ] && [ -d "$rundir" ] || exit 1
 audit_rc=0
 bash "$BIN/audit-test-skips.sh" "$rundir" "$BIN/lib/stock-skip-manifest.txt" || audit_rc=$?

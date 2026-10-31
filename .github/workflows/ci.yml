@@ -381,6 +381,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Run the gate in a stock environment
         shell: bash
