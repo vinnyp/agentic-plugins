@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-. "${BASH_SOURCE[0]%/*}/lib/timeout-bin.sh"
 # Hermetic probe and preflight coverage; never invokes a provider binary.
 set -uo pipefail
 BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$BIN_DIR/lib/timeout-bin.sh"
 # shellcheck disable=SC1091
 . "$BIN_DIR/lib/test-env-reset.sh"
 reset_dispatch_env

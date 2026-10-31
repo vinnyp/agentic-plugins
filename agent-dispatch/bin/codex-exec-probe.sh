@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
-. "${BASH_SOURCE[0]%/*}/lib/timeout-bin.sh"
 # Source-able shell-tool readiness probe. The last stdout line is the reason;
 # diagnostics stay on stderr. Subshell traps cannot overwrite the caller's traps.
+_probe_source=${BASH_SOURCE[0]}
+case "$_probe_source" in */*) _probe_dir=${_probe_source%/*} ;; *) _probe_dir=. ;; esac
+# shellcheck disable=SC1091
+. "$_probe_dir/lib/timeout-bin.sh"
+unset _probe_source _probe_dir
+
 codex_exec_probe() (
   local codex_bin="${CODEX_BIN:-codex}"
   local probe_timeout="${CODEX_EXEC_PROBE_TIMEOUT-75s}"

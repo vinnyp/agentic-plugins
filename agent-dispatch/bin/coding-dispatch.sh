@@ -76,9 +76,10 @@ while [ -L "$_src" ]; do
   case "$_src" in /*) ;; *) _src="$_dir/$_src" ;; esac
 done
 SCRIPT_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
-# shellcheck disable=SC1091
 [ -r "$SCRIPT_DIR/lib/timeout-bin.sh" ] || { echo "coding-dispatch.sh: broken install: cannot read $SCRIPT_DIR/lib/timeout-bin.sh" >&2; exit 3; }
+# shellcheck disable=SC1091
 . "$SCRIPT_DIR/lib/timeout-bin.sh"
+# shellcheck disable=SC1091
 . "$SCRIPT_DIR/lib/agy-models.sh"
 # shellcheck disable=SC1091  # dynamic source path ($SCRIPT_DIR); resolved at runtime
 . "$SCRIPT_DIR/lib/hash.sh"

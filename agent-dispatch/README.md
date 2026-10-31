@@ -89,9 +89,9 @@ contain the agent it launches.
 
 ## Requirements
 
-`bash` 3.2+, `git`, and `jq` are needed for the core dispatch commands; `timeout`/`gtimeout` (GNU
-coreutils — `brew install coreutils` on macOS) bounds every agent run, and **without it runs are
-unbounded**. The agent CLIs (`codex`, `agy`, `claude`), `tmux`/`cmux` for the drive scripts,
+`bash` 3.2+, `git`, and `jq` are needed for the core dispatch commands; `timeout`, `gtimeout`, or the bundled
+`perl` helper bounds agent runs. Runs are unbounded only if none is usable; coreutils is
+not required for a bound. The agent CLIs (`codex`, `agy`, `claude`), `tmux`/`cmux` for the drive scripts,
 `python3` for `run-long-gate.sh`, `shellcheck`, and a Go toolchain (for the `review-gate` CLI) are
 each optional and needed only for their own feature. macOS and Linux are both supported. Full
 per-command table: [Command reference → Requirements](docs/commands.md#requirements).
@@ -184,6 +184,7 @@ symlinked entrypoints and refuses to run when its required stat helper is missin
 
 ```bash
 bash bin/run-tests.sh
+# Stock macOS contract: bash bin/run-stock-gate.sh (see command reference)
 ```
 
 Each top-level runner checks `ps` availability against its own PATH, including

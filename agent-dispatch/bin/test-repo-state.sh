@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-. "${BASH_SOURCE[0]%/*}/lib/timeout-bin.sh"
 set -euo pipefail
 BIN=$(cd "$(dirname "$0")" && pwd)
+. "$BIN/lib/timeout-bin.sh"
 TMP=$(set -eu; scratch=$(mktemp -d "${TMPDIR:-/tmp}/repo-state-test.XXXXXX"); [ -n "$scratch" ]; printf '%s\n' "$scratch")
 [ -n "$TMP" ] || exit 1
 TMP=$(cd "$TMP" && pwd -P)
@@ -85,6 +85,7 @@ mkfifo "$R/.gitignore"
 for mode in timeout no-timeout; do
   rc_is 0 "$timer" -k 1 9 bash "$TMP/performance.sh" "$BIN" "$TMP/bounded.sh" "$R" "$TMP/fifo-$mode" "$mode" hostile
 done
+echo 'hostile snapshot fallback PASS'
 rm "$R/.gitignore"
 # Delay ref enumeration after the sweep, independently of Git's FIFO behavior.
 # The diagnostic must survive replacement of the timed-out snapshot.
@@ -133,6 +134,7 @@ COMPARE
   for mode in timeout no-timeout; do
     rc_is 0 "$timer" -k 1 9 bash "$TMP/compare-bound.sh" "$BIN" "$TMP/bounded.sh" "$TMP" "$mode"
   done
+echo 'compare bound PASS'
 # CLI failures distinguish critical after-state loss from invalid input.
 fixture
 snap "$TMP/before"
@@ -674,6 +676,7 @@ for shape in fifo zero dangling; do
   [ "$shape" != fifo ] || path=info/exclude
   grep -qx "metadata $path: <changed>" "$TMP/changes" || { echo "metadata $shape missed" >&2; exit 1; }
 done
+echo 'hostile metadata types PASS'
 fixture
 snap "$TMP/before"
 git -C "$R" -c user.name=Foreign -c user.email=foreign@example.invalid commit -qm injected --allow-empty

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-SELF_DIR=$(cd "${BASH_SOURCE[0]%/*}" && pwd)
+SELF_DIR=$(cd "$(dirname "$0")" && pwd)
 . "$SELF_DIR/lib/test-dispatch-worker-lib.sh"
 REAL_PERL=$(command -v perl)
 base_path=$PATH

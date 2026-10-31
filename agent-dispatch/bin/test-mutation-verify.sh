@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-. "${BASH_SOURCE[0]%/*}/lib/timeout-bin.sh"
 # shellcheck disable=SC2181
 # test-mutation-verify.sh — TDD suite for mutation-verify.sh.
 #
@@ -19,6 +18,7 @@
 set -uo pipefail
 unset MUTATION_VERIFY_COPY_ROOT MUTATION_VERIFY_FILE MUTATION_VERIFY_SWEEP_JOBS
 SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SELF_DIR/lib/timeout-bin.sh"
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/test-mv-core.XXXXXX")
 [ -n "$TMP" ] || exit 1
 TMP=$(cd "$TMP" && pwd -P)

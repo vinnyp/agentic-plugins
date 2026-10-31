@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
-. "${BASH_SOURCE[0]%/*}/lib/timeout-bin.sh"
 # Source-able agy OAuth freshness probe; retains successful output for model checks.
+
+_probe_source=${BASH_SOURCE[0]}
+case "$_probe_source" in */*) _probe_dir=${_probe_source%/*} ;; *) _probe_dir=. ;; esac
+# shellcheck disable=SC1091
+. "$_probe_dir/lib/timeout-bin.sh"
+unset _probe_source _probe_dir
 
 agy_auth_probe() {
   AGY_AUTH_PROBE_OUTPUT=""

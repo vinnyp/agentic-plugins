@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-. "${BASH_SOURCE[0]%/*}/lib/timeout-bin.sh"
 set -eu
 SELF_DIR=$(cd "$(dirname "$0")" && pwd)
+. "$SELF_DIR/lib/timeout-bin.sh"
 # shellcheck source=lib/test-env-reset.sh
 . "$SELF_DIR/lib/test-env-reset.sh"
 reset_dispatch_env

@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-. "${BASH_SOURCE[0]%/*}/lib/timeout-bin.sh"
 # Test dispatch-worker's --review (read-only peer-review) mode against the default
 # autonomous-EDIT mode. The unit-of-proof is the BRIEF that gets assembled and fed
 # to the runtime on stdin — observable by stubbing `agy`/`codex` on PATH. We do NOT
@@ -15,6 +14,7 @@
 #   - codex --review forces a read-only sandbox even when --ceremony is also passed.
 
 SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SELF_DIR/lib/timeout-bin.sh"
 # shellcheck source=lib/test-dispatch-worker-lib.sh
 . "$SELF_DIR/lib/test-dispatch-worker-lib.sh"
 

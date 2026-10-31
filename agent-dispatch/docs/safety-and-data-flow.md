@@ -25,10 +25,10 @@ What the `coding-dispatch.sh` net covers:
 1. **A dirty tree is refused.** Without `--worktree`, `coding-dispatch.sh` exits 2 if
    `git status --porcelain` is non-empty, because the revert hard-resets to HEAD and would take
    your uncommitted work with it.
-2. **An external timeout owns the clock.** The bound is a separate `timeout` process, never the
+2. **An external timeout owns the clock.** The bound uses `timeout`, `gtimeout`, or the bundled `perl` helper, never the
    agent's own `--print-timeout` (agy has hung hours past its own setting). A kill is exit 124 —
-   a *blocked phase*, not a result. With no `timeout`/`gtimeout` on PATH the run is unbounded and
-   the script says so.
+   a *blocked phase*, not a result. The run is unbounded only if none is usable, and
+   the script says so. Coreutils is not required for a bound.
 3. **A failure restores the tree.** The revert is `git reset --hard <pre-dispatch-commit>` +
    `git clean -fd` — **not** `git checkout -- .`, and note there is no `-x`, so ignored files
    (build caches, `.env`, `.venv`) are left alone. In `--worktree` mode the reset runs inside the

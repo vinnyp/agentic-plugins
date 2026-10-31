@@ -240,3 +240,27 @@ rc_is 2 repo_state_compare "$TMP/a" "$TMP/b" "$TMP/changes"
   [ "$REPO_STATE_BOUND_OUT" = $'state: compare could not complete (escape failed)\n' ] || fail 'escape failure payload lacks final newline'
 )
 echo 'repo-state memory tests passed'
+
+# Distinct files and nonregular channels must still fail closed.
+: > "$TMP/channel-a"; : > "$TMP/channel-b"
+(exec 7>"$TMP/channel-a" 8<>"$TMP/channel-b"; rc_is 1 _repo_state_channel_verified)
+(exec 7>"$TMP/channel-a" 8<>"$TMP/channel-a"; rc_is 0 _repo_state_channel_verified)
+mkfifo "$TMP/channel-fifo"
+(exec 7>"$TMP/channel-a" 8<>"$TMP/channel-fifo"; rc_is 1 _repo_state_channel_verified)
+workers=''
+for worker in 1 2 3 4 5 6 7 8; do
+  (
+    operation=0
+    while [ "$operation" -lt 40 ]; do
+      operation=$((operation + 1))
+      rc=0
+      "$BIN/review-pin.sh" status "$TMP/repo" > "$TMP/parallel-$worker" 2>&1 || rc=$?
+      [ "$rc" != 3 ] || { cat "$TMP/parallel-$worker"; exit 1; }
+    done
+  ) &
+  workers="$workers $!"
+done
+parallel_failed=0
+for worker in $workers; do wait "$worker" || parallel_failed=1; done
+[ "$parallel_failed" = 0 ] || fail 'concurrent bounded status failed'
+echo 'channel verification and concurrent bounded status PASS'

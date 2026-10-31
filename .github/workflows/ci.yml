@@ -372,6 +372,23 @@ jobs:
             commitlint --from "$before" --to "$sha" --verbose
           fi
 
+  stock-macos:
+    name: Stock macOS
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Run the gate in a stock environment
+        shell: bash
+        run: |
+          stock_home="$(mktemp -d)"
+          env -i HOME="$stock_home" TMPDIR="$RUNNER_TEMP" RUN_TESTS_TIMEOUT=600 \
+            PATH=/usr/bin:/bin /bin/bash agent-dispatch/bin/run-stock-gate.sh
+
   go-review-gate:
     name: Go (review-gate)
     runs-on: ubuntu-latest

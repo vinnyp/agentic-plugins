@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -eu
-SELF_DIR=$(cd "${BASH_SOURCE[0]%/*}" && pwd)
+SELF_DIR=$(cd "$(dirname "$0")" && pwd)
 . "$SELF_DIR/lib/test-env-reset.sh"
 reset_dispatch_env
 TASK_TMP=$(mktemp -d "${TMPDIR:-/tmp}/portable-timeout.XXXXXX")
@@ -225,3 +225,13 @@ done
   [ "$rc" = 1 ] && [ -z "$result" ]
 )
 echo 'dispatch_timeout_bin precedence, fallback, probe and source path PASS'
+
+(
+  cd "$SELF_DIR/.."
+  CDPATH="$SELF_DIR/.."
+  export CDPATH
+  helper=$(. bin/lib/timeout-bin.sh; printf '%s\n' "$_DISPATCH_TIMEOUT_HELPER")
+  [ "$helper" = "$SELF_DIR/lib/portable-timeout" ]
+) || { echo 'FAIL CDPATH helper path'; exit 1; }
+(cd "$SELF_DIR" && bash test-audit-test-skips.sh) || exit 1
+echo 'CDPATH helper path and bare-name suite PASS'

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-. "${BASH_SOURCE[0]%/*}/lib/timeout-bin.sh"
 # test-review-pin.sh — acceptance tests for review-pin.sh.
 set -uo pipefail
 SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$SELF_DIR/lib/timeout-bin.sh"
 TMP="$(cd "$(mktemp -d)" && pwd -P)"
 trap 'chmod -R u+w "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT
 # shellcheck disable=SC1091
