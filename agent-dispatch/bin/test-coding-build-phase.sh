@@ -388,7 +388,7 @@ heredoc_261 "cat <<'plan.md'" plan.md
 heredoc_261 "cat <<'END DOC'" 'END DOC'
 heredoc_261 "   cat <<'EOF'" '   EOF'
 # The end word must match the whole line.
-printf '%s\n' '### Task 1: exact word' '```' "cat <<'EOF'" 'EOFISH' '## Still quoted' 'EOF' '```' 'EXACT-AFTER' '## Trailing' 'EXACT-TRAILING' > "$TMP/plan-261-exact.md"
+printf '%s\n' '### Task 1: exact word' '```' "cat <<'EOF'" 'EOFISH' '```' '## Still quoted' 'EOF' '```' 'EXACT-AFTER' '## Trailing' 'EXACT-TRAILING' > "$TMP/plan-261-exact.md"
 run_261 "$TMP/plan-261-exact.md" 1
 expect_261 "$CTX_DIR/1" want '## Still quoted' EXACT-AFTER
 expect_261 "$CTX_DIR/1" deny EXACT-TRAILING
@@ -397,7 +397,7 @@ run_261 "$TMP/plan-261-crlf2.md" 1
 expect_261 "$CTX_DIR/1" want '## Quoted' CRLF-DOC-AFTER
 expect_261 "$CTX_DIR/1" deny CRLF-DOC-TRAILING
 # Text that only resembles a heredoc opens nothing, so the closing section stays out, silently.
-printf '%s\n' '### Task 1: not heredocs' '```' 'x = a << b' 'y = 1<<n' 'std::cout <<endl;' '# prefer cat <<EOF over echo' 'cat <<<word' '```' 'NOT-AFTER' '## Trailing' 'NOT-TRAILING' > "$TMP/plan-261-not.md"
+printf '%s\n' '### Task 1: not heredocs' '```' 'x = a << b' 'y = 1<<n' 'std::cout <<endl;' '# prefer cat <<EOF over echo' 'cat <<<word' 'cat <<< "$x"' "cat <<<'word'" '```' 'NOT-AFTER' '## Trailing' 'NOT-TRAILING' > "$TMP/plan-261-not.md"
 run_261 "$TMP/plan-261-not.md" 1
 expect_261 "$CTX_DIR/1" want NOT-AFTER
 expect_261 "$CTX_DIR/1" deny NOT-TRAILING
