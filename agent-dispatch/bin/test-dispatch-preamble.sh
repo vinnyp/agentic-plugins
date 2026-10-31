@@ -189,7 +189,7 @@ fi
 
 # --- The peer-review gate skill carries the clauses -------------------------
 # The list is compared exactly, so a stale extra line or a reordered clause fails too.
-awk '/The four clauses are:/ {on=1; next} on && /^- / {print; seen=1; next} seen {exit}' "$SKILL" > "$TMP/skill-clauses"
+awk '/The four clauses are:/ {on=1; next} on && /^$/ {next} on && /^- / {print; next} on {exit}' "$SKILL" > "$TMP/skill-clauses"
 printf '%s\n' "$CLAUSES" > "$TMP/block-clauses"
 if cmp -s "$TMP/skill-clauses" "$TMP/block-clauses"; then ok "the skill's clause list matches the shipped block exactly"
 else bad "the skill's clause list differs from the shipped block"; fi
