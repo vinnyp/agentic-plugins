@@ -2,6 +2,7 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
     # `edited` is NOT in the default set ([opened, synchronize, reopened]) and is
     # load-bearing here: the "prospective squash message" step below lints the PR
