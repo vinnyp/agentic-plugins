@@ -260,6 +260,86 @@ done
 unset CTX_DIR
 echo "test #237 plan context reaches every task prompt PASS"
 
+# foundry#261: a task block ends at any level-2 heading, so a plan's closing sections stay out
+# of the prompt. A "## " line inside a code fence is task content, and an unclosed fence must
+# not swallow the next task.
+cat > "$TMP/plan-261.md" <<'PLAN'
+### Task 1: quotes a document
+BEFORE-FENCE
+```markdown
+## Quoted heading
+QUOTED-BODY
+```
+AFTER-FENCE
+#### Subheading
+SUB-BODY
+## Stage 2 heading
+STAGE-TEXT
+### Task 2: nested fences
+````markdown
+```
+## Nested heading
+```
+NESTED-BODY
+````
+~~~
+## Tilde heading
+```
+## Backtick inside tilde
+~~~
+TILDE-AFTER
+```inline``` is not a fence
+## Orchestrator steps
+ORCH-TEXT open a PR and merge it
+## Self-review
+SELF-TEXT
+PLAN
+cat > "$TMP/plan-261-unclosed.md" <<'PLAN'
+### Task 1: unclosed
+```
+OPEN-FENCE-BODY
+## Inside unclosed
+INSIDE-UNCLOSED
+### Task 2: next
+NEXT-BODY
+## Closing notes
+CLOSING-TEXT
+PLAN
+printf '%s\r\n' '### Task 1: crlf' '```' '## Quoted crlf' '```' 'CRLF-AFTER' '## Trailing' 'CRLF-TRAILING' > "$TMP/plan-261-crlf.md"
+repo261="$TMP/phase261"; new_phase_repo "$repo261"
+export CTX_DIR="$TMP/ctx261"; mkdir -p "$CTX_DIR"
+expect_261() { # <prompt file> <want|deny> <literal>...
+  local f261="$1" mode261="$2"; shift 2
+  local w261
+  for w261 in "$@"; do
+    if [ "$mode261" = want ]; then
+      grep -qF -- "$w261" "$f261" || { cat "$f261"; echo "FAIL: #261 $f261 should carry '$w261'"; exit 1; }
+    else
+      ! grep -qF -- "$w261" "$f261" || { cat "$f261"; echo "FAIL: #261 $f261 should not carry '$w261'"; exit 1; }
+    fi
+  done
+}
+out="$(PATH="$TMP/ctxbin:$PATH" "$SELF_DIR/coding-build-phase.sh" codex "$TMP/plan-261.md" "$repo261" 1 2 --build-cmd true 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] || { echo "$out"; echo "FAIL: #261 phase should exit 0, got $rc"; exit 1; }
+expect_261 "$CTX_DIR/1" want BEFORE-FENCE '## Quoted heading' QUOTED-BODY AFTER-FENCE '#### Subheading' SUB-BODY
+expect_261 "$CTX_DIR/1" deny STAGE-TEXT NESTED-BODY
+expect_261 "$CTX_DIR/2" want '## Nested heading' NESTED-BODY '## Tilde heading' '## Backtick inside tilde' TILDE-AFTER '```inline``` is not a fence'
+expect_261 "$CTX_DIR/2" deny '## Orchestrator steps' ORCH-TEXT SELF-TEXT
+rm -f "$CTX_DIR"/*
+out="$(PATH="$TMP/ctxbin:$PATH" "$SELF_DIR/coding-build-phase.sh" codex "$TMP/plan-261-unclosed.md" "$repo261" 1 2 --build-cmd true 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] || { echo "$out"; echo "FAIL: #261 unclosed-fence phase should exit 0, got $rc"; exit 1; }
+expect_261 "$CTX_DIR/1" want OPEN-FENCE-BODY INSIDE-UNCLOSED
+expect_261 "$CTX_DIR/1" deny NEXT-BODY
+expect_261 "$CTX_DIR/2" want NEXT-BODY
+expect_261 "$CTX_DIR/2" deny CLOSING-TEXT
+rm -f "$CTX_DIR"/*
+out="$(PATH="$TMP/ctxbin:$PATH" "$SELF_DIR/coding-build-phase.sh" codex "$TMP/plan-261-crlf.md" "$repo261" 1 --build-cmd true 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] || { echo "$out"; echo "FAIL: #261 CRLF phase should exit 0, got $rc"; exit 1; }
+expect_261 "$CTX_DIR/1" want '## Quoted crlf' CRLF-AFTER
+expect_261 "$CTX_DIR/1" deny CRLF-TRAILING
+unset CTX_DIR
+echo "test #261 task block ends at a level-2 heading outside a fence PASS"
+
 # #234: unavailable agents block either phase mode without committing.
 printf '#!/usr/bin/env bash\nexit 6\n' > "$TMP/bin/coding-dispatch.sh"
 for mode234 in in-place worktree; do

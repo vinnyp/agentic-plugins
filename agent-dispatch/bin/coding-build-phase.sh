@@ -101,11 +101,24 @@ fi
 tmp="$(mktemp -d)"
 
 # extract_task <id>: print the plan block from "### Task <id>:" up to (not incl.) the next
-# "### Task ", "## Phase", or "## Self-Review". Anchored colon distinguishes 13 from 13b.
+# "### Task ", "## Phase", "## Self-Review", or any other level-2 heading, so a plan's closing
+# sections never reach the worker (vinnyp/foundry#261). Anchored colon distinguishes 13 from 13b.
+# A "## " line inside a code fence is task content, not a heading: plans quote whole documents.
+# Only the generic terminator is fence-aware, so an unclosed fence still stops at the next task.
 extract_task() {
   awk -v t="^### Task ${1}:" '
     $0 ~ t {f=1; print; next}
     f && (/^### Task /||/^## Phase/||/^## Self-Review/) {exit}
+    f && /^ ? ? ?(```|~~~)/ {
+      line=$0; sub(/^ +/, "", line)
+      match(line, /^(`+|~+)/); mark=substr(line, 1, RLENGTH); rest=substr(line, RLENGTH + 1)
+      if (fence == "") {
+        if (mark !~ /^`/ || rest !~ /`/) fence=mark
+      } else if (substr(mark, 1, 1) == substr(fence, 1, 1) && length(mark) >= length(fence) && rest ~ /^[ \t\r]*$/) {
+        fence=""
+      }
+    }
+    f && fence == "" && /^## / {exit}
     f {print}
   ' "$plan"
 }
