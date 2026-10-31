@@ -260,6 +260,189 @@ done
 unset CTX_DIR
 echo "test #237 plan context reaches every task prompt PASS"
 
+# foundry#261: a task block ends at any level-2 heading, so a plan's closing sections stay out
+# of the prompt. A "## " line inside a code fence is task content, and an unclosed fence must
+# not swallow the next task.
+cat > "$TMP/plan-261.md" <<'PLAN'
+### Task 1: quotes a document
+BEFORE-FENCE
+```markdown
+## Quoted heading
+QUOTED-BODY
+```
+AFTER-FENCE
+#### Subheading
+SUB-BODY
+## Stage 2 heading
+STAGE-TEXT
+### Task 2: nested fences
+````markdown
+```
+## Nested heading
+```
+NESTED-BODY
+````
+~~~
+## Tilde heading
+```
+## Backtick inside tilde
+~~~
+TILDE-AFTER
+```inline``` is not a fence
+## Orchestrator steps
+ORCH-TEXT open a PR and merge it
+## Self-review
+SELF-TEXT
+PLAN
+cat > "$TMP/plan-261-unclosed.md" <<'PLAN'
+### Task 1: unclosed
+```
+OPEN-FENCE-BODY
+## Inside unclosed
+INSIDE-UNCLOSED
+### Task 2: next
+NEXT-BODY
+## Closing notes
+CLOSING-TEXT
+PLAN
+printf '%s\r\n' '### Task 1: crlf' '```' '## Quoted crlf' '```' 'CRLF-AFTER' '## Trailing' 'CRLF-TRAILING' > "$TMP/plan-261-crlf.md"
+repo261="$TMP/phase261"; new_phase_repo "$repo261"
+export CTX_DIR="$TMP/ctx261"; mkdir -p "$CTX_DIR"
+expect_261() { # <prompt file> <want|deny> <literal>...
+  local f261="$1" mode261="$2"; shift 2
+  local w261
+  for w261 in "$@"; do
+    if [ "$mode261" = want ]; then
+      grep -qF -- "$w261" "$f261" || { cat "$f261"; echo "FAIL: #261 $f261 should carry '$w261'"; exit 1; }
+    else
+      ! grep -qF -- "$w261" "$f261" || { cat "$f261"; echo "FAIL: #261 $f261 should not carry '$w261'"; exit 1; }
+    fi
+  done
+}
+out="$(PATH="$TMP/ctxbin:$PATH" "$SELF_DIR/coding-build-phase.sh" codex "$TMP/plan-261.md" "$repo261" 1 2 --build-cmd true 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] || { echo "$out"; echo "FAIL: #261 phase should exit 0, got $rc"; exit 1; }
+expect_261 "$CTX_DIR/1" want BEFORE-FENCE '## Quoted heading' QUOTED-BODY AFTER-FENCE '#### Subheading' SUB-BODY
+expect_261 "$CTX_DIR/1" deny STAGE-TEXT NESTED-BODY
+expect_261 "$CTX_DIR/2" want '## Nested heading' NESTED-BODY '## Tilde heading' '## Backtick inside tilde' TILDE-AFTER '```inline``` is not a fence'
+expect_261 "$CTX_DIR/2" deny '## Orchestrator steps' ORCH-TEXT SELF-TEXT
+rm -f "$CTX_DIR"/*
+out="$(PATH="$TMP/ctxbin:$PATH" "$SELF_DIR/coding-build-phase.sh" codex "$TMP/plan-261-unclosed.md" "$repo261" 1 2 --build-cmd true 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] || { echo "$out"; echo "FAIL: #261 unclosed-fence phase should exit 0, got $rc"; exit 1; }
+expect_261 "$CTX_DIR/1" want OPEN-FENCE-BODY INSIDE-UNCLOSED
+expect_261 "$CTX_DIR/1" deny NEXT-BODY
+expect_261 "$CTX_DIR/2" want NEXT-BODY
+expect_261 "$CTX_DIR/2" deny CLOSING-TEXT
+rm -f "$CTX_DIR"/*
+out="$(PATH="$TMP/ctxbin:$PATH" "$SELF_DIR/coding-build-phase.sh" codex "$TMP/plan-261-crlf.md" "$repo261" 1 --build-cmd true 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] || { echo "$out"; echo "FAIL: #261 CRLF phase should exit 0, got $rc"; exit 1; }
+expect_261 "$CTX_DIR/1" want '## Quoted crlf' CRLF-AFTER
+expect_261 "$CTX_DIR/1" deny CRLF-TRAILING
+# A closed fence protects every "## " line, including quoted Phase and Self-Review headings, and
+# only a real closer ends it. Unfenced, those headings still end the block.
+printf '%s\n' '### Task 1: closers' '```' '## Phase 1 quoted' '## Self-Review quoted' '```bash' '## Info not a closer' '```' \
+  'AFTER-INFO' '```' '## Longer closer' '````' 'AFTER-LONG' '   ```' '## Indented fence' '    ```' '## Four spaces not a closer' '   ```' \
+  'AFTER-INDENT' '    ```' '## Four spaces not an opener' 'INDENT-TRAILING' > "$TMP/plan-261-closers.md"
+printf '%s\n' '### Task 1: real phase' 'PHASE-BODY' '## Phase 2' 'PHASE-TEXT' > "$TMP/plan-261-phase.md"
+printf '%s\n' '### Task 1: real self-review' 'SELF-BODY' '## Self-Review' 'SELF-REVIEW-TEXT' > "$TMP/plan-261-self.md"
+printf '### Task 1: tab closer\n```\n## Tab quoted\n```\t\nTAB-AFTER\n## Trailing\nTAB-TRAILING\n' > "$TMP/plan-261-tab.md"
+printf '%s\n' '### Task 1: stray fence' 'STRAY-BODY' '```' '## Orchestrator steps' 'STRAY-TEXT' > "$TMP/plan-261-stray.md"
+# A heredoc in a fence hides its document: the inner closer would otherwise close the outer fence
+# and the document's next "## " would cut the task mid-file. Here-strings, comments, a glued "1<<n"
+# and a lower-case "a << b" open nothing.
+printf '%s\n' '### Task 1: heredoc' '```bash' "cat > f <<'EOF'" '```sh' 'inner' '```' '## Quoted section' 'TAIL' 'EOF' '```' 'STEP-2' \
+  '### Notes' 'NOTES-BODY' '~~~ `x`' '## Tilde info quoted' '~~~' 'AFTER-TILDE' '```' 'echo $((1<<n)) ; a << b ; cat <<<word' '```' 'AFTER-SHIFT' \
+  '## Orchestrator steps' 'HEREDOC-TRAILING' > "$TMP/plan-261-heredoc.md"
+printf '%s\n' '### Task 1: heredoc variants' '```' 'cat <<-"END"' '```' '## Dash quoted' '	END' 'python3 - <<PY' '## Python quoted' 'PY' '```' 'VARIANTS-AFTER' '## Trailing' 'VARIANTS-TRAILING' > "$TMP/plan-261-heredoc2.md"
+run_261() { # <plan> <task id>
+  rm -f "$CTX_DIR"/*
+  out="$(PATH="$TMP/ctxbin:$PATH" "$SELF_DIR/coding-build-phase.sh" codex "$1" "$repo261" "$2" --build-cmd true 2>&1)"; rc=$?
+  [ "$rc" -eq 0 ] && [ -f "$CTX_DIR/1" ] || { echo "$out"; echo "FAIL: #261 $1 phase should dispatch and exit 0, got $rc"; exit 1; }
+}
+run_261 "$TMP/plan-261-closers.md" 1
+expect_261 "$CTX_DIR/1" want '## Phase 1 quoted' '## Self-Review quoted' '## Info not a closer' AFTER-INFO '## Longer closer' AFTER-LONG '## Indented fence' '## Four spaces not a closer' AFTER-INDENT
+expect_261 "$CTX_DIR/1" deny '## Four spaces not an opener' INDENT-TRAILING
+printf '%s\n' "$out" | grep -qF 'task 1 stops at heading: ## Four spaces not an opener' || { echo "$out"; echo "FAIL: #261 the stopping heading should be named"; exit 1; }
+run_261 "$TMP/plan-261-heredoc.md" 1
+expect_261 "$CTX_DIR/1" want '## Quoted section' TAIL STEP-2 '### Notes' NOTES-BODY '## Tilde info quoted' AFTER-TILDE AFTER-SHIFT
+grep -qxF EOF "$CTX_DIR/1" || { cat "$CTX_DIR/1"; echo "FAIL: #261 the heredoc's end line should reach the worker"; exit 1; }
+expect_261 "$CTX_DIR/1" deny '## Orchestrator steps' HEREDOC-TRAILING
+run_261 "$TMP/plan-261-heredoc2.md" 1
+expect_261 "$CTX_DIR/1" want '## Dash quoted' '## Python quoted' VARIANTS-AFTER
+expect_261 "$CTX_DIR/1" deny VARIANTS-TRAILING
+# Each heredoc spelling keeps its document and still stops at the closing section.
+heredoc_261() { # <opener line> <end line>
+  printf '%s\n' '### Task 1: spelling' '```bash' "$1" '```sh' 'inner' '```' '## Quoted' 'AFTER-DOC' "$2" '```' 'STEP-AFTER' '## notes' 'SPELLING-TRAILING' > "$TMP/plan-261-spelling.md"
+  run_261 "$TMP/plan-261-spelling.md" 1
+  expect_261 "$CTX_DIR/1" want '## Quoted' AFTER-DOC STEP-AFTER
+  expect_261 "$CTX_DIR/1" deny SPELLING-TRAILING
+  grep -qxF -- "$2" "$CTX_DIR/1" || { cat "$CTX_DIR/1"; echo "FAIL: #261 the prompt lost the end line '$2'"; exit 1; }
+  ! printf '%s\n' "$out" | grep -qF 'task 1 ends inside' || { echo "$out"; echo "FAIL: #261 a closed heredoc must not warn: $1"; exit 1; }
+}
+heredoc_261 "cat << 'EOF'" EOF
+heredoc_261 "cat<<'EOF'" EOF
+heredoc_261 'cat <<\EOF' EOF
+heredoc_261 'cat << EOF' EOF
+heredoc_261 'cat <<EOF > f' EOF
+heredoc_261 "cat <<'END-OF-DOC'" END-OF-DOC
+heredoc_261 "cat <<'plan.md'" plan.md
+heredoc_261 "cat <<'END DOC'" 'END DOC'
+heredoc_261 "   cat <<'EOF'" '   EOF'
+heredoc_261 'cat <<-EOF' "$(printf '\tEOF')"
+heredoc_261 'cat <<- EOF' "$(printf '\tEOF')"
+heredoc_261 'python3 - <<PY' PY
+heredoc_261 'cat <<MY_END2' MY_END2
+# The end word must match the whole line.
+printf '%s\n' '### Task 1: exact word' '```' "cat <<'EOF'" 'EOFISH' '```' '## Still quoted' 'EOF' '```' 'EXACT-AFTER' '## Trailing' 'EXACT-TRAILING' > "$TMP/plan-261-exact.md"
+run_261 "$TMP/plan-261-exact.md" 1
+expect_261 "$CTX_DIR/1" want '## Still quoted' EXACT-AFTER
+expect_261 "$CTX_DIR/1" deny EXACT-TRAILING
+for opener261 in 'cat <<EOF' 'cat << EOF'; do
+  printf '%s\r\n' '### Task 1: crlf heredoc' '```' "$opener261" '```sh' 'inner' '```' '## Quoted' 'EOF' '```' 'CRLF-DOC-AFTER' '## Trailing' 'CRLF-DOC-TRAILING' > "$TMP/plan-261-crlf2.md"
+  run_261 "$TMP/plan-261-crlf2.md" 1
+  expect_261 "$CTX_DIR/1" want '## Quoted' CRLF-DOC-AFTER
+  expect_261 "$CTX_DIR/1" deny CRLF-DOC-TRAILING
+done
+# Text that only resembles a heredoc opens nothing, so the closing section stays out, silently.
+printf '%s\n' '### Task 1: not heredocs' '```' 'x = a << b' 'y = 1<<n' 'std::cout <<endl;' '# prefer cat <<EOF over echo' '  # prefer cat <<EOF here' 'cat <<<word' 'cat <<< "$x"' "cat <<<'word'" '```' 'NOT-AFTER' '## Trailing' 'NOT-TRAILING' > "$TMP/plan-261-not.md"
+run_261 "$TMP/plan-261-not.md" 1
+expect_261 "$CTX_DIR/1" want NOT-AFTER
+expect_261 "$CTX_DIR/1" deny NOT-TRAILING
+! printf '%s\n' "$out" | grep -qF 'task 1 ends inside' || { echo "$out"; echo "FAIL: #261 these lines must not read as heredocs"; exit 1; }
+# A heredoc outside any fence hides nothing.
+printf '%s\n' '### Task 1: unfenced' 'run cat <<EOF' '## Trailing' 'UNFENCED-TRAILING' > "$TMP/plan-261-unfenced.md"
+run_261 "$TMP/plan-261-unfenced.md" 1
+expect_261 "$CTX_DIR/1" deny UNFENCED-TRAILING
+# An accepted false open leaks as it did before #261, and says so, naming the word.
+printf '%s\n' '### Task 1: false open' '```' 'mask = 1 <<bits' '```' '## Orchestrator steps' 'FALSE-OPEN-TEXT' > "$TMP/plan-261-false.md"
+run_261 "$TMP/plan-261-false.md" 1
+expect_261 "$CTX_DIR/1" want FALSE-OPEN-TEXT
+printf '%s\n' "$out" | grep -qF 'task 1 ends inside a heredoc that never reached bits' || { echo "$out"; echo "FAIL: #261 a false open should warn and name its word"; exit 1; }
+# An unterminated heredoc still stops at the next task, and warns.
+printf '%s\n' '### Task 1: unterminated' '```' 'cat <<EOF' 'NEVER-CLOSED' '### Task 2: next' 'NEXT-AFTER-HEREDOC' > "$TMP/plan-261-open.md"
+run_261 "$TMP/plan-261-open.md" 1
+expect_261 "$CTX_DIR/1" want NEVER-CLOSED
+expect_261 "$CTX_DIR/1" deny NEXT-AFTER-HEREDOC
+printf '%s\n' "$out" | grep -qF 'task 1 ends inside a heredoc that never reached EOF' || { echo "$out"; echo "FAIL: #261 an unterminated heredoc should warn"; exit 1; }
+# A fence left open at the next task warns as well.
+run_261 "$TMP/plan-261-unclosed.md" 1
+printf '%s\n' "$out" | grep -qF 'task 1 ends inside an open code fence' || { echo "$out"; echo "FAIL: #261 a fence open at the next task should warn"; exit 1; }
+run_261 "$TMP/plan-261-phase.md" 1
+expect_261 "$CTX_DIR/1" want PHASE-BODY
+expect_261 "$CTX_DIR/1" deny PHASE-TEXT
+run_261 "$TMP/plan-261-self.md" 1
+expect_261 "$CTX_DIR/1" want SELF-BODY
+expect_261 "$CTX_DIR/1" deny SELF-REVIEW-TEXT
+run_261 "$TMP/plan-261-tab.md" 1
+expect_261 "$CTX_DIR/1" want '## Tab quoted' TAB-AFTER
+expect_261 "$CTX_DIR/1" deny TAB-TRAILING
+run_261 "$TMP/plan-261-stray.md" 1
+expect_261 "$CTX_DIR/1" want STRAY-TEXT
+printf '%s\n' "$out" | grep -qF 'task 1 ends inside an open code fence' || { echo "$out"; echo "FAIL: #261 an open fence at the end of a block should warn"; exit 1; }
+run_261 "$TMP/plan-261.md" 1
+! printf '%s\n' "$out" | grep -qF 'open code fence' || { echo "$out"; echo "FAIL: #261 a balanced block must not warn"; exit 1; }
+unset CTX_DIR
+echo "test #261 task block ends at a level-2 heading outside a fence PASS"
+
 # #234: unavailable agents block either phase mode without committing.
 printf '#!/usr/bin/env bash\nexit 6\n' > "$TMP/bin/coding-dispatch.sh"
 for mode234 in in-place worktree; do

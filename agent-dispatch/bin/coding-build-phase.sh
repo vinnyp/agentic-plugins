@@ -101,12 +101,54 @@ fi
 tmp="$(mktemp -d)"
 
 # extract_task <id>: print the plan block from "### Task <id>:" up to (not incl.) the next
-# "### Task ", "## Phase", or "## Self-Review". Anchored colon distinguishes 13 from 13b.
+# "### Task " or level-2 heading, so a plan's closing sections never reach the worker
+# (vinnyp/foundry#261). Anchored colon distinguishes 13 from 13b. A "## " line inside a code fence
+# is task content, not a heading: plans quote whole documents. Only "### Task " ignores fence
+# state, so an unclosed fence or heredoc still stops at the next task. A heredoc opened inside a
+# fence hides what follows up to its end word: a quoted document's own fences and headings are not
+# the plan's. Detection leans towards opening, because a missed heredoc cuts a task mid-document
+# while a false one leaks later sections up to the next task, and warns. A quoted or backslashed word
+# opens at any spacing; a bare word needs a blank before "<<" and, after any blank, upper case, so
+# "a << b" reads as a shift. Both ways a section can be lost or leak are reported on stderr: the
+# heading that stopped a block, and a block ending inside an open fence or heredoc.
 extract_task() {
-  awk -v t="^### Task ${1}:" '
+  awk -v t="^### Task ${1}:" -v id="$1" '
     $0 ~ t {f=1; print; next}
-    f && (/^### Task /||/^## Phase/||/^## Self-Review/) {exit}
+    f && /^### Task / {exit}
+    f && heredoc != "" {
+      line=$0; sub(/\r$/, "", line); sub(/^[ \t]+/, "", line)
+      if (line == heredoc) heredoc=""
+      print; next
+    }
+    f && /^ ? ? ?(```|~~~)/ {
+      line=$0; sub(/^ +/, "", line)
+      match(line, /^(`+|~+)/); mark=substr(line, 1, RLENGTH); rest=substr(line, RLENGTH + 1)
+      if (fence == "") {
+        if (mark !~ /^`/ || rest !~ /`/) fence=mark
+      } else if (substr(mark, 1, 1) == substr(fence, 1, 1) && length(mark) >= length(fence) && rest ~ /^[ \t\r]*$/) {
+        fence=""
+      }
+    }
+    f && fence != "" && /<</ && !/^[ \t]*#/ {
+      line=$0; gsub(/<<</, "", line)
+      if (match(line, /<<-?[ \t]*(\047[^\047]+\047|"[^"]+"|\\[A-Za-z_][A-Za-z0-9_]*)/) ||
+          match(line, /[ \t]<<-?[A-Za-z_][A-Za-z0-9_]*([ \t]|\r?$)/) ||
+          match(line, /[ \t]<<-?[ \t]+[A-Z_][A-Z0-9_]*([ \t]|\r?$)/)) {
+        word=substr(line, RSTART, RLENGTH)
+        sub(/^[ \t]*<<-?[ \t]*/, "", word); sub(/[ \t\r]+$/, "", word); gsub(/[\047"\\]/, "", word)
+        heredoc=word
+      }
+    }
+    f && fence == "" && /^## / {
+      line=$0; sub(/\r$/, "", line)
+      print "coding-build-phase: task " id " stops at heading: " line > "/dev/stderr"
+      exit
+    }
     f {print}
+    END {
+      if (heredoc != "") print "coding-build-phase: task " id " ends inside a heredoc that never reached " heredoc ": a quoted ### Task line may have cut it short, or later sections may have reached the worker; check the plan" > "/dev/stderr"
+      else if (fence != "") print "coding-build-phase: task " id " ends inside an open code fence, so later sections may have reached the worker; check the plan for a stray fence" > "/dev/stderr"
+    }
   ' "$plan"
 }
 
