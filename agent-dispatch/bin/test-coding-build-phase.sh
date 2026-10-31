@@ -347,7 +347,8 @@ printf '%s\n' '### Task 1: real self-review' 'SELF-BODY' '## Self-Review' 'SELF-
 printf '### Task 1: tab closer\n```\n## Tab quoted\n```\t\nTAB-AFTER\n## Trailing\nTAB-TRAILING\n' > "$TMP/plan-261-tab.md"
 printf '%s\n' '### Task 1: stray fence' 'STRAY-BODY' '```' '## Orchestrator steps' 'STRAY-TEXT' > "$TMP/plan-261-stray.md"
 # A heredoc in a fence hides its document: the inner closer would otherwise close the outer fence
-# and the document's next "## " would cut the task mid-file. Shifts and here-strings open nothing.
+# and the document's next "## " would cut the task mid-file. Here-strings, comments, a glued "1<<n"
+# and a lower-case "a << b" open nothing.
 printf '%s\n' '### Task 1: heredoc' '```bash' "cat > f <<'EOF'" '```sh' 'inner' '```' '## Quoted section' 'TAIL' 'EOF' '```' 'STEP-2' \
   '### Notes' 'NOTES-BODY' '~~~ `x`' '## Tilde info quoted' '~~~' 'AFTER-TILDE' '```' 'echo $((1<<n)) ; a << b ; cat <<<word' '```' 'AFTER-SHIFT' \
   '## Orchestrator steps' 'HEREDOC-TRAILING' > "$TMP/plan-261-heredoc.md"
@@ -362,11 +363,63 @@ expect_261 "$CTX_DIR/1" want '## Phase 1 quoted' '## Self-Review quoted' '## Inf
 expect_261 "$CTX_DIR/1" deny '## Four spaces not an opener' INDENT-TRAILING
 printf '%s\n' "$out" | grep -qF 'task 1 stops at heading: ## Four spaces not an opener' || { echo "$out"; echo "FAIL: #261 the stopping heading should be named"; exit 1; }
 run_261 "$TMP/plan-261-heredoc.md" 1
-expect_261 "$CTX_DIR/1" want '## Quoted section' TAIL EOF STEP-2 '### Notes' NOTES-BODY '## Tilde info quoted' AFTER-TILDE AFTER-SHIFT
+expect_261 "$CTX_DIR/1" want '## Quoted section' TAIL STEP-2 '### Notes' NOTES-BODY '## Tilde info quoted' AFTER-TILDE AFTER-SHIFT
+grep -qxF EOF "$CTX_DIR/1" || { cat "$CTX_DIR/1"; echo "FAIL: #261 the heredoc's end line should reach the worker"; exit 1; }
 expect_261 "$CTX_DIR/1" deny '## Orchestrator steps' HEREDOC-TRAILING
 run_261 "$TMP/plan-261-heredoc2.md" 1
 expect_261 "$CTX_DIR/1" want '## Dash quoted' '## Python quoted' VARIANTS-AFTER
 expect_261 "$CTX_DIR/1" deny VARIANTS-TRAILING
+# Each heredoc spelling keeps its document and still stops at the closing section.
+heredoc_261() { # <opener line> <end line>
+  printf '%s\n' '### Task 1: spelling' '```bash' "$1" '```sh' 'inner' '```' '## Quoted' 'AFTER-DOC' "$2" '```' 'STEP-AFTER' '## notes' 'SPELLING-TRAILING' > "$TMP/plan-261-spelling.md"
+  run_261 "$TMP/plan-261-spelling.md" 1
+  expect_261 "$CTX_DIR/1" want '## Quoted' AFTER-DOC STEP-AFTER
+  expect_261 "$CTX_DIR/1" deny SPELLING-TRAILING
+  grep -qxF -- "$2" "$CTX_DIR/1" || { cat "$CTX_DIR/1"; echo "FAIL: #261 the prompt lost the end line '$2'"; exit 1; }
+  ! printf '%s\n' "$out" | grep -qF 'task 1 ends inside' || { echo "$out"; echo "FAIL: #261 a closed heredoc must not warn: $1"; exit 1; }
+}
+heredoc_261 "cat << 'EOF'" EOF
+heredoc_261 "cat<<'EOF'" EOF
+heredoc_261 'cat <<\EOF' EOF
+heredoc_261 'cat << EOF' EOF
+heredoc_261 'cat <<EOF > f' EOF
+heredoc_261 "cat <<'END-OF-DOC'" END-OF-DOC
+heredoc_261 "cat <<'plan.md'" plan.md
+heredoc_261 "cat <<'END DOC'" 'END DOC'
+heredoc_261 "   cat <<'EOF'" '   EOF'
+# The end word must match the whole line.
+printf '%s\n' '### Task 1: exact word' '```' "cat <<'EOF'" 'EOFISH' '## Still quoted' 'EOF' '```' 'EXACT-AFTER' '## Trailing' 'EXACT-TRAILING' > "$TMP/plan-261-exact.md"
+run_261 "$TMP/plan-261-exact.md" 1
+expect_261 "$CTX_DIR/1" want '## Still quoted' EXACT-AFTER
+expect_261 "$CTX_DIR/1" deny EXACT-TRAILING
+printf '### Task 1: crlf heredoc\r\n```\r\ncat <<EOF\r\n## Quoted\r\nEOF\r\n```\r\nCRLF-DOC-AFTER\r\n## Trailing\r\nCRLF-DOC-TRAILING\r\n' > "$TMP/plan-261-crlf2.md"
+run_261 "$TMP/plan-261-crlf2.md" 1
+expect_261 "$CTX_DIR/1" want '## Quoted' CRLF-DOC-AFTER
+expect_261 "$CTX_DIR/1" deny CRLF-DOC-TRAILING
+# Text that only resembles a heredoc opens nothing, so the closing section stays out, silently.
+printf '%s\n' '### Task 1: not heredocs' '```' 'x = a << b' 'y = 1<<n' 'std::cout <<endl;' '# prefer cat <<EOF over echo' 'cat <<<word' '```' 'NOT-AFTER' '## Trailing' 'NOT-TRAILING' > "$TMP/plan-261-not.md"
+run_261 "$TMP/plan-261-not.md" 1
+expect_261 "$CTX_DIR/1" want NOT-AFTER
+expect_261 "$CTX_DIR/1" deny NOT-TRAILING
+! printf '%s\n' "$out" | grep -qF 'task 1 ends inside' || { echo "$out"; echo "FAIL: #261 these lines must not read as heredocs"; exit 1; }
+# A heredoc outside any fence hides nothing.
+printf '%s\n' '### Task 1: unfenced' 'run cat <<EOF' '## Trailing' 'UNFENCED-TRAILING' > "$TMP/plan-261-unfenced.md"
+run_261 "$TMP/plan-261-unfenced.md" 1
+expect_261 "$CTX_DIR/1" deny UNFENCED-TRAILING
+# An accepted false open leaks as it did before #261, and says so, naming the word.
+printf '%s\n' '### Task 1: false open' '```' 'mask = 1 <<bits' '```' '## Orchestrator steps' 'FALSE-OPEN-TEXT' > "$TMP/plan-261-false.md"
+run_261 "$TMP/plan-261-false.md" 1
+expect_261 "$CTX_DIR/1" want FALSE-OPEN-TEXT
+printf '%s\n' "$out" | grep -qF 'task 1 ends inside a heredoc that never reached bits' || { echo "$out"; echo "FAIL: #261 a false open should warn and name its word"; exit 1; }
+# An unterminated heredoc still stops at the next task, and warns.
+printf '%s\n' '### Task 1: unterminated' '```' 'cat <<EOF' 'NEVER-CLOSED' '### Task 2: next' 'NEXT-AFTER-HEREDOC' > "$TMP/plan-261-open.md"
+run_261 "$TMP/plan-261-open.md" 1
+expect_261 "$CTX_DIR/1" want NEVER-CLOSED
+expect_261 "$CTX_DIR/1" deny NEXT-AFTER-HEREDOC
+printf '%s\n' "$out" | grep -qF 'task 1 ends inside a heredoc that never reached EOF' || { echo "$out"; echo "FAIL: #261 an unterminated heredoc should warn"; exit 1; }
+# A fence left open at the next task warns as well.
+run_261 "$TMP/plan-261-unclosed.md" 1
+printf '%s\n' "$out" | grep -qF 'task 1 ends inside an open code fence' || { echo "$out"; echo "FAIL: #261 a fence open at the next task should warn"; exit 1; }
 run_261 "$TMP/plan-261-phase.md" 1
 expect_261 "$CTX_DIR/1" want PHASE-BODY
 expect_261 "$CTX_DIR/1" deny PHASE-TEXT
