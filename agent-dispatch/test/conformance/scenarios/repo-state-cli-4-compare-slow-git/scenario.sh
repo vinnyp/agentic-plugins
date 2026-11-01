@@ -9,7 +9,9 @@ export CASE_MODE=timeout
   declare d rc=0
   fixture; d=$(outdir)
   compare_pair "$d"
+  started=$SECONDS
   DISPATCH_SNAPSHOT_TIMEOUT_SECS=1 slow_cli compare "$d/before" "$d/after" > "$d/out" 2> "$d/err" || rc=$?
+  [ "$((SECONDS - started))" -le 5 ] || fail "deadline exceeded"
   [ "$rc" = 2 ] || fail "expected 2, got $rc"
   [ "$(cat "$d/out")" = 'state: compare timed out' ] || fail 'compare output is not exactly the timeout line'
   survivors; no_state_dir "$d"; no_bound_dir

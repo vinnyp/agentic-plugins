@@ -8,6 +8,7 @@ setup_mode
 fixture
 d=$(outdir)
 compare_pair "$d"
+cli snapshot "$R" "$d/file"
 export PATH="$NOTIMER:$PATH"
 for mode in snapshot compare; do
   rc=0
@@ -19,7 +20,7 @@ for mode in snapshot compare; do
     DISPATCH_SNAPSHOT_TIMEOUT_SECS=1 slow_cli compare "$d/before" "$d/after" > "$d/out" 2> "$d/err" || rc=$?
     [ "$rc" = 2 ] || fail "compare rc=$rc"
     [ "$(wc -l < "$d/out" | tr -d ' ')" = 1 ] || fail 'compare output is not one line'
-    grep -Eq '^state: compare ' "$d/out" || fail 'compare did not fail closed'
+    grep -Eq '^state: compare (timed out|could not complete \(.+\))$' "$d/out" || fail 'compare did not fail closed'
   fi
   survivors; no_state_dir "$d"; no_bound_dir
 done

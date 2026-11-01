@@ -267,7 +267,9 @@ fixtures under
 
 These goldens are recorded through `baseline-tree.sh` at the pinned BASELINE
 SHA. Fixtures use fixed identities and synthetic reviewers; each child is
-waited for and no real agent is invoked. The worker bound cases assert exit 10,
+waited for and no real agent is invoked. Scenarios 2 (`repo-state-cli-2-snapshot-slow-git`) and 4
+(`repo-state-cli-4-compare-slow-git`) bound snapshot and compare elapsed time
+to five seconds each. The worker bound cases assert exit 10,
 an incomplete drift diagnostic, and pin release.
 
 ### Probe test rewrite
@@ -354,8 +356,12 @@ redaction without leaking the synthetic secret.
 
 `repo-state-cli-timer-claims-success` places a timer that reports success without
 running its command first on PATH. Snapshot must return 3 with an unreadable
-first line; compare must return 2 with exactly one `state: compare ` line.
-This checks refusal only, not any deadline: the watchdog is never entered.
+first line, replacing a stale readable snapshot; compare must return 2 with
+exactly one line in either documented form: `state: compare timed out` or
+`state: compare could not complete (reason)`.
+On an external-timer implementation, this proves refusal without a completion
+record; on an internal-deadline implementation, it reduces to the deadline
+refusal.
 
 `probe-codex-cancellation` sends INT, TERM and HUP to the preflight process group,
 which is how a public caller cancels. It requires exits 130/143/129, child

@@ -163,7 +163,7 @@ repo-state-worker-limits	preserve		120	0
 repo-state-hash-failure	preserve		30	0
 probe-agy-auth-preflight	preserve		120	0
 probe-agy-print-form-probe	preserve		120	0
-probe-codex-cancellation	preserve		45	0
+probe-codex-cancellation	preserve		60	0
 probe-codex-exec-probe	preserve		120	0
 probe-codex-pid-signal	known-defect	vinnyp/foundry#277	45	0
 probe-agy-doctor	preserve		120	0

@@ -15,7 +15,7 @@ exec /bin/sleep 12
 SH
 chmod +x "$SCN_TMP/tools/codex"
 for signal in INT TERM HUP; do
-  rm -f "$PROBE_PID_FILE"
+  rm -f "$PROBE_PID_FILE" "$PROBE_DIR_FILE"
   PATH="$SCN_TMP/tools:$PATH" CODEX_EXEC_PROBE_TIMEOUT=20s perl -e '$SIG{INT}="DEFAULT"; $SIG{HUP}=$SIG{TERM}="DEFAULT"; setpgrp(0,0) or die; exec @ARGV' bash "$IMPL_BIN/coding-preflight.sh" codex </dev/null > "$SCN_TMP/out" 2> "$SCN_TMP/err" &
   pid=$!
   deadline=$((SECONDS + 5))

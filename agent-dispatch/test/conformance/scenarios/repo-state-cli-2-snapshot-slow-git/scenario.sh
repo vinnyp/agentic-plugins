@@ -8,7 +8,9 @@ export CASE_MODE=timeout
   set -eu; setup_mode
   declare d rc=0
   fixture; d=$(outdir)
+  started=$SECONDS
   DISPATCH_SNAPSHOT_TIMEOUT_SECS=1 slow_cli snapshot "$R" "$d/file" 2> "$d/err" || rc=$?
+  [ "$((SECONDS - started))" -le 5 ] || fail "deadline exceeded"
   [ "$rc" = 3 ] || fail "expected 3, got $rc"
   [ "$(first_line "$d/file")" = unreadable ] || fail 'file not unreadable'
   ! grep -q '^unsafe' "$d/file" || fail 'unexpected unsafe line'
