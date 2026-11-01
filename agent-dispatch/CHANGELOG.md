@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.4](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.9.3...agent-dispatch-v1.9.4) (2026-11-01)
+
+
+### Bug Fixes
+
+* **agent-dispatch:** refuse to ship a reviewer brief with no preamble ([0d87580](https://github.com/vinnyp/agentic-plugins/commit/0d87580ffb6a4e2388f33b01f5e2e2b264e8670e))
+
 ## [1.9.3](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.9.2...agent-dispatch-v1.9.3) (2026-10-31)
 
 
