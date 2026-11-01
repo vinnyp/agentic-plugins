@@ -251,74 +251,129 @@ fi
 
 # Run the actual extracted snippet without errexit: its explicit refusals are the contract.
 # Every case has fresh briefs and a fresh repository under the suite's private TMP.
+REAL_CAT="$(command -v cat)"
+REAL_MV="$(command -v mv)"
+[ -n "$REAL_CAT" ] && [ -n "$REAL_MV" ] || { bad "cat or mv unavailable"; exit 1; }
 case_number=0
+check_temps() {
+  local f
+  [ "$(cat "$1/brief-one.md.tmp.other")" = 'FOREIGN TEMP' ] || return 1
+  for f in "$1"/*.tmp*; do
+    [ "$f" = "$1/brief-one.md.tmp.other" ] || return 1
+  done
+}
 run_reviewer_case() { # <shell> <case> <extracted snippet>
-  local shell="$1" scenario="$2" source="$3" work repo briefs root rc expected line
+  local shell="$1" scenario="$2" source="$3" work repo briefs root rc expected line run_path
   case_number=$((case_number + 1))
   work="$TMP/case-$case_number"; repo="$work/repo"; briefs="$work/briefs"
   mkdir -p "$repo" "$briefs" || return 1
   git -C "$repo" init -q || return 1
-  root="$PLUGIN_ROOT"
+  root="$PLUGIN_ROOT"; run_path="$PATH"; expected=''
   printf 'FIRST BODY\n' > "$briefs/brief-one.md"
   printf 'SECOND BODY\n' > "$briefs/brief-two.md"
+  printf 'FOREIGN TEMP\n' > "$briefs/brief-one.md.tmp.other"
   cp "$briefs/brief-one.md" "$work/one.before"
   cp "$briefs/brief-two.md" "$work/two.before"
   case "$scenario" in
-    missing) root=/nonexistent ;;
-    markers|token)
+    missing) root=/nonexistent; expected='no preamble block' ;;
+    markers|token|two-tokens)
       root="$work/root"; mkdir -p "$root/docs"
-      if [ "$scenario" = markers ]; then
-        printf 'no markers\n' > "$root/docs/dispatch-preamble.md"
+      case "$scenario" in
+        markers) printf 'no markers\n'; expected='no preamble block' ;;
+        token) printf '<!-- PREAMBLE:START -->\nno token\n<!-- PREAMBLE:END -->\n'; expected='no dirty-paths token' ;;
+        two-tokens) printf '<!-- PREAMBLE:START -->\n{{DIRTY_PATHS}}\n{{DIRTY_PATHS}}\n<!-- PREAMBLE:END -->\n'; expected='still carries' ;;
+      esac > "$root/docs/dispatch-preamble.md" ;;
+    outside) repo="$work/outside"; mkdir -p "$repo"; expected='git status failed' ;;
+    no-brief) rm "$briefs/brief-one.md" "$briefs/brief-two.md"; expected='no brief matched' ;;
+    cat-fails|cat-truncates|mv-fails)
+      mkdir "$work/bin"; run_path="$work/bin:$PATH"
+      if [ "$scenario" = mv-fails ]; then
+        cat > "$work/bin/mv" <<STUB
+#!/usr/bin/env bash
+count=0
+[ ! -f "$work/count" ] || read -r count < "$work/count"
+count=\$((count + 1))
+printf '%s\n' "\$count" > "$work/count"
+[ "\$count" -ne 2 ] || exit 1
+exec "$REAL_MV" "\$@"
+STUB
+        chmod +x "$work/bin/mv"; expected='re-run'
       else
-        printf '<!-- PREAMBLE:START -->\nno token\n<!-- PREAMBLE:END -->\n' > "$root/docs/dispatch-preamble.md"
+        rc=1; [ "$scenario" != cat-truncates ] || rc=0
+        cat > "$work/bin/cat" <<STUB
+#!/usr/bin/env bash
+for arg in "\$@"; do
+  case "\$arg" in *brief-two.md) exit $rc ;; esac
+done
+exec "$REAL_CAT" "\$@"
+STUB
+        chmod +x "$work/bin/cat"
+        [ "$scenario" != cat-fails ] || expected='could not write'
       fi ;;
-    outside) repo="$work/outside"; mkdir -p "$repo" ;;
-    no-brief) rm "$briefs/brief-one.md" "$briefs/brief-two.md" ;;
-    unwritable) mkdir "$briefs/brief-two.md.tmp" ;;
     pipe) printf 'dirty\n' > "$repo/a|b.md" ;;
     amp) printf 'dirty\n' > "$repo/a&b.md" ;;
     one) printf 'dirty\n' > "$repo/one.md" ;;
     two) printf 'dirty\n' > "$repo/one.md"; printf 'dirty\n' > "$repo/two.md" ;;
-    zero) ;;
+    zero|second-run) ;;
     *) return 1 ;;
   esac
   sed "s#$RB/brief-#$briefs/brief-#g" "$source" > "$work/snippet.sh"
-  # This guard covers BOTH loops and die's cleanup, and fails rather than skips.
   if ! grep -qF "for b in $briefs/brief-" "$work/snippet.sh" ||
      ! grep -qF "rm -f $briefs/brief-" "$work/snippet.sh" ||
      sed "s#$briefs##g" "$work/snippet.sh" | grep -qF '/tmp/'; then
     echo "snippet reaches outside the private directory" >&2; return 1
   fi
-  (cd "$repo" && GIT_CEILING_DIRECTORIES="$work" CLAUDE_PLUGIN_ROOT="$root" \
+  (cd "$repo" && PATH="$run_path" GIT_CEILING_DIRECTORIES="$work" CLAUDE_PLUGIN_ROOT="$root" \
     "$shell" "$work/snippet.sh") > "$work/output" 2>&1
   rc=$?
-  case "$scenario" in
-    missing|markers|token|outside|no-brief|unwritable)
-      [ "$rc" -ne 0 ] || return 1
-      [ "$scenario" = no-brief ] && return 0
+  check_temps "$briefs" || return 1
+  if [ -n "$expected" ]; then
+    [ "$rc" -ne 0 ] || return 1
+    grep -qF "$expected" "$work/output" || return 1
+    if [ "$scenario" = mv-fails ]; then
+      ! grep -qF 'no brief was changed' "$work/output" || return 1
+      grep -qxF -- "$C_CLAUSE1" "$briefs/brief-one.md" || return 1
+      cmp -s "$work/two.before" "$briefs/brief-two.md" || return 1
+    elif [ "$scenario" = no-brief ]; then
+      [ ! -e "$briefs/brief-*.md" ] || return 1
+    else
       cmp -s "$work/one.before" "$briefs/brief-one.md" || return 1
       cmp -s "$work/two.before" "$briefs/brief-two.md" || return 1
-      # The intentional directory is the write obstruction, not a leaked temp file.
-      for line in "$briefs"/*.tmp; do
-        [ ! -e "$line" ] || { [ "$scenario" = unwritable ] && [ -d "$line" ]; } || return 1
-      done ;;
-    *)
-      [ "$rc" -eq 0 ] || return 1
-      case "$scenario" in
-        zero) expected='none' ;;
-        one) expected='`one.md`' ;;
-        two) expected='`one.md` `two.md`' ;;
-        pipe) expected='`a|b.md`' ;;
-        amp) expected='`a&b.md`' ;;
-      esac
-      # HEAD/TAIL also keeps the expectation independent of bash replacement rules.
-      line="${C_CLAUSE2%%'{{DIRTY_PATHS}}'*}$expected${C_CLAUSE2#*'{{DIRTY_PATHS}}'}"
-      for expected in "$briefs/brief-one.md" "$briefs/brief-two.md"; do
-        grep -qxF -- "$line" "$expected" || return 1
-        grep -qF '{{DIRTY_PATHS}}' "$expected" && return 1
-        grep -qF 'BODY' "$expected" || return 1
-      done ;;
+      grep -qF 'no brief was changed' "$work/output" || return 1
+    fi
+    [ "$scenario" = mv-fails ] || return 0
+  else
+    [ "$rc" -eq 0 ] || return 1
+  fi
+  if [ "$scenario" = second-run ] || [ "$scenario" = mv-fails ]; then
+    cp "$briefs/brief-one.md" "$work/one.after"
+    cp "$briefs/brief-two.md" "$work/two.after"
+    (cd "$repo" && GIT_CEILING_DIRECTORIES="$work" CLAUDE_PLUGIN_ROOT="$root" \
+      "$shell" "$work/snippet.sh") > "$work/output2" 2>&1
+    rc=$?
+    check_temps "$briefs" || return 1
+    [ "$rc" -eq 0 ] || return 1
+    if [ "$scenario" = second-run ]; then
+      cmp -s "$work/one.after" "$briefs/brief-one.md" || return 1
+      cmp -s "$work/two.after" "$briefs/brief-two.md" || return 1
+    fi
+  fi
+  case "$scenario" in
+    one) expected='`one.md`' ;; two) expected='`one.md` `two.md`' ;;
+    pipe) expected='`a|b.md`' ;; amp) expected='`a&b.md`' ;; *) expected=none ;;
   esac
+  line="${C_CLAUSE2%%'{{DIRTY_PATHS}}'*}$expected${C_CLAUSE2#*'{{DIRTY_PATHS}}'}"
+  for expected in "$briefs/brief-one.md" "$briefs/brief-two.md"; do
+    [ "$(grep -cxF -- "$C_CLAUSE1" "$expected")" -eq 1 ] || return 1
+    grep -qxF -- "$line" "$expected" || return 1
+    grep -qF '{{DIRTY_PATHS}}' "$expected" && return 1
+  done
+  grep -qxF 'FIRST BODY' "$briefs/brief-one.md" || return 1
+  if [ "$scenario" = cat-truncates ]; then
+    ! grep -qF 'SECOND BODY' "$briefs/brief-two.md" || return 1
+  else
+    grep -qxF 'SECOND BODY' "$briefs/brief-two.md" || return 1
+  fi
   return 0
 }
 
@@ -333,18 +388,48 @@ fi
 # an exit-zero die; the ampersand assertion must reject naive replacement on bash 5.2+.
 sed 's/exit 1; }/exit 0; }/' "$TMP/reviewer-snippet.sh" > "$TMP/false-success.sh"
 sed 's/^RENDERED=.*/RENDERED=${BLOCK\/\/$TOK\/$DIRTY}/' "$TMP/reviewer-snippet.sh" > "$TMP/naive-replacement.sh"
+# Each mutant changes only a private extracted copy.
+python3 - "$TMP/reviewer-snippet.sh" "$TMP" <<'PYMUT'
+import pathlib, sys
+s = pathlib.Path(sys.argv[1]).read_text()
+mutations = {
+    'no-mv-die': (' || die "could not replace $b"', ''),
+    'no-skip': ('  [ "$(sed -n 1p "$b")" != "$FIRST" ] || continue\n', ''),
+    'no-note': ("NOTE='some briefs may already carry it; fix this and re-run, which skips those'", ''),
+    'no-file-guard': ('  [ -f "$b" ] || die "no brief matched"\n', ''),
+    'no-block-guard': ('[ -n "$BLOCK" ] || die "no preamble block in $PRE"\n', ''),
+    'no-token-recheck': ('case "$RENDERED" in *"$TOK"*) die "the preamble still carries the dirty-paths token" ;; esac\n', ''),
+    'partial-write': ("printf '%s\\n\\n' \"$RENDERED\"", "printf '%s\\n\\n' \"$FIRST\""),
+}
+for name, (old, new) in mutations.items():
+    if s.count(old) != 1:
+        raise SystemExit('mutation target missing: ' + name)
+    pathlib.Path(sys.argv[2], name + '.sh').write_text(s.replace(old, new))
+PYMUT
+[ "$?" -eq 0 ] || { bad "could not create mutations"; exit 1; }
 for shell in "${shells[@]}"; do
   if ! "$shell" -c 'exit 0'; then bad "interpreter cannot run: $shell"; continue; fi
-  for scenario in missing markers token outside no-brief unwritable pipe amp zero one two; do
+  for scenario in missing markers token outside no-brief two-tokens cat-fails mv-fails cat-truncates second-run pipe amp zero one two; do
     if run_reviewer_case "$shell" "$scenario" "$TMP/reviewer-snippet.sh"; then
       ok "$shell reviewer snippet: $scenario"
     else bad "$shell reviewer snippet: $scenario"; fi
   done
-  for scenario in missing markers token outside no-brief unwritable; do
+  for scenario in missing markers token outside no-brief two-tokens cat-fails mv-fails; do
     if run_reviewer_case "$shell" "$scenario" "$TMP/false-success.sh"; then
       bad "$shell refusal mutation survived: $scenario"
     else ok "$shell refusal mutation rejected: $scenario"; fi
   done
+  for pair in no-mv-die:mv-fails no-skip:second-run no-note:mv-fails no-file-guard:no-brief no-block-guard:markers no-token-recheck:two-tokens; do
+    mutant="${pair%%:*}"; scenario="${pair#*:}"
+    if run_reviewer_case "$shell" "$scenario" "$TMP/$mutant.sh"; then
+      bad "$shell mutation survived: $mutant"
+    else ok "$shell mutation rejected: $mutant"; fi
+  done
+  if run_reviewer_case "$shell" cat-truncates "$TMP/partial-write.sh"; then
+    bad "$shell partial-write mutation survived"
+  elif grep -qF 'does not carry the block' "$TMP/case-$case_number/output"; then
+    ok "$shell partial-write mutation rejected with block refusal"
+  else bad "$shell partial-write mutation failed without block refusal"; fi
   if "$shell" -c '(( BASH_VERSINFO[0] > 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] >= 2) ))'; then
     if run_reviewer_case "$shell" amp "$TMP/naive-replacement.sh"; then
       bad "$shell ampersand mutation survived"
