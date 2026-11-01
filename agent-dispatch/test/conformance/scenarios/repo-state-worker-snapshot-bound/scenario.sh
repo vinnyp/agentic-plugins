@@ -25,14 +25,14 @@ cat > "$TMP/bin/git" <<'GIT'
 #!/usr/bin/env bash
 if [ -f "$SCN_TMP/runtime-ran" ]; then
   case "$BOUND_MODE:$*" in
-    snapshot:*for-each-ref*|compare:*rev-list*|compare:*cat-file*) exec /bin/sleep 3 ;;
+    snapshot:*for-each-ref*|compare:*rev-list*|compare:*cat-file*) exec /bin/sleep 12 ;;
   esac
 fi
 exec "$REAL_GIT" "$@"
 GIT
 chmod +x "$TMP/bin/"*
 rc=0
-PATH="$TMP/bin:$PATH" DISPATCH_SNAPSHOT_TIMEOUT_SECS=1 KILL_AFTER=1s   "$BIN/dispatch-worker" --runtime codex --review --workdir "$SCN_REPO" --brief "$TMP/brief" --timeout 5s > "$TMP/out" 2> "$TMP/err" || rc=$?
+PATH="$TMP/bin:$PATH" DISPATCH_SNAPSHOT_TIMEOUT_SECS=5 KILL_AFTER=1s   "$BIN/dispatch-worker" --runtime codex --review --workdir "$SCN_REPO" --brief "$TMP/brief" --timeout 5s > "$TMP/out" 2> "$TMP/err" || rc=$?
 [ "$rc" = 10 ] || { cat "$TMP/out" "$TMP/err"; fail "worker bound returned $rc"; }
 [ -f "$TMP/runtime-ran" ]
 grep -Eq 'critical|unreadable|could not complete' "$TMP/out" "$TMP/err"

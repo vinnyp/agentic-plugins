@@ -14,6 +14,7 @@ rc_is() {
   [ "$rc" = "$want" ] || fail "expected $want, got $rc: $*"
 }
 fixture_number=0
+# shellcheck disable=SC2120 # Optional repo name is supplied by sourced scenarios.
 fixture() {
   fixture_number=$((fixture_number + 1))
   R="$TMP/${1:-repo}.$fixture_number"
