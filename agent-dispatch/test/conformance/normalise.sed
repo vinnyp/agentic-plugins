@@ -1,3 +1,5 @@
+# Bash can emit this harmless job-control race under load.
+/^.*: child setpgid \([0-9]+ to [0-9]+\): Operation not permitted$/d
 :again
 s/(^|[^[:alnum:]_-])cd-[0-9]{14}-[0-9]+([^[:alnum:]_-]|$)/\1cd-<TS>-<PID>\2/g
 s/(^|[^[:alnum:]_-])phase-([[:alnum:]_-]+)-[0-9]{14}-[0-9]+([^[:alnum:]_-]|$)/\1phase-\2-<TS>-<PID>\3/g

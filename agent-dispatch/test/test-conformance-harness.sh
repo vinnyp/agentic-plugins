@@ -56,6 +56,15 @@ printf 'id\ttag\tissue\tbudget_s\tretry\nsample\tpreserve\t\t2\t0\n' > "$h/golde
 bash "$h/run.sh" --impl "$work/impl" --out "$work/a"
 bash "$h/run.sh" --impl "$work/impl" --out "$work/b"
 bash "$h/compare.sh" "$work/a" "$work/b" || fail 'two runs with tool paths compare clean'
+for side in a b; do
+  printf '/example/bin/lib/repo-state.sh: child setpgid (91436 to 91436): Operation not permitted\n' >> "$work/$side/sample/stderr"
+  bash "$h/compare.sh" "$work/a" "$work/b" || fail 'setpgid race line ignored'
+  cp "$work/recording/stderr" "$work/$side/sample/stderr"
+done
+printf '/example/bin/lib/repo-state.sh: child setpgid (91436 to 91436): Operation not permitted extra\n' >> "$work/b/sample/stderr"
+if bash "$h/compare.sh" "$work/a" "$work/b" > "$work/diff"; then fail 'other setpgid text still compared'; fi
+case "$(cat "$work/diff")" in *'sample/stderr differs'*) ;; *) fail 'other setpgid text names stderr';; esac
+cp "$work/recording/stderr" "$work/b/sample/stderr"
 ln -s "$work/impl" "$work/impl-link"
 bash "$h/run.sh" --impl "$work/impl-link" --out "$work/symlinked"
 bash "$h/compare.sh" "$work/a" "$work/symlinked" || fail 'symlinked impl compares clean'
