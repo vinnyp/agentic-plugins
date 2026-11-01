@@ -1,0 +1,70 @@
+census_id	kind	ref	how
+D001	scenario	worker-agy-timeout	External deadline must stop the runtime and return blocked
+D002	test	bin/test-coding-dispatch.sh#test #20 agy timeout defaults, hint, and model surfacing PASS	Agent-specific deadline and model diagnostics must remain visible
+D003	scenario	worker-codex-auth	Rejected models must produce an authentication diagnostic
+D005	scenario	worker-codex-usage	A zero-status limit banner must produce an unavailable verdict
+D006	scenario	edit-agy	Captured agy arguments must omit the obsolete print flag
+D011	scenario	edit-committed-fail	A worker commit must be unwound and its patch retained on failure
+D013	scenario	state-clone-isolation	Clone edits and private refs must leave source content and metadata unchanged
+D013	scenario	worker-agy-review	The launched reviewer must run in a separate clone rather than the source checkout
+D016	scenario	edit-phase-ok	Build phase must execute the installed dispatch command successfully
+D019	test	test/test-conformance-empty-phase.sh#empty-task-list	An empty task list must return the usage diagnostic under both Bash interpreters
+D021	scenario	worker-agy-auth	Failed authentication must stop reviewer launch
+D023	test	bin/test-agy-auth-preflight.sh#test 1b (coding-preflight agy symlink resolves helper) PASS	A PATH symlink must still find the sibling authentication helper
+D030	test	bin/test-mutation-verify-slow.sh#test --cover-check unreachable function -> MUTANT-UNREACHABLE PASS	An unexecuted changed function must be identified as unreachable
+D030	test	bin/test-mutation-verify.sh#test no-op mutation -> exit 2 PASS	An edit expression that changes no bytes must be rejected
+D031	test	bin/test-mutation-verify.sh#test uncommitted-work preserved exactly (not reverted to HEAD) PASS	Uncommitted source bytes must survive the verification run exactly
+D036	scenario	edit-scope	An edit outside the allowlist must be refused and reverted
+D047	scenario	worker-agy-retry-blocked	Repeated timeout must preserve the blocked verdict after one retry
+D054	test	bin/test-coding-dispatch.sh#test FINDING1 legitimate TDD commit with gitignored marker is not unwound PASS	A completed worker commit must retain its identity
+D054	test	bin/test-coding-dispatch.sh#test FINDING3 --worktree report_fail RM_ON_FAIL=1 patch survives worktree removal PASS	Removing a failed worktree must leave a retrievable patch
+D054	test	bin/test-coding-dispatch.sh#test FINDING4 --worktree report_fail RM_ON_FAIL=0 patch retrievable + pristine index PASS	Salvage must retain the patch without staging untracked files
+D060	test	bin/test-agy-print-form-probe.sh#test 10 (real 30s default: an 11s-equivalent round trip passes) PASS	A valid response slower than ten seconds must pass the default probe
+D067	test	bin/test-dispatch-env-reset.sh#regression: test-coding-dispatch.sh is green under CODING_DISPATCH_TIMEOUT=1s AGY_MODEL=zzz	Perturbed operator variables must not change suite results
+D071	test	bin/test-run-long-gate.sh#Test 12 PASS	A dead lock owner must not prevent a subsequent gate
+D086	test	bin/test-run-long-gate.sh#Test 9 PASS	A second gate for the same workdir must refuse before execution
+D092	test	bin/test-agy-auth-preflight.sh#test probe 3 (absent creds ignored; live models healthy) PASS	Healthy runtime authentication must work without another client credential file
+D093	scenario	edit-agy	Captured invocation must deliver the brief through stdin
+D094	test	bin/test-dispatch-worker.sh#test 13b (review prose about 429 is not a limit banner) PASS	Substantive discussion of throttling must succeed instead of returning six
+D099	scenario	worker-agy-review	Reviewer cwd must be a separate clone outside runtime temporary storage
+D101	scenario	worker-agy-review	Captured review invocation must enable tool permissions
+D102	test	bin/test-coding-dispatch.sh#test fail artifacts (patch + marker stay out of the consumer's tree) PASS	Failure artifacts must stay outside the consumer working tree
+D102	test	bin/test-coding-dispatch.sh#test gate order (scope gate refuses before the build gate executes) PASS	A rejected scope must prevent build execution
+D106	scenario	worker-agent-missing	An absent persona must refuse dispatch
+D122	test	bin/test-drive-cold-session.sh#PASS: 2500-line inline transcript	Long replies must retain their first and last rows
+D122	test	bin/test-drive-cold-session.sh#PASS: alternate-screen transcript unverified	An alternate screen must return an unverifiable status
+D122	test	bin/test-drive-cold-session.sh#PASS: daemon interstitial titles	A daemon setup screen must refuse before receiving the prompt
+D124	test	bin/test-mutation-verify-slow.sh#test restored file is newer than mutant artifacts -> PASS	Restored source timestamp must exceed mutant artifacts in whole seconds
+D126	scenario	edit-unavailable	Capacity refusal must return six rather than an empty-change failure
+D131	scenario	state-clone-isolation	Clone configuration changes must leave source configuration unchanged
+D131	scenario	worker-agy-review	The launched reviewer must receive a distinct clone and private global configuration
+D139	test	bin/test-mutation-verify.sh#test baseline exit 141 emits SIGPIPE / grep -q hint -> PASS	A pipeline signal failure must produce its specific diagnostic
+D140	test	bin/test-mutation-verify.sh#test --expect-fail-output: unrelated RED -> exit 3 PASS	A failure missing the expected hazard text must remain unverified
+D141	test	bin/test-run-tests-signals.sh#inherited	Inherited ignored signals must be reset so the runner handles interruption
+D142	test	bin/test-coding-dispatch.sh#test #234k PASS	Launch failure before a FIFO writer arrives must finish and reap readers
+D144	test	bin/test-repo-state.sh#userinfo shape leaked	Sensitive URL key components must be absent from snapshots and diagnostics
+D145	scenario	state-compare-exclude	Exclude metadata changes must appear in the drift verdict
+D145	scenario	state-compare-grafts	Graft changes must be classified as critical
+D145	scenario	state-compare-ref	Replacement refs must be classified as critical
+D145	scenario	state-compare-shallow	Shallow metadata changes must be classified as critical
+D145	test	bin/test-repo-state.sh#hostile metadata types PASS	Special metadata files must finish bounded and report drift
+D146	test	bin/test-repo-state-cli.sh#stale or partial snapshot left readable	Blocked metadata must produce an unreadable snapshot within the bound
+D147	test	bin/test-drive-cold-session.sh#larger agent pane history limit was lowered	Inherited history capacity must remain above the driver minimum
+D148	test	bin/test-repo-state-cli.sh#cleanup killed the bystander	Survivor cleanup must reap owned processes while preserving a bystander
+D149	test	bin/test-review-launch.sh#review launch FIFO matrix and allocation/before-snapshot failures PASS	Blocked launch metadata reads must time out without launching a reviewer
+D150	test	test/test-conformance-feeds.sh#verdict-feed-failure	Failure to produce any of the config, commit-history, or records verdict feeds must return unreadable
+D151	test	bin/test-repo-state-memory.sh#concurrent bounded status failed	Parallel descriptor verification must avoid transient status failures
+D152	test	bin/test-review-launch-safety.sh#empty agy review must truncate stale caller output and exit 8	Empty reviewer output must erase previous file content
+D154	test	bin/test-portable-timeout.sh#dispatch_timeout_bin precedence, fallback, probe and source path PASS	With both external timers absent the bundled timer must be selected
+D155	test	bin/test-dispatch-worker-signals.sh#agent survived	Caller signals must terminate the launched runtime
+D155	test	bin/test-dispatch-worker-signals.sh#descendant survived	A pipe-holding descendant must be gone when dispatch returns
+D007	scenario	capture-agy-done	Exit-zero completion prose with no edits returns failure 1; the phase consumer stops at task 1 and routes it to Opus rather than success or capacity blocking.
+D034	scenario	capture-review-collision	A symlink at the predictable review output path retains its target bytes and link while dispatch reports failure 3.
+D037	scenario	capture-scope-cleanup	Out-of-scope edits are refused and reverted; injected prompt files are removed.
+D037	scenario	capture-alias-cleanup	The deprecated worktree field equals worktree_ns on success and the injected prompt is removed.
+D069	scenario	capture-no-setsid	With setsid absent from PATH the finite gate runs in another session and completes through synchronous wait.
+D132	scenario	capture-shared-config	Known defect vinnyp/foundry#239: a linked worker writes shared config and succeeds undetected; the golden changes when cutover change 7 lands.
+D158	scenario	capture-limit-file	Known defect vinnyp/foundry#263: Codex prints a document containing a limit phrase and is incorrectly classified unavailable (6).
+D161	scenario	state-compare-socket	Known defect vinnyp/foundry#267: legitimate fsmonitor socket currently produces critical rather than clean.
+D120	smoke	agy-models	Attended metadata-only probe checks both defaults from bin/lib/agy-models.sh against real agy models output.
+D120	smoke	codex-models	Attended metadata-only app-server config/read and model/list check the configured Codex default against the real service roster without a turn.

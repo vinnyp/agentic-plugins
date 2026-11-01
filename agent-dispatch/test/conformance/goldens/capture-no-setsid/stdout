@@ -1,0 +1,6 @@
+LOG_PATH=<SCN_TMP>/short.log
+pid=32131
+observed_rc=0
+detached=True
+GATE_EXIT=0
+setsid absent; detached finite command completed

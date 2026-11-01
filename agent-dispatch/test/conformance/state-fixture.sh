@@ -54,6 +54,10 @@ case "$id" in
       *filter)
         printf '*.txt filter=fixture\n' > .gitattributes
         printf '\n[filter "fixture"]\n clean = "echo filter-ran >> %s; cat"\n' "$SCN_TMP/filter-ran" >> .git/config
+        # Same size avoids Git's size-only dirty shortcut; an old mtime forces
+        # a content check even when the baseline and edit share a stat tick.
+        printf 'edit\n' > tracked.txt
+        touch -t 200001010000 tracked.txt
         ;;
       *socket)
         python3 -c 'import socket,sys; s=socket.socket(socket.AF_UNIX); s.bind(sys.argv[1]); s.close()' ".git/fsmonitor--daemon.ipc"

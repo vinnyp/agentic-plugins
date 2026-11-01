@@ -99,7 +99,7 @@ state-compare-harmless	preserve	-	12	0
 state-compare-deleted	known-defect	README.md#state-known-defects	12	0
 state-compare-truncated	known-defect	README.md#state-known-defects	12	0
 state-compare-filter	known-defect	README.md#state-known-defects	12	0
-state-compare-socket	known-defect	README.md#state-known-defects	12	0
+state-compare-socket	known-defect	vinnyp/foundry#267	12	0
 state-pin-block	preserve	-	12	0
 state-pin-stale	preserve	-	12	0
 state-pin-duplicate	preserve	-	12	0
@@ -125,3 +125,10 @@ state-compare-exclude	preserve	-	5	0
 state-clone-nonempty	preserve	-	5	0
 state-clone-mode	preserve	-	5	0
 state-clone-source	preserve	-	5	0
+capture-agy-done	preserve	-	25	0
+capture-scope-cleanup	preserve	-	15	0
+capture-alias-cleanup	preserve	-	15	0
+capture-shared-config	known-defect	vinnyp/foundry#239	15	0
+capture-limit-file	known-defect	vinnyp/foundry#263	15	0
+capture-review-collision	preserve	-	15	0
+capture-no-setsid	preserve	-	15	0

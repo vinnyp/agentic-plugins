@@ -6,7 +6,36 @@ here=$(CDPATH='' cd "$(dirname "$0")" && pwd -P)
 bin=$(CDPATH='' cd "$here/../../bin" && pwd -P)
 # shellcheck source=../../bin/lib/timeout-bin.sh
 . "$bin/lib/timeout-bin.sh"
+# shellcheck source=../../bin/lib/agy-models.sh
+. "$bin/lib/agy-models.sh"
 timer=$(dispatch_timeout_bin) || { echo 'NOT RUN timer unavailable'; exit 1; }
+# Model metadata probes do not need a repository or a worker prompt.
+model_probe() {
+  case "$1" in
+    agy-models)
+      roster=$("$timer" -k 1 "${DISPATCH_LIVE_TIMEOUT:-20}" agy models) || return 1
+      agy_model_present "$roster" "$AGY_MODEL_CODING_DEFAULT" &&
+        agy_model_present "$roster" "$AGY_MODEL_REVIEW_DEFAULT" ;;
+    codex-models)
+      "$timer" -k 1 "${DISPATCH_LIVE_TIMEOUT:-20}" python3 "$here/model-roster.py" codex ;;
+  esac
+}
+report_model() {
+  local model_rc=0
+  model_probe "$1" || model_rc=$?
+  case "$1:$model_rc" in
+    *:0) printf 'PASS %s\n' "$1" ;;
+    codex-models:2) printf 'INFO codex-models: model metadata unavailable\n'; model_checks=1 ;;
+    *) printf 'FAIL %s\n' "$1"; return 1 ;;
+  esac
+}
+if [ "${1:-}" = --models-only ]; then
+  model_failed=0
+  for model_id in agy-models codex-models; do
+    report_model "$model_id" || model_failed=1
+  done
+  exit "$model_failed"
+fi
 # Fixtures must be physically outside the runtime's TMPDIR trap.
 root=$HOME/.cache/agent-dispatch-live
 mkdir -p "$root"
@@ -31,6 +60,7 @@ chmod 700 "$root" "$work" "$trap_dir"
 : > "$work/empty-gitconfig"
 export GIT_CONFIG_GLOBAL="$work/empty-gitconfig" GIT_CONFIG_NOSYSTEM=1
 failed=0
+model_checks=2
 report() {
   printf '%-7s %s\n' "$1" "$2"
   [ "$1" = PASS ] || failed=1
@@ -53,6 +83,11 @@ probe() {
     fi
     return
   fi
+  case "$id" in
+    agy-models|codex-models)
+      report_model "$id" || failed=1
+      return ;;
+  esac
   case "$id" in
     agy-clone|agy-auth) input=$work/prompt ;;
     agy-tmpdir) input=$work/shell-prompt ;;
@@ -81,6 +116,8 @@ probe() {
         grep -qxF "$content" "$cwd/live-smoke-inside" && [ ! -e "$work/outside" ] ;;
   esac && report PASS "$id" || report FAIL "$id"
 }
+probe agy-models agy "$work"
+probe codex-models codex "$work"
 printf '%s\n' 'Reply with the uppercase letters live, underscore, smoke, underscore, ok, joined together.' > "$work/prompt"
 probe agy-clone agy "$work/agy-clone" --dangerously-skip-permissions
 printf '%s\n' 'Use the shell command tool to run: ls -a . Then reply with DONE.' > "$work/shell-prompt"
@@ -96,5 +133,5 @@ state=${XDG_STATE_HOME:-$HOME/.local/state}/agent-dispatch
 mkdir -p "$state"
 chmod 700 "$state"
 last=$(mktemp "$state/last-live.XXXXXX")
-printf '{"status":"PASS","checks":5,"completed_at":"%s"}\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" > "$last"
+printf '{"status":"PASS","checks":%s,"completed_at":"%s"}\n' "$((5 + model_checks))" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" > "$last"
 mv "$last" "$state/last-live.json"

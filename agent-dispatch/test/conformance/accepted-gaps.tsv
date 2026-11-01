@@ -1,0 +1,8 @@
+census_id	category	reason
+D014	other-project	Auditing unrelated suites for real runtime launches belongs to their owning projects.
+D032	agent-behaviour	Instruction loading by an attended interactive agent cannot be guaranteed by dispatch replay.
+D039	agent-behaviour	Whether reviewers obey shared-checkout restrictions depends on their actual tool choices.
+D133	agent-behaviour	An agent choosing to rewrite operator configuration is outside dispatch port equivalence.
+D157	agent-behaviour	Agent willingness to perform an authorized edit requires an attended behavioural evaluation.
+D040	test-tooling	mutation-verify has no cached-result handling, so this guarantee is documentation-only.
+D116	test-only	Permanent test-fixture matter: fixture implementation parity involves no dispatch behaviour.

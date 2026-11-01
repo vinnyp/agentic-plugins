@@ -1369,3 +1369,17 @@ by design; set `DISPATCH_CONFORMANCE_ROOT` to a neutral path outside HOME and
 TMPDIR. `DISPATCH_CONFORMANCE_TIMEOUT` and `DISPATCH_LIVE_TIMEOUT` can shorten
 capture and live-probe bounds for stub tests. Live probes inspect stdout only,
 require explicit reply markers, and ignore global/system Git configuration.
+
+## Conformance checks
+
+The attended conformance probe
+`bash agent-dispatch/test/conformance/live-smoke.sh --models-only` checks live
+model metadata without launching an agent: agy's coding and review defaults
+come from `bin/lib/agy-models.sh`; Codex's configured default is checked against
+its app-server model roster. The ordinary live smoke also runs these probes.
+
+Codex uses the app-server `config/read` and `model/list` metadata requests, not
+a standalone model-list command. If that interface is unavailable, the probe
+reports `INFO codex-models` rather than claiming a roster match. An available
+roster lacking the configured default reports `FAIL`; a missing agy `models`
+command also reports `FAIL`.
