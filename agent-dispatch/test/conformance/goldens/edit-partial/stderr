@@ -1,0 +1,1 @@
+DISPATCH=error: --build-cmd runs a partial gate (this runner's --only/--changed exit 4 even when the selected suites pass); use the full runner as the build gate

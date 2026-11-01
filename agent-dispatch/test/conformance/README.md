@@ -88,3 +88,21 @@ and TMPDIR before recording. Work directories are private (mode 700).
 Live checks separate stdout from stderr and require explicit reply markers.
 `DISPATCH_LIVE_TIMEOUT` overrides the default 20-second probe bound for tests.
 Each probe ignores global and system Git configuration. Silent replies fail.
+
+The edit slice runs with `bash agent-dispatch/test/test-conformance-edit.sh`;
+`IMPL_BIN` can select another implementation. Its fixtures use only synthetic
+Codex recordings plus a small edit wrapper, never a real runtime. Golden files
+come from BASELINE 1.9.5; literal scratch and implementation paths are replaced
+with `<SCN_TMP>`, `<RUN>`, and `<IMPL_BIN>` before committing. Metadata uses those
+same placeholders so the ordinary comparator still applies. A fixture Python
+version reply and a fixed clock for review pins keep host versions and pin ages
+out of the observations. All other implementation output remains significant.
+
+`edit-coverage.tsv` maps exact inventory rows to a scenario and an observed exit
+or output fragment. `edit-line-exemptions.tsv` enumerates only documentation
+prose/input rows with reasons; new inventory rows fail closed. Exit 4 is a census
+artifact from the partial-runner signature, so `edit-partial` proves the actual
+exit-2 refusal. Parameterized documentation examples for Task 2 use the same
+Task 1 output template. `edit-newdir` preserves vinnyp/foundry#275; duplicate
+failure verdicts in the scope, marker, and FM4 captures preserve cutover change
+12. These are observations of the frozen contract, not desired behavior.

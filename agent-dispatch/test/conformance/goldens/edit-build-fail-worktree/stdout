@@ -1,0 +1,1 @@
+DISPATCH=fail: build/vet failed (false) — diff SALVAGED in <SCN_TMP>/.worktrees/repo__b7025ff3/cd-20261101023147-13163 (branch cd-20261101023147-13163); remove with: git -C <SCN_TMP>/repo worktree remove --force <SCN_TMP>/.worktrees/repo__b7025ff3/cd-20261101023147-13163; patch: <SCN_TMP>/repo/.git/worktrees/cd-20261101023147-13163/coding-dispatch-last-fail.patch

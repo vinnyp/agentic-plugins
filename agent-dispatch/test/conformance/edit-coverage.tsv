@@ -1,0 +1,31 @@
+coding-build-phase.sh	exit	0	(`CODING_COMMIT_SCOPE` overrides). Exit codes: `0` phase complete, `1` a task failed	docs/commands.md	edit-phase-ok	rc=0
+coding-build-phase.sh	exit	1	(`CODING_COMMIT_SCOPE` overrides). Exit codes: `0` phase complete, `1` a task failed	docs/commands.md	edit-phase-stopped	rc=1
+coding-build-phase.sh	exit	1	literal exit 1	bin/coding-build-phase.sh	edit-phase-stopped	rc=1
+coding-build-phase.sh	exit	2	literal exit 2	bin/coding-build-phase.sh	edit-phase-usage	rc=2
+coding-build-phase.sh	exit	6	literal exit 6	bin/coding-build-phase.sh	edit-phase-blocked	rc=6
+coding-build-phase.sh	exit	9	literal exit 9	bin/coding-build-phase.sh	edit-phase-refused	rc=9
+coding-build-phase.sh	line	text	PHASE=ok worktree=… branch=phase-myrepo-20260830131500-4821 tasks=[1 2 3] — land with: git -C '…' merge --ff-only 'phase-…' && git -C '…' worktree remove '…'	docs/commands.md	edit-phase-worktree	PHASE=ok worktree=
+coding-build-phase.sh	line	text	════════ dispatching Task 1 → codex ════════	docs/commands.md	edit-phase-ok	════════ dispatching Task 1
+coding-build-phase.sh	line	text	════════ dispatching Task 2 → codex ════════	docs/commands.md	edit-phase-ok	════════ dispatching Task 1
+coding-build-phase.sh	line	text	✓ Task 1 committed (4c9ab12)	docs/commands.md	edit-phase-ok	✓ Task 1 committed (
+coding-build-phase.sh	line	text	✓ Task 2 committed (8ee01f7)	docs/commands.md	edit-phase-ok	✓ Task 1 committed (
+coding-dispatch.sh	exit	0	literal exit 0	bin/coding-dispatch.sh	edit-ok	rc=0
+coding-dispatch.sh	exit	0	| `0` | success. `DISPATCH=ok …` — changes left in the tree (or worktree) for you to review and commit. `DISPATCH=ok-noop` means a resume dispatch found the work already done, after the build gate passes (when configured or inferred from `go.mod`) and every `--require-file` path is verified as a tracked blob in `HEAD`. If no build gate runs, stderr reports `no build gate ran`. |	docs/commands.md	edit-ok	rc=0
+coding-dispatch.sh	exit	1	literal exit 1	bin/coding-dispatch.sh	edit-empty	rc=1
+coding-dispatch.sh	exit	1	| `1` | failure. Non-worktree: tree hard-reset to the pre-dispatch commit (unless `--keep-on-fail`). Worktree: diff salvaged in the worktree, or the worktree removed with `CODING_DISPATCH_RM_ON_FAIL=1` (the patch still survives). |	docs/commands.md	edit-empty	rc=1
+coding-dispatch.sh	exit	143	literal exit 143	bin/coding-dispatch.sh	edit-signal	rc=143
+coding-dispatch.sh	exit	143	| `143` | killed by INT/TERM mid-dispatch; a fresh empty worktree is removed, a partial diff is left for salvage |	docs/commands.md	edit-signal	rc=143
+coding-dispatch.sh	exit	2	The refusal exits 2 before agent launch and is never deduplicated. Other	docs/commands.md	edit-usage	rc=2
+coding-dispatch.sh	exit	2	literal exit 2	bin/coding-dispatch.sh	edit-usage	rc=2
+coding-dispatch.sh	exit	2	| `2` | usage or environment error; nothing was done |	docs/commands.md	edit-usage	rc=2
+coding-dispatch.sh	exit	3	literal exit 3	bin/coding-dispatch.sh	edit-broken-install	rc=3
+coding-dispatch.sh	exit	4	`# agent-dispatch-run-tests: partial runs exit 4`. A simple command (split on	docs/commands.md	edit-partial	rc=2
+coding-dispatch.sh	exit	4	literal exit 4	bin/coding-dispatch.sh	edit-partial	rc=2
+coding-dispatch.sh	exit	6	| `6` | agent unavailable (capacity/rate limit); no work attempted |	docs/commands.md	edit-unavailable	rc=6
+coding-dispatch.sh	exit	9	literal exit 9	bin/coding-dispatch.sh	edit-refused	rc=9
+coding-dispatch.sh	exit	9	| `9` | a review pin is active on the workdir (see [`review-pin.sh`](#review-pinsh)) |	docs/commands.md	edit-refused	rc=9
+coding-dispatch.sh	line	text	DISPATCH=fail: build/vet failed (go test ./...) — diff SALVAGED in …/cd-20260830131500-4821 (branch cd-…); remove with: git -C ~/code/myrepo worktree remove --force …; patch: …/.git/worktrees/cd-…/coding-dispatch-last-fail.patch	docs/commands.md	edit-build-fail-worktree	DISPATCH=fail: build/vet failed
+coding-dispatch.sh	line	text	DISPATCH=ok worktree_ns=… worktree=… branch=cd-20260830131500-4821 base_sha=1a0d56f2c1b8 head=… files=cmd/report/json.go, cmd/report/json_test.go	docs/commands.md	edit-ok-worktree	DISPATCH=ok 
+coding-dispatch.sh	line	text	DISPATCH_BASE base_ref=HEAD base_sha=1a0d56f2c1b8	docs/commands.md	edit-ok-worktree	DISPATCH_BASE base_ref=HEAD
+coding-dispatch.sh	line	text	▶ brief fingerprint: 9f1c4b2ae0d1 (243B); first line: Add a --json flag to cmd/report…	docs/commands.md	edit-ok	▶ brief fingerprint:
+coding-dispatch.sh	line	text	▶ dispatching to codex in ~/code/.worktrees/myrepo_3f2a91cc/cd-20260830… (timeout 15m, base 1a0d56f2c1b8)…	docs/commands.md	edit-ok-worktree	▶ dispatching to codex

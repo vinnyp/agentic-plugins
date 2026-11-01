@@ -1,0 +1,1 @@
+DISPATCH=error: usage: coding-dispatch.sh [--worktree] [--base <ref>] [--allow-stale-base] <codex|agy> <workdir> <prompt-file> [build-cmd]

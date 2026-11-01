@@ -1,0 +1,1 @@
+coding-build-phase: ERROR — flag '--worktree' must come AFTER the positionals: <codex|agy> <plan.md> <repo-dir> <task-id...> [--worktree] [--build-cmd ...]

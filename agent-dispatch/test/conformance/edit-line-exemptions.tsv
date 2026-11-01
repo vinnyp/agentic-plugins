@@ -1,0 +1,93 @@
+coding-build-phase.sh	line	text	"  --worktree --build-cmd ""make lint && make test"""	docs/commands.md	Input/example syntax or code fence, not command output.
+coding-build-phase.sh	line	text	## `coding-build-phase.sh`	docs/commands.md	Documentation prose, not an emitted output line.
+coding-build-phase.sh	line	text	(`CODING_COMMIT_SCOPE` overrides). Exit codes: `0` phase complete, `1` a task failed	docs/commands.md	Documentation prose, not an emitted output line.
+coding-build-phase.sh	line	text	(`PHASE=blocked-unavailable:<id>`), `9` review pin active.	docs/commands.md	Documentation prose, not an emitted output line.
+coding-build-phase.sh	line	text	(`PHASE=stopped-at:<id>`), `2` usage/plan error, `6` agent unavailable	docs/commands.md	Documentation prose, not an emitted output line.
+coding-build-phase.sh	line	text	(the dispatch has already reverted or salvaged). `--build-cmd` is required — set `CODING_BUILD_CMD`	docs/commands.md	Documentation prose, not an emitted output line.
+coding-build-phase.sh	line	text	**Flags go after the positionals.** `coding-build-phase.sh --worktree codex …` fails with a	docs/commands.md	Documentation prose, not an emitted output line.
+coding-build-phase.sh	line	text	Drives a coding agent through a set of plan tasks. For each id it extracts that task's block	docs/commands.md	Documentation prose, not an emitted output line.
+coding-build-phase.sh	line	text	Given a plan with `### Task 1: …`, `### Task 2: …` headings, run a whole phase — one dispatch per	docs/commands.md	Documentation prose, not an emitted output line.
+coding-build-phase.sh	line	text	Set `--build-cmd` to the repo's **full** ship gate (lint *and* tests), not just tests. A	docs/commands.md	Documentation prose, not an emitted output line.
+coding-build-phase.sh	line	text	```	docs/commands.md	Input/example syntax or code fence, not command output.
+coding-build-phase.sh	line	text	```bash	docs/commands.md	Input/example syntax or code fence, not command output.
+coding-build-phase.sh	line	text	after the last task stays out of the prompt. Inside a fence, a heredoc also hides what follows up	docs/commands.md	Documentation prose, not an emitted output line.
+coding-build-phase.sh	line	text	are kept. Leading YAML frontmatter is dropped, and whitespace-only preambles produce no	docs/commands.md	Documentation prose, not an emitted output line.
+coding-build-phase.sh	line	text	banner has only orchestrator boilerplate removed; spec references and other worker guidance	docs/commands.md	Documentation prose, not an emitted output line.
+coding-build-phase.sh	line	text	carries the plan's preamble (everything above the first `### Task ` heading: goal, spec path,	docs/commands.md	Documentation prose, not an emitted output line.
+coding-build-phase.sh	line	text	clarifies that orchestrator instructions are not for the worker and requires it to stop and	docs/commands.md	Documentation prose, not an emitted output line.
+coding-build-phase.sh	line	text	"coding-build-phase.sh <codex|agy> <plan.md> <repo-dir> <task-id...> [--worktree] --build-cmd ""<gate>"""	docs/commands.md	Input/example syntax or code fence, not command output.
+coding-build-phase.sh	line	text	coding-build-phase.sh codex ~/plans/retry.md ~/code/myrepo 1 2 3 \	docs/commands.md	Input/example syntax or code fence, not command output.
+coding-build-phase.sh	line	text	context block. The block is capped at `CODING_BUILD_PLAN_CONTEXT_MAX` characters, with a	docs/commands.md	Documentation prose, not an emitted output line.
+coding-build-phase.sh	line	text	does. Plan-wide rules belong above the first task. A block that stops at a `## ` heading names it	docs/commands.md	Documentation prose, not an emitted output line.
+coding-build-phase.sh	line	text	global constraints) under a `PLAN CONTEXT` banner ahead of the task spec, so plan-wide rules	docs/commands.md	Documentation prose, not an emitted output line.
+coding-build-phase.sh	line	text	instead if you prefer. Commit scope defaults to the repo directory's basename	docs/commands.md	Documentation prose, not an emitted output line.
+coding-build-phase.sh	line	text	is task content and does not end the block, so a task can quote a whole document while a section	docs/commands.md	Documentation prose, not an emitted output line.
+coding-build-phase.sh	line	text	may then have reached the worker. A shift such as `1 <<bits` reads as a heredoc and warns the same	docs/commands.md	Documentation prose, not an emitted output line.
+coding-build-phase.sh	line	text	"misleading ""plan not found: codex""; the script refuses a leading flag with an explicit message."	docs/commands.md	Documentation prose, not an emitted output line.
+coding-build-phase.sh	line	text	on stderr, and a block that ends inside an open fence or heredoc warns, because later sections	docs/commands.md	Documentation prose, not an emitted output line.
+coding-build-phase.sh	line	text	reach the worker without being restated per task. The superpowers `> **For agentic workers:**`	docs/commands.md	Documentation prose, not an emitted output line.
+coding-build-phase.sh	line	text	report conflicts between plan context and task spec instead of guessing or claiming success. Stops at the first failure	docs/commands.md	Documentation prose, not an emitted output line.
+coding-build-phase.sh	line	text	task, each committed in the worktree on success, stopping at the first failure:	docs/commands.md	Documentation prose, not an emitted output line.
+coding-build-phase.sh	line	text	tests-only gate merges lint debt the repo enforces at ship. There is no auto-detection.	docs/commands.md	Documentation prose, not an emitted output line.
+coding-build-phase.sh	line	text	the delegation contract, dispatches it, and commits on success. A `## ` line inside a code fence	docs/commands.md	Documentation prose, not an emitted output line.
+coding-build-phase.sh	line	text	to its end word, so a quoted document's own fences do not end the task; only `### Task ` still	docs/commands.md	Documentation prose, not an emitted output line.
+coding-build-phase.sh	line	text	truncation note naming the absolute plan path and one stdout warning per phase. The prompt	docs/commands.md	Documentation prose, not an emitted output line.
+coding-build-phase.sh	line	text	verbatim from `### Task <id>:` up to the next `### Task ` or level-2 (`## `) heading, wraps it in	docs/commands.md	Documentation prose, not an emitted output line.
+coding-build-phase.sh	line	text	way, which is the safe direction: a missed heredoc would cut the task. Every task prompt also	docs/commands.md	Documentation prose, not an emitted output line.
+coding-dispatch.sh	line	text	                   <codex|agy> <workdir> <prompt-file> [build-cmd]	docs/commands.md	Input/example syntax or code fence, not command output.
+coding-dispatch.sh	line	text	                   [--no-venv] [--allow-path <glob>]... [--require-file <path>]...	docs/commands.md	Input/example syntax or code fence, not command output.
+coding-dispatch.sh	line	text	"  {""status"":""complete"",""files_written"":[""...""],""timestamp"":""<ISO8601Z>""}"	docs/commands.md	Input/example syntax or code fence, not command output.
+coding-dispatch.sh	line	text	## `coding-dispatch.sh`	docs/commands.md	Documentation prose, not an emitted output line.
+coding-dispatch.sh	line	text	(see [Worktree isolation](worktree-isolation.md)).	docs/commands.md	Documentation prose, not an emitted output line.
+coding-dispatch.sh	line	text	**Validation order** (all after the agent returns): non-empty change → scope gate → build gate →	docs/commands.md	Documentation prose, not an emitted output line.
+coding-dispatch.sh	line	text	Add a --json flag to cmd/report that prints the same summary as JSON.	docs/commands.md	Input/example syntax or code fence, not command output.
+coding-dispatch.sh	line	text	EOF	docs/commands.md	Input/example syntax or code fence, not command output.
+coding-dispatch.sh	line	text	Every failure snapshots the pre-revert diff — captured with `git diff <base>` against a throwaway	docs/commands.md	Documentation prose, not an emitted output line.
+coding-dispatch.sh	line	text	On failure instead:	docs/commands.md	Documentation prose, not an emitted output line.
+coding-dispatch.sh	line	text	On success ONLY, write _coding-result.json in the repo root:	docs/commands.md	Input/example syntax or code fence, not command output.
+coding-dispatch.sh	line	text	One dispatch with a build gate, in an isolated worktree:	docs/commands.md	Documentation prose, not an emitted output line.
+coding-dispatch.sh	line	text	One task: snapshot → delegate → validate → revert. **You** author the prompt; this owns the	docs/commands.md	Documentation prose, not an emitted output line.
+coding-dispatch.sh	line	text	Refusal applies only to runner files containing the exact signature line	docs/commands.md	Documentation prose, not an emitted output line.
+coding-dispatch.sh	line	text	The changes are **not committed**. Review the diff, then commit them yourself, or land the branch	docs/commands.md	Documentation prose, not an emitted output line.
+coding-dispatch.sh	line	text	The marker is belt-and-braces, not required — a non-empty change that passes the gates gets a	docs/commands.md	Documentation prose, not an emitted output line.
+coding-dispatch.sh	line	text	The refusal exits 2 before agent launch and is never deduplicated. Other	docs/commands.md	Documentation prose, not an emitted output line.
+coding-dispatch.sh	line	text	Use the full runner as the build gate.	docs/commands.md	Documentation prose, not an emitted output line.
+coding-dispatch.sh	line	text	Whitespace-preceded shell comments are ignored. Flags on other commands do not	docs/commands.md	Documentation prose, not an emitted output line.
+coding-dispatch.sh	line	text	Write the test first. Do NOT run git commit / git push / git add.	docs/commands.md	Input/example syntax or code fence, not command output.
+coding-dispatch.sh	line	text	`# agent-dispatch-run-tests: partial runs exit 4`. A simple command (split on	docs/commands.md	Documentation prose, not an emitted output line.
+coding-dispatch.sh	line	text	`&&`, `||`, `;`, or `|`) must invoke that runner and contain a whole `--only`	docs/commands.md	Documentation prose, not an emitted output line.
+coding-dispatch.sh	line	text	`_coding-result.json` in the workdir on success only.	docs/commands.md	Documentation prose, not an emitted output line.
+coding-dispatch.sh	line	text	```	docs/commands.md	Input/example syntax or code fence, not command output.
+coding-dispatch.sh	line	text	```bash	docs/commands.md	Input/example syntax or code fence, not command output.
+coding-dispatch.sh	line	text	`agent-dispatch/bin/run-tests.sh` are checked relative to the workdir too.	docs/commands.md	Documentation prose, not an emitted output line.
+coding-dispatch.sh	line	text	`git status`/`git diff`, while the build gate executes what the agent just wrote.	docs/commands.md	Documentation prose, not an emitted output line.
+coding-dispatch.sh	line	text	and prints where it landed.	docs/commands.md	Documentation prose, not an emitted output line.
+coding-dispatch.sh	line	text	cat > /tmp/task.md <<'EOF'	docs/commands.md	Input/example syntax or code fence, not command output.
+coding-dispatch.sh	line	text	"coding-dispatch.sh --worktree codex ~/code/myrepo /tmp/task.md ""go test ./..."""	docs/commands.md	Input/example syntax or code fence, not command output.
+coding-dispatch.sh	line	text	coding-dispatch.sh [--worktree] [--base <ref>] [--allow-stale-base] [--keep-on-fail]	docs/commands.md	Input/example syntax or code fence, not command output.
+coding-dispatch.sh	line	text	coding-preflight.sh codex          # once per session, when you opt into a runtime	docs/commands.md	Input/example syntax or code fence, not command output.
+coding-dispatch.sh	line	text	command selects a partial gate. Quoted flag tokens are also recognized.	docs/commands.md	Documentation prose, not an emitted output line.
+coding-dispatch.sh	line	text	completion marker. The scope gate runs **before** the build gate on purpose: it is pure	docs/commands.md	Documentation prose, not an emitted output line.
+coding-dispatch.sh	line	text	index copy, so it covers untracked files *and* per-task commits without mutating your real index —	docs/commands.md	Documentation prose, not an emitted output line.
+coding-dispatch.sh	line	text	mechanics. The prompt must tell the agent not to run `git commit/push/add`, and to write	docs/commands.md	Documentation prose, not an emitted output line.
+coding-dispatch.sh	line	text	or `--changed` token (including `--only=…`). Nested paths such as	docs/commands.md	Documentation prose, not an emitted output line.
+coding-dispatch.sh	line	text	runners receive a non-blocking, TTL-deduped `gate-target advisory` when their	docs/commands.md	Documentation prose, not an emitted output line.
+coding-dispatch.sh	line	text	synthesized marker rather than a false failure.	docs/commands.md	Documentation prose, not an emitted output line.
+coding-dispatch.sh	line	text	trigger refusal or a partial-gate advisory.	docs/commands.md	Documentation prose, not an emitted output line.
+coding-dispatch.sh	line	text	| Exit | Meaning |	docs/commands.md	Documentation table row describing the interface, not emitted output.
+coding-dispatch.sh	line	text	| Flag | Effect |	docs/commands.md	Documentation table row describing the interface, not emitted output.
+coding-dispatch.sh	line	text	| `--allow-path <glob>` | repeatable scope allowlist. The globs are injected into the brief AND enforced afterwards: any changed path outside them fails the dispatch. |	docs/commands.md	Documentation table row describing the interface, not emitted output.
+coding-dispatch.sh	line	text	| `--allow-stale-base` | permit that stale base, still printing the staleness |	docs/commands.md	Documentation table row describing the interface, not emitted output.
+coding-dispatch.sh	line	text	| `--base <ref>` | (worktree mode) branch from `<ref>` instead of `HEAD`; refuses a base behind its local tracking ref |	docs/commands.md	Documentation table row describing the interface, not emitted output.
+coding-dispatch.sh	line	text	| `--keep-on-fail` | (non-worktree) skip the hard revert; leave the tree exactly as the agent left it |	docs/commands.md	Documentation table row describing the interface, not emitted output.
+coding-dispatch.sh	line	text	| `--no-venv` | don't prepend `<workdir>/.venv/bin` to the gate's PATH |	docs/commands.md	Documentation table row describing the interface, not emitted output.
+coding-dispatch.sh	line	text	| `--require-file <path>` | repeatable. Fail if the named file was not delivered. |	docs/commands.md	Documentation table row describing the interface, not emitted output.
+coding-dispatch.sh	line	text	| `--worktree` | run the cycle in an isolated worktree at `<repo>/../.worktrees/<repo>_<hash>/<slug>`, outside the parent checkout. The parent need not be clean. On success the worktree and branch are left for you to land. |	docs/commands.md	Documentation table row describing the interface, not emitted output.
+coding-dispatch.sh	line	text	| `0` | success. `DISPATCH=ok …` — changes left in the tree (or worktree) for you to review and commit. `DISPATCH=ok-noop` means a resume dispatch found the work already done, after the build gate passes (when configured or inferred from `go.mod`) and every `--require-file` path is verified as a tracked blob in `HEAD`. If no build gate runs, stderr reports `no build gate ran`. |	docs/commands.md	Documentation table row describing the interface, not emitted output.
+coding-dispatch.sh	line	text	| `143` | killed by INT/TERM mid-dispatch; a fresh empty worktree is removed, a partial diff is left for salvage |	docs/commands.md	Documentation table row describing the interface, not emitted output.
+coding-dispatch.sh	line	text	| `1` | failure. Non-worktree: tree hard-reset to the pre-dispatch commit (unless `--keep-on-fail`). Worktree: diff salvaged in the worktree, or the worktree removed with `CODING_DISPATCH_RM_ON_FAIL=1` (the patch still survives). |	docs/commands.md	Documentation table row describing the interface, not emitted output.
+coding-dispatch.sh	line	text	| `2` | usage or environment error; nothing was done |	docs/commands.md	Documentation table row describing the interface, not emitted output.
+coding-dispatch.sh	line	text	| `6` | agent unavailable (capacity/rate limit); no work attempted |	docs/commands.md	Documentation table row describing the interface, not emitted output.
+coding-dispatch.sh	line	text	| `9` | a review pin is active on the workdir (see [`review-pin.sh`](#review-pinsh)) |	docs/commands.md	Documentation table row describing the interface, not emitted output.
+coding-dispatch.sh	line	text	| `build-cmd` | the gate. If given it always runs. With none, falls back to `go build ./... && go vet ./...` only when `go.mod` is present. |	docs/commands.md	Documentation table row describing the interface, not emitted output.
+coding-dispatch.sh	line	text	|---|---|	docs/commands.md	Documentation table row describing the interface, not emitted output.

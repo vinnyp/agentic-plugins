@@ -1,0 +1,4 @@
+════════ dispatching Task 1 → codex ════════
+DISPATCH=ok: codex completed; files: tracked.txt; changes left for caller to review + commit
+✓ Task 1 committed (17835a2)
+PHASE=ok: tasks [1] complete

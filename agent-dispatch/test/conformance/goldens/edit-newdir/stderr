@@ -1,0 +1,4 @@
+▶ brief fingerprint: 3a2c9bfff601 (18B); first line: Edit tracked.txt.
+▶ dispatching to codex in <SCN_TMP>/repo (timeout 5s, base 22d655def6c9)…
+DISPATCH=fail: scope gate: out-of-scope file changed: new/
+DISPATCH=fail: scope gate violation — tree reverted to 22d655def6c9; patch: <SCN_TMP>/repo/.git/coding-dispatch-last-fail.patch
