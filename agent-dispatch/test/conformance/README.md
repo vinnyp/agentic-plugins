@@ -292,3 +292,16 @@ Goldens are captured through `baseline-tree.sh` at the pinned `BASELINE` SHA.
 Each scenario returns zero only after its public-command assertions pass;
 its output records the completed cases. All five have finite budgets and no
 retry. Scratch and implementation paths use the standard harness placeholders.
+
+### Review clone test rewrite
+
+Run `bash agent-dispatch/test/test-conformance-clone.sh` for the migrated
+`bin/test-review-clone.sh` cases. `clone-contract` invokes only the published
+`review-clone.sh` interface. Its assertions retain every original case, including
+quoted and tabbed attribute paths, large info attributes, linked sources, remote
+isolation, destination validation, guarded removal, and symlink CLI usage.
+The convergence fixture wraps Git to add a source tag at the first source ref
+listing; it calls no implementation functions. Private result variables are
+observed through CLI stdout and single-line stderr. No cases are dropped and
+no implementation sourcing remains in this group. The baseline golden is
+recorded through `baseline-tree.sh` at the SHA in `BASELINE`.
