@@ -107,10 +107,8 @@ cleanup() {
 }
 trap cleanup EXIT
 # Make signal-terminated runs route through the EXIT trap explicitly. On bash 3.2
-# the EXIT trap already fires for INT/TERM (verified), so this is not a bug fix —
-# it matches the explicit EXIT/INT/TERM convention mutation-verify.sh uses and
-# makes the intent legible, since Test 4 briefly creates a real executable inside
-# the tracked bin/ directory.
+# the EXIT trap already fires for INT/TERM (verified). Explicit signal exits
+# keep cleanup consistent for all temporary fixtures.
 trap 'exit 1' INT TERM
 
 FAKE_LOCAL_BIN="$TMP/.local/bin"
@@ -161,6 +159,9 @@ else
   fail "Test 4: executable non-test bin registry is incomplete"
 fi
 
+registry_bin=$BIN_DIR
+BIN_DIR="$TMP/registry"
+mkdir -p "$BIN_DIR"
 UNREGISTERED_FIXTURE="$BIN_DIR/zz-unregistered-entrypoint.fixture"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$UNREGISTERED_FIXTURE"
 chmod +x "$UNREGISTERED_FIXTURE"
@@ -168,6 +169,7 @@ registry_out="$(assert_registry_complete 2>&1)"
 registry_rc=$?
 rm -f "$UNREGISTERED_FIXTURE"
 UNREGISTERED_FIXTURE=""
+BIN_DIR=$registry_bin
 
 if [ "$registry_rc" -eq 0 ]; then
   fail "Test 4: unregistered executable fixture did not fail registry check"
@@ -484,6 +486,70 @@ if [ "$missing_rc" = 1 ] && printf '%s\n' "$missing_out" | grep -qF 'FAIL broken
 else
   fail "nonexecutable timer helper was not diagnosed: $missing_out"
 fi
+
+# Live checks use only these PATH stubs, never an installed agent.
+LIVE_BIN="$TMP/live-bin"
+mkdir -p "$LIVE_BIN" "$TMP/live-temp"
+cat > "$LIVE_BIN/agy" <<'EOF'
+#!/usr/bin/env bash
+case "$PWD" in "$TMPDIR"/*) exit 0 ;; esac
+[ "${LIVE_FAIL:-}" != agy ] || exit 3
+if [ "${1:-}" = models ] && [ "${LIVE_AUTH_FAIL:-0}" = 1 ]; then
+  echo 'invalid_grant'; exit 0
+fi
+case " $* " in
+  *' models '*) ;;
+  ' --dangerously-skip-permissions ') grep -q LIVE_SMOKE_OK || exit 9 ;;
+  *) exit 9 ;;
+esac
+printf 'healthy models and output\n'
+EOF
+cat > "$LIVE_BIN/codex" <<'EOF'
+#!/usr/bin/env bash
+case "$PWD/" in "$TMPDIR/"*) exit 9 ;; esac
+case " $* " in
+  *' --sandbox read-only '*)
+    [ "${LIVE_RO_WRITE:-0}" != 1 ] || echo bad > live-smoke-inside
+    ;;
+  *' --sandbox workspace-write '*)
+    printf 'live smoke\n' > live-smoke-inside
+    [ "${LIVE_ESCAPE:-0}" != 1 ] || printf 'escaped\n' > ../outside
+    ;;
+esac
+printf 'write refused where required\n'
+EOF
+cat > "$LIVE_BIN/claude" <<'EOF'
+#!/usr/bin/env bash
+case " $* " in *' --permission-mode plan '*) ;; *) exit 9 ;; esac
+[ "${LIVE_PLAN_WRITE:-0}" != 1 ] || echo bad > live-smoke-inside
+printf 'write refused\n'
+EOF
+chmod +x "$LIVE_BIN/agy" "$LIVE_BIN/codex" "$LIVE_BIN/claude"
+# A closed PATH prevents a missing stub from falling through to a real runtime.
+for tool in bash git mkdir mktemp rm cat grep date mv dirname perl timeout gtimeout; do
+  location=$(command -v "$tool" 2>/dev/null) || continue
+  ln -s "$location" "$LIVE_BIN/$tool"
+done
+live_run() {
+  HOME="$TMP" TMPDIR="$TMP/live-temp" XDG_STATE_HOME="$TMP/state" PATH="$LIVE_BIN" "$DOCTOR_BIN" --live
+}
+live_out=$(live_run 2>&1); live_rc=$?
+[ "$live_rc" = 0 ] && [ "$(printf '%s\n' "$live_out" | grep -c '^PASS ')" = 6 ] || fail "live all-pass: $live_out"
+last_good="$TMP/state/agent-dispatch/last-live.json"
+[ -s "$last_good" ] || fail 'live success did not record last-good JSON'
+good=$(cat "$last_good" 2>/dev/null)
+LIVE_FAIL=agy live_run > "$TMP/live-fail" 2>&1; live_rc=$?
+[ "$live_rc" != 0 ] && grep -q '^FAIL ' "$TMP/live-fail" || fail 'live agent failure should fail'
+LIVE_ESCAPE=1 live_run > "$TMP/live-escape" 2>&1; live_rc=$?
+[ "$live_rc" != 0 ] || fail 'workspace-write outside mutation accepted'
+for fault in LIVE_AUTH_FAIL LIVE_RO_WRITE LIVE_PLAN_WRITE; do
+  live_out=$(export "$fault=1"; live_run 2>&1); live_rc=$?
+  [ "$live_rc" != 0 ] || fail "$fault regression accepted: $live_out"
+done
+rm "$LIVE_BIN/claude"
+live_out=$(live_run 2>&1); live_rc=$?
+[ "$live_rc" != 0 ] && printf '%s\n' "$live_out" | grep -q '^NOT RUN.*claude' || fail "missing agent must be NOT RUN: $live_out"
+[ "$(cat "$last_good" 2>/dev/null)" = "$good" ] || fail 'failed live run replaced last-good'
 
 # ---------------------------------------------------------------------------
 # Summary

@@ -2,6 +2,7 @@ agent-dispatch-doctor — install + verify the agent-dispatch plugin.
 
 Usage:
   agent-dispatch-doctor            run health checks (verify mode)
+  agent-dispatch-doctor --live     run attended, bounded runtime smoke checks
   agent-dispatch-doctor --install  symlink entrypoints into ~/.local/bin
   agent-dispatch-doctor -h|--help  show this help
 

@@ -1004,11 +1004,26 @@ the PR body, whether archived or local-only.
 agent-dispatch-doctor              # verify
 agent-dispatch-doctor --install    # symlink entrypoints into ~/.local/bin
 agent-dispatch-doctor --help
+agent-dispatch-doctor --live       # attended runtime smoke checks
 ```
 
 `--install` symlinks every entrypoint into `~/.local/bin`. It is idempotent. It refuses to
 overwrite a real file, and it refuses to re-point a same-named symlink unless that symlink already
 points into an agent-dispatch checkout — so it cannot silently hijack another tool's command.
+`--live` runs six bounded runtime checks using `agy`, `codex`, and `claude` from
+PATH: agy output in a clone, its empty-output TMPDIR trap, its auth response
+(using the failure vocabulary in `agy-auth-probe.sh`), codex read-only refusal,
+codex workspace-write inside/outside boundaries, and claude plan-mode refusal.
+This mode makes real agent calls and is attended. Each call has a 20-second
+budget and a one-second kill grace. Fixtures are disposable clones under
+`$HOME/.cache/agent-dispatch-live`, physically outside TMPDIR; only the deliberate
+agy trap probe runs under TMPDIR. A HOME cache inside TMPDIR is refused.
+Each result is `PASS`, `FAIL`, or `NOT RUN`; missing agents are `NOT RUN`.
+Live mode exits `0` only when all six pass, otherwise `1`. Only a fully green
+run atomically updates `${XDG_STATE_HOME:-$HOME/.local/state}/agent-dispatch/last-live.json`;
+a failed or incomplete run preserves the previous success. Agent output stays
+in disposable fixtures and is removed after the run.
+
 `--print-entrypoints` lists the installed command names.
 
 Verify prints a per-check report:

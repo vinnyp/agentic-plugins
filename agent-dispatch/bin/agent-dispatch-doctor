@@ -95,6 +95,7 @@ agent-dispatch-doctor — install + verify the agent-dispatch plugin.
 
 Usage:
   agent-dispatch-doctor            run health checks (verify mode)
+  agent-dispatch-doctor --live     run attended, bounded runtime smoke checks
   agent-dispatch-doctor --install  symlink entrypoints into ~/.local/bin
   agent-dispatch-doctor -h|--help  show this help
 
@@ -117,6 +118,10 @@ fi
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
   usage
   exit 0
+fi
+
+if [ "${1:-}" = "--live" ]; then
+  exec bash "$BIN_DIR/../test/conformance/live-smoke.sh"
 fi
 
 # ---------------------------------------------------------------------------
