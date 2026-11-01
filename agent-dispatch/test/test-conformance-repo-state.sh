@@ -45,4 +45,8 @@ for path in Path(sys.argv[1]).iterdir():
         assert not (path / 'argv').read_text(), path.name
 PY
 bash "$c/compare.sh" "$work/expected" "$work/actual"
+# Publish case tokens only after every observation matches its golden.
+for dir in "$work/actual"/*; do
+  grep -E '^(PASS:|hostile metadata types PASS$)' "$dir/stdout"
+done
 echo 'PASS: repo-state public-command rewrite and complete mapping'

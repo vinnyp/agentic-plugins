@@ -322,3 +322,18 @@ and invokes mutation verification/sweep commands; it is retained as the small
 helper exception and cannot run when mutation tools are prohibited.
 The harness suite checks the anchored implementation-sourcing pattern across
 all scenarios and migrated suites, requiring an explicit allowlist reason.
+
+### Stock repo-state coverage after suite retirement
+
+The stock skip manifest requires the verified case tokens printed by
+`test-conformance-repo-state.sh` after golden comparison succeeds. Clean snapshot
+performance, bounded worker comparison, hostile snapshot fallback, slow snapshot
+and comparison, and hostile metadata remain mandatory. The former timeout and
+watchdog function modes share their public-command replacements; their private
+transport distinction was explicitly dropped in `rewrite-map.tsv`.
+
+`repo-state-inputs` checks the FIFO snapshot warning byte for byte against its
+fixture path in the scenario, keeping scratch paths out of its stderr golden.
+That empty stderr observation was recaptured from the pinned baseline archive;
+the remaining observations are unchanged. A comparison failure now prints a
+normalized unified diff labelled `expected` and `actual`.

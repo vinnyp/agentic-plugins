@@ -78,6 +78,10 @@ while IFS= read -r id; do
     if [ ! -f "$1/$id/$file" ] || [ ! -f "$2/$id/$file" ]; then echo "$id/$file differs (missing)"; exit 1; fi
     normalise "$1/$id" "$file" "$work/shas.1" > "$work/a"
     normalise "$2/$id" "$file" "$work/shas.2" > "$work/b"
-    if ! cmp -s "$work/a" "$work/b"; then echo "$id/$file differs"; exit 1; fi
+    if ! cmp -s "$work/a" "$work/b"; then
+      echo "$id/$file differs"
+      diff -u -L expected -L actual "$work/a" "$work/b" || :
+      exit 1
+    fi
   done < "$work/files.1"
 done < "$work/ids.1"

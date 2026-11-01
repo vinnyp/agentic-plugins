@@ -40,7 +40,10 @@ snap "$TMP/b"
 rc_is 2 compare "$TMP/a" "$TMP/b" "$TMP/changes"
 # Preserve unsafe diagnostics even when the remainder of a snapshot is unreadable.
 mkfifo "$R/.git/fixture-fifo"
-snap "$TMP/unsafe"
+# Keep the scratch-path diagnostic out of the golden while checking it exactly.
+snap "$TMP/unsafe" 2> "$TMP/unsafe-err"
+printf 'repo-state-check: baseline contains special files: %s/.git/fixture-fifo\n' "$R" > "$TMP/expected-unsafe-err"
+cmp "$TMP/expected-unsafe-err" "$TMP/unsafe-err"
 { printf 'unreadable\n'; grep '^unsafe' "$TMP/unsafe"; } > "$TMP/unreadable"
 rc_is 2 compare "$TMP/a" "$TMP/unreadable" "$TMP/changes"
 grep -q 'nonregular .*fixture-fifo: critical' "$TMP/changes"

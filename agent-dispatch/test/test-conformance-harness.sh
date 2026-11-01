@@ -88,6 +88,10 @@ done
 printf '/example/bin/lib/repo-state.sh: child setpgid (91436 to 91436): Operation not permitted extra\n' >> "$work/b/sample/stderr"
 if bash "$h/compare.sh" "$work/a" "$work/b" > "$work/diff"; then fail 'other setpgid text still compared'; fi
 case "$(cat "$work/diff")" in *'sample/stderr differs'*) ;; *) fail 'other setpgid text names stderr';; esac
+# case: comparison-failure-diagnostics
+grep -qx -- '--- expected' "$work/diff" || fail 'diff labels expected observation'
+grep -qx -- '+++ actual' "$work/diff" || fail 'diff labels actual observation'
+grep -Fqx -- '+/example/bin/lib/repo-state.sh: child setpgid (91436 to 91436): Operation not permitted extra' "$work/diff" || fail 'diff shows unexpected stderr bytes'
 cp "$work/recording/stderr" "$work/b/sample/stderr"
 ln -s "$work/impl" "$work/impl-link"
 bash "$h/run.sh" --impl "$work/impl-link" --out "$work/symlinked"
