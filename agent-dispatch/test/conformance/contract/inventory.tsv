@@ -1265,6 +1265,9 @@ mutation-verify.sh	line	text	| cargo | `cargo test -q`, no positional filter and
 mutation-verify.sh	line	text	| go | `go test -v -count=1 <one package>` | `-skip '^TestName$'`, or `-skip '^TestName$/^row$'` for one table row | `--knockout-delta-line '=== RUN '` |	docs/commands.md
 mutation-verify.sh	line	text	| pytest | `pytest -q <path>` | `--deselect <full node id, including any [param] id>` | `--knockout-expect-output '1 deselected'` |	docs/commands.md
 mutation-verify.sh	line	text	|---|---|---|---|	docs/commands.md
+repo-state-check	env	DISPATCH_CONFORMANCE_ROOT	by design; set `DISPATCH_CONFORMANCE_ROOT` to a neutral path outside HOME and	docs/commands.md
+repo-state-check	env	DISPATCH_CONFORMANCE_TIMEOUT	TMPDIR. `DISPATCH_CONFORMANCE_TIMEOUT` and `DISPATCH_LIVE_TIMEOUT` can shorten	docs/commands.md
+repo-state-check	env	DISPATCH_LIVE_TIMEOUT	TMPDIR. `DISPATCH_CONFORMANCE_TIMEOUT` and `DISPATCH_LIVE_TIMEOUT` can shorten	docs/commands.md
 repo-state-check	env	DISPATCH_SNAPSHOT_TIMEOUT_SECS	once complete. The git reads are killed after `DISPATCH_SNAPSHOT_TIMEOUT_SECS`	docs/commands.md
 repo-state-check	env	DISPATCH_SNAPSHOT_TIMEOUT_SECS	| `DISPATCH_SNAPSHOT_TIMEOUT_SECS` | review setup and snapshots, `review-pin.sh`, `repo-state-check` | 1–86400 decimal seconds; default 120 for dispatcher/pins, 60 for `repo-state-check`; invalid values warn and use the default |	docs/commands.md
 repo-state-check	env	TMPDIR	`repo-state-*` directories in `TMPDIR` (they hold no secrets). A successful snapshot	docs/commands.md
@@ -1313,6 +1316,7 @@ repo-state-check	line	text	(`state: compare timed out` or `state: compare could 
 repo-state-check	line	text	--help, -h: print usage and exit 0	help/repo-state-check.txt
 repo-state-check	line	text	A timeout message lists special files found in git metadata (what was found, not a proven	docs/commands.md
 repo-state-check	line	text	Compare prints named change lines and exits 0 for clean, 1 for warn-only drift or 2 for	docs/commands.md
+repo-state-check	line	text	Conformance capture (`test/conformance/record.sh`) bounds each runtime to 20	docs/commands.md
 repo-state-check	line	text	DISPATCH_SNAPSHOT_TIMEOUT_SECS: seconds (1-86400) the git reads may run before they are killed; default 60 here, 120 for dispatch-worker; an invalid value uses the default with a warning	help/repo-state-check.txt
 repo-state-check	line	text	Hook changes and new local-only commits with a committer different from the initial identity	docs/commands.md
 repo-state-check	line	text	In `dispatch-worker` review runs, snapshots and changes stay in shell memory.	docs/commands.md
@@ -1321,6 +1325,7 @@ repo-state-check	line	text	Results use an unlinked channel with a checked exit s
 repo-state-check	line	text	Snapshot exit 3 also means "not evaluated": a timeout, a missing completion record or an	docs/commands.md
 repo-state-check	line	text	Snapshot records effective config (including worktree config), hook hashes and modes, refs,	docs/commands.md
 repo-state-check	line	text	Snapshots also hash `info/exclude`, `info/attributes`, and	docs/commands.md
+repo-state-check	line	text	TMPDIR. `DISPATCH_CONFORMANCE_TIMEOUT` and `DISPATCH_LIVE_TIMEOUT` can shorten	docs/commands.md
 repo-state-check	line	text	The dispatcher never reopens snapshot or changes paths to decide the verdict.	docs/commands.md
 repo-state-check	line	text	```	docs/commands.md
 repo-state-check	line	text	```text	docs/commands.md
@@ -1333,6 +1338,8 @@ repo-state-check	line	text	`repo-state-*` directories in `TMPDIR` (they hold no 
 repo-state-check	line	text	`sort`, `comm` or `awk` that exits abnormally or is killed) is never read as a verdict:	docs/commands.md
 repo-state-check	line	text	are critical. Ref, worktree and working-tree movement warn. Sensitive values are hashed in	docs/commands.md
 repo-state-check	line	text	before any other work, so a stale or partial snapshot is never left readable (any special	docs/commands.md
+repo-state-check	line	text	by design; set `DISPATCH_CONFORMANCE_ROOT` to a neutral path outside HOME and	docs/commands.md
+repo-state-check	line	text	capture and live-probe bounds for stub tests. Live probes inspect stdout only,	docs/commands.md
 repo-state-check	line	text	cause), or says none were found, or that the pre-sweep failed (naming any special files it	docs/commands.md
 repo-state-check	line	text	check failed: stop and investigate, never clean. `dispatch-worker` treats a compare	docs/commands.md
 repo-state-check	line	text	compare exits: 0 clean, 1 warn, 2 critical or not evaluated (a "state:" line or "config: <unreadable after review>"), 3 input error (unreadable before file, internal temp failure or a failed helper), 64 usage	help/repo-state-check.txt
@@ -1351,12 +1358,15 @@ repo-state-check	line	text	over 64 MiB are not evaluated and produce exit 3 befo
 repo-state-check	line	text	present before the review or is `.` (the local repository);	docs/commands.md
 repo-state-check	line	text	repo-state-check compare <before> <after>	docs/commands.md
 repo-state-check	line	text	repo-state-check snapshot <abs-repo-dir> <file>	docs/commands.md
+repo-state-check	line	text	require explicit reply markers, and ignore global/system Git configuration.	docs/commands.md
 repo-state-check	line	text	runs under the same bound and limit as snapshot. A helper that fails during compare (a	docs/commands.md
+repo-state-check	line	text	seconds, uses Codex read-only and Claude plan mode, and refuses unsanitized	docs/commands.md
 repo-state-check	line	text	snapshot exits: 0 ok, 3 failure or not evaluated (<file> then reads "unreadable"), 64 usage	help/repo-state-check.txt
 repo-state-check	line	text	snapshots and output is redacted. Treat compare exit 2 as review rc 10; exits 3/64 mean	docs/commands.md
 repo-state-check	line	text	temp directory and remove them after inspection. Snapshot exits 0 on success or 3 for an	docs/commands.md
 repo-state-check	line	text	that cannot complete as critical and returns rc 10.	docs/commands.md
 repo-state-check	line	text	the `unreadable` pre-mark cannot be made by rename, snapshot exits 3 without writing to the	docs/commands.md
+repo-state-check	line	text	transcripts. Its default root under `$HOME` makes real Codex recordings refused	docs/commands.md
 repo-state-check	line	text	unexpected failure of the bounded git reads. The output file is replaced with `unreadable`	docs/commands.md
 repo-state-check	line	text	usage: repo-state-check snapshot <repo> <file> | compare <before> <after>	help/repo-state-check.txt
 repo-state-check	line	text	whose baseline already holds special files warns on stderr and still exits 0.	docs/commands.md
