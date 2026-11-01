@@ -1203,6 +1203,50 @@ wd=""; while [ $# -gt 0 ]; do [ "$1" = "-C" ] && { wd="$2"; shift 2; continue; }
 printf '{"status":"complete","files_written":[],"timestamp":"2026-01-01T00:00:00Z"}\n' > "$wd/_coding-result.json"
 STUB
 chmod +x "$TMP/bin/codex"
+# Final gates also apply to marker-backed no-ops.
+for scenario in gate_fails gate_passes require_present require_absent require_directory require_subdir worktree_fails no_gate; do
+  P_noop_gate="$TMP/noop_$scenario"; new_parent_gitignoring_marker "$P_noop_gate"
+  noop_workdir="$P_noop_gate"
+  noop_args=()
+  noop_gate=true
+  noop_expected=0
+  case "$scenario" in
+    gate_fails) noop_gate=false; noop_expected=1 ;;
+    require_present) noop_args=(--require-file tracked.txt) ;;
+    require_absent) noop_args=(--require-file missing.txt); noop_expected=1 ;;
+    require_directory|require_subdir)
+      mkdir -p "$P_noop_gate/sub"
+      echo base > "$P_noop_gate/sub/nested.txt"
+      git -C "$P_noop_gate" add -A; git -C "$P_noop_gate" commit -qm subdir
+      if [ "$scenario" = require_directory ]; then
+        noop_args=(--require-file sub); noop_expected=1
+      else
+        noop_args=(--require-file sub/nested.txt); noop_workdir="$P_noop_gate/sub"
+      fi
+      ;;
+    worktree_fails) noop_args=(--worktree); noop_gate=false; noop_expected=1 ;;
+    no_gate) noop_gate="" ;;
+  esac
+  CODING_DISPATCH_WORKTREE=noop-gate bash "$CD" ${noop_args[@]+"${noop_args[@]}"} codex "$noop_workdir" "$TMP/prompt" "$noop_gate" >"$TMP/noop_out" 2>"$TMP/noop_err"; rc=$?
+  noop_label="noop ${scenario//_/ }"
+  [ "$rc" -eq "$noop_expected" ] || { cat "$TMP/noop_out" "$TMP/noop_err"; fail "$noop_label: expected rc $noop_expected, got $rc"; }
+  if [ "$noop_expected" -eq 0 ]; then
+    grep -q 'DISPATCH=ok-noop' "$TMP/noop_out" || fail "$noop_label: missing ok-noop"
+  else
+    ! grep -q 'DISPATCH=ok-noop' "$TMP/noop_out" "$TMP/noop_err" || fail "$noop_label: reported ok-noop"
+  fi
+  case "$scenario" in
+    gate_fails|worktree_fails)
+      grep -q 'DISPATCH=fail: build/vet failed' "$TMP/noop_out" || fail "$noop_label: missing build failure" ;;
+    require_absent) grep -q 'required file' "$TMP/noop_err" || fail "$noop_label: missing required file diagnostic" ;;
+    no_gate) grep -q 'no build gate ran' "$TMP/noop_err" || fail "$noop_label: missing no-gate diagnostic" ;;
+  esac
+  if [ "$scenario" = worktree_fails ]; then
+    [ -d "$(expected_wt "$P_noop_gate" noop-gate)" ] || fail "$noop_label: worktree was removed"
+  fi
+  echo "test $noop_label PASS"
+done
+
 mkdir -p "$TMP/cap128b"
 TMPDIR="$TMP/cap128b" bash "$CD" codex "$P_noop" "$TMP/prompt" "true" >"$TMP/out_noop" 2>&1; rc=$?
 [ -z "$(find "$TMP/cap128b" -name 'coding-dispatch-cap.*')" ] || fail "#128b leaked capture dir"
