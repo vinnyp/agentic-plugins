@@ -1,0 +1,6 @@
+▶ brief fingerprint: 3a2c9bfff601 (18B); first line: Edit tracked.txt.
+▶ dispatching to codex in <SCN_TMP>/repo (timeout 5s, base 22d655def6c9)…
+gate-env: python=<SCN_TMP>/bin/python3 Python fixture ruff=absent
+GATE_TREE_PRE pwd=<SCN_TMP>/repo top=<SCN_TMP>/repo head=22d655def6c92ac5944765a9910bf86566ea8d86
+GATE_TREE_POST pwd=<SCN_TMP>/repo top=<SCN_TMP>/repo head=22d655def6c92ac5944765a9910bf86566ea8d86 code=0
+ℹ no/incomplete marker, but diff + build passed — marker synthesized from the diff

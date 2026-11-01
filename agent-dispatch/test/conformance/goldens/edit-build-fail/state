@@ -1,0 +1,14 @@
+HEAD 22d655def6c92ac5944765a9910bf86566ea8d86
+branches
+* main
+worktrees
+worktree <SCN_TMP>/repo
+HEAD 22d655def6c92ac5944765a9910bf86566ea8d86
+branch refs/heads/main
+tree <SCN_TMP>/repo
+status
+
+result 0
+patch <SCN_TMP>/repo/.git/coding-dispatch-last-fail.patch 1 7 sha256=f28d6722c6ecbc6ba29205e1b252928522ccfe2420ca4069116ecf92b9153dd9
+fail-patches
+worktree-directories

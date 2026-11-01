@@ -1,0 +1,3 @@
+▶ brief fingerprint: 3a2c9bfff601 (18B); first line: Edit tracked.txt.
+▶ dispatching to codex in <SCN_TMP>/repo (timeout 5s, base 22d655def6c9)…
+DISPATCH=fail: mutation marker (// MUT / # MUT) present in the dispatched change (tracked.txt) — a mutation-test sentinel was not restored before the build/commit. Restore the tree to its pre-mutation state and re-dispatch. A leftover mutant must be removed; only a dedicated mutation-suite file named test-mutants* is exempt by default.

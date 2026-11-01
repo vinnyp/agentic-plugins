@@ -1,0 +1,5 @@
+════════ dispatching Task 1 → codex ════════
+Selected model is at capacity
+DISPATCH=fail: agent unavailable (capacity/rate limit) — rc=1, no work attempted: Selected model is at capacity — nothing to revert
+✗ Task 1 BLOCKED: agent unavailable (capacity/rate limit) — per AGENTS.md, finish this task locally, then resume the phase at the next task.
+PHASE=blocked-unavailable:1

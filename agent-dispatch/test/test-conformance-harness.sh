@@ -11,6 +11,8 @@ mkdir -p "$work/test" "$work/bin/lib"
 cp -R "$here/conformance" "$work/test/conformance"
 cp "$here/../bin/lib/timeout-bin.sh" "$here/../bin/lib/portable-timeout" "$work/bin/lib/"
 h="$work/test/conformance"
+rm -rf "$h/scenarios" "$h/goldens"
+printf 'id\ttag\tissue\tbudget_s\tretry\n' > "$h/goldens.tsv"
 # Exact expectations prevent a comparison from passing by erasing both values.
 normalised_is() {
   local actual
@@ -23,6 +25,9 @@ normalised_is 'cd slug normalised' 'branch=cd-20261031230803-77539' 'branch=cd-<
 normalised_is 'review temp path normalised' 'REVIEW_OUTFILE=/tmp/dispatch-review.aB1234.md (rc=124) [retry]' 'REVIEW_OUTFILE=<REVIEW_TMP> (rc=124) [retry]'
 normalised_is 'BSD review temp path normalised' 'REVIEW_OUTFILE=/var/folders/example/T/dispatch-review.aB12345678 (rc=0)' 'REVIEW_OUTFILE=<REVIEW_TMP> (rc=0)'
 normalised_is 'worktree namespace hash normalised' 'worktree=<SCN_TMP>/.worktrees/my_repo_1a2b3c4d/cd-20261031230803-77539' 'worktree=<SCN_TMP>/.worktrees/my_repo_<HASH>/cd-<TS>-<PID>'
+normalised_is 'state namespace directory' 'repo__1a2b3c4d' 'repo__<HASH>'
+normalised_is 'state namespace contents' 'repo__1a2b3c4d/tracked.txt' 'repo__<HASH>/tracked.txt'
+normalised_is 'state namespace path' '<SCN_TMP>/.worktrees/repo__1a2b3c4d' '<SCN_TMP>/.worktrees/repo__<HASH>'
 normalised_is 'review worktree normalised' 'worktree=/tmp/dispatch-review-wt.aB1234/repo word' 'worktree=/tmp/dispatch-review-wt.<TMP>/repo word'
 normalised_is 'review worktree prefix anchored' 'other-dispatch-review-wt.aB1234/repo' 'other-dispatch-review-wt.aB1234/repo'
 normalised_is 'brief fingerprint preserved' '▶ brief fingerprint: abcdef123456 (42B); first line: brief' '▶ brief fingerprint: abcdef123456 (42B); first line: brief'
@@ -57,7 +62,7 @@ bash "$h/compare.sh" "$work/a" "$work/symlinked" || fail 'symlinked impl compare
 cp "$work/a/sample/scn_tmp" "$work/b/sample/scn_tmp"
 cp "$work/a/sample/run_dir" "$work/b/sample/run_dir"
 cp "$work/a/sample/stdout" "$work/original"
-for change in rc stderr exit dispatch argv; do
+for change in rc stderr exit dispatch argv state; do
   cp "$work/original" "$work/b/sample/stdout"
   cp "$work/a/sample/rc" "$work/b/sample/rc"
   cp "$work/a/sample/stderr" "$work/b/sample/stderr"
@@ -67,12 +72,17 @@ for change in rc stderr exit dispatch argv; do
     stderr) printf 'different\n' >> "$work/b/sample/stderr"; field=stderr ;;
     exit) printf 'exit=1 sha=0123456789abcdef0123456789abcdef01234567 pid=123\n' >> "$work/a/sample/stdout"; printf 'exit=2 sha=0123456789abcdef0123456789abcdef01234567 pid=123\n' >> "$work/b/sample/stdout"; field=stdout ;;
     dispatch) printf 'DISPATCH=ok\n' >> "$work/a/sample/stdout"; printf 'DISPATCH=fail\n' >> "$work/b/sample/stdout"; field=stdout ;;
+    state) printf 'changed\n' > "$work/b/sample/state"; field=state ;;
     argv) printf '%s\n' '--changed' >> "$work/b/sample/argv"; field=argv ;;
   esac
   if bash "$h/compare.sh" "$work/a" "$work/b" > "$work/diff"; then fail "$change difference detected"; fi
   case "$(cat "$work/diff")" in *"sample/$field"*) ;; *) fail "$change names file" ;; esac
   cp "$work/original" "$work/a/sample/stdout"
 done
+cp "$work/a/sample/state" "$work/b/sample/state"
+rm "$work/b/sample/state"
+if bash "$h/compare.sh" "$work/a" "$work/b" > "$work/diff"; then fail 'missing state accepted'; fi
+cp "$work/a/sample/state" "$work/b/sample/state"
 cp "$work/a/sample/argv" "$work/b/sample/argv"
 cp "$work/original" "$work/b/sample/stdout"
 sed 's/0123456789abcdef0123456789abcdef01234567/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/; s/base_sha=abcdef1/base_sha=1234567/; s/pid=123/pid=456/; s/1793495751/1793499999/; s/elapsed=12s/elapsed=99s/; s/cd-20261031230803-123/cd-20271101230803-456/; s/phase-build-20261031230803-123/phase-build-20271101230803-456/' "$work/original" > "$work/b/sample/stdout"

@@ -1,0 +1,1 @@
+DISPATCH=fail: build/vet failed (false) — --keep-on-fail: tree left intact (not reverted); patch: <SCN_TMP>/repo/.git/coding-dispatch-last-fail.patch

@@ -1,0 +1,4 @@
+════════ dispatching Task 1 → codex ════════
+DISPATCH=fail: empty diff (agent changed nothing, rc=0) — nothing to revert
+✗ Task 1 FAILED (dispatch reverted the tree). Stopping phase — Opus takes this task.
+PHASE=stopped-at:1
