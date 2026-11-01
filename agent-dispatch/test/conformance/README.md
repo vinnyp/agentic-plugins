@@ -200,7 +200,9 @@ slice; they describe frozen observations and do not change production behavior.
 
 - STATE-001 (`state-compare-filter`): a newly configured `filter.*.clean` actually
   runs during snapshotting, before config comparison reports critical. The
-  fixture's filter writes a sentinel, and the scenario asserts it exists.
+  fixture changes a tracked text file with same-size content and an old mtime
+  to force filtering regardless of timestamp resolution. Its filter writes a
+  sentinel, and the scenario asserts it exists.
 - STATE-002 (`state-compare-deleted`, `state-compare-truncated`): deleting or
   emptying a standalone baseline yields input error 3, rather than critical 2.
   Both are refused; neither is clean. Preserve these observations as known
