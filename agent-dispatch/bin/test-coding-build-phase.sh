@@ -19,6 +19,7 @@ git -C "$TMP" init -q
 new_phase_repo() {
   local p="$1"; mkdir -p "$p"; git -C "$p" init -q
   printf 'base\n' > "$p/tracked.txt"
+  echo _coding-result.json > "$p/.gitignore"
   git -C "$p" add -A; git -C "$p" commit -qm base
 }
 
@@ -63,8 +64,13 @@ echo 'test worker committed its own work PASS'
 FAIL_COMMIT="$TMP/fail-commit"; new_phase_repo "$FAIL_COMMIT"
 printf '#!/usr/bin/env bash\nexit 1\n' > "$FAIL_COMMIT/.git/hooks/pre-commit"
 chmod +x "$FAIL_COMMIT/.git/hooks/pre-commit"
-out="$(PATH="$TMP/outcomebin:$PATH" "$SELF_DIR/coding-build-phase.sh" codex "$TMP/plan.md" "$FAIL_COMMIT" 1 --build-cmd true 2>&1)"; rc=$?
-[ "$rc" -ne 0 ] && ! printf '%s\n' "$out" | grep -q committed ||
+printf '### Task 1: change\nchange\n### Task 2: later\nlater\n' > "$TMP/fail-plan.md"
+fail_head="$(git -C "$FAIL_COMMIT" rev-parse HEAD)"
+out="$(PATH="$TMP/outcomebin:$PATH" "$SELF_DIR/coding-build-phase.sh" codex "$TMP/fail-plan.md" "$FAIL_COMMIT" 1 2 --build-cmd true 2>&1)"; rc=$?
+[ "$rc" -ne 0 ] && printf '%s\n' "$out" | grep -qF 'PHASE=stopped-at:1' &&
+  printf '%s\n' "$out" | grep -qF 'commit failed' &&
+  ! printf '%s\n' "$out" | grep -qF 'dispatching Task 2' &&
+  [ "$(git -C "$FAIL_COMMIT" rev-parse HEAD)" = "$fail_head" ] ||
   { echo "$out"; echo 'FAIL: commit failure stops the phase'; exit 1; }
 echo 'test commit failure stops the phase PASS'
 
@@ -89,12 +95,90 @@ printf '### Task 1: noop\nnoop\n### Task 2: change\nchange\n' > "$TMP/noop-next.
 out="$(PATH="$SELF_DIR:$TMP/noopbin:$PATH" NOOP_SEEN="$TMP/noop-seen" "$SELF_DIR/coding-build-phase.sh" codex "$TMP/noop-next.md" "$NEXT" 1 2 --worktree --build-cmd true 2>&1)"; rc=$?
 next_branch="$(printf '%s\n' "$out" | sed -n 's/.*PHASE=ok worktree=[^ ]* branch=\([^ ]*\) .*/\1/p')"
 [ "$rc" -eq 0 ] && [ -n "$next_branch" ] &&
+  printf '%s\n' "$out" | grep -qF 'DISPATCH=ok-noop' &&
   printf '%s\n' "$out" | grep -qF 'Task 1 made no changes' &&
   printf '%s\n' "$out" | grep -qF 'Task 2 committed (' &&
   [ "$(git -C "$NEXT" rev-list --count "$next_head..$next_branch")" -eq 1 ] &&
   [ "$(git -C "$NEXT" show "$next_branch:agent_made_this.txt")" = change ] ||
   { echo "$out"; echo 'FAIL: worktree no-op, then next task'; exit 1; }
 echo 'test worktree no-op, then next task PASS'
+
+# Real dispatcher outcomes in a worktree, including hook failure and worker residue.
+mkdir -p "$TMP/outcome-worker"
+cat > "$TMP/outcome-worker/codex" <<'STUB'
+#!/usr/bin/env bash
+wd=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = -C ]; then wd="$2"; shift 2; else shift; fi
+done
+if [ "$OUTCOME" != noop ]; then
+  echo change >> "$wd/tracked.txt"
+  if [ "$OUTCOME" != failure ]; then
+    git -C "$wd" add tracked.txt && git -C "$wd" commit -qm worker || exit 1
+  fi
+  if [ "$OUTCOME" = residue ]; then echo residue >> "$wd/residue.txt"; fi
+fi
+printf '{"status":"complete","files_written":[],"timestamp":"2026-01-01T00:00:00Z"}\n' > "$wd/_coding-result.json"
+STUB
+chmod +x "$TMP/outcome-worker/codex"
+for outcome in worker failure residue noop; do
+  outcome_repo="$TMP/outcome-$outcome"; new_phase_repo "$outcome_repo"
+  outcome_head="$(git -C "$outcome_repo" rev-parse HEAD)"
+  if [ "$outcome" = failure ]; then
+    printf '#!/usr/bin/env bash\nexit 1\n' > "$outcome_repo/.git/hooks/pre-commit"
+    chmod +x "$outcome_repo/.git/hooks/pre-commit"
+  fi
+  out="$(PATH="$SELF_DIR:$TMP/outcome-worker:$PATH" OUTCOME="$outcome" "$SELF_DIR/coding-build-phase.sh" codex "$TMP/fail-plan.md" "$outcome_repo" 1 2 --worktree --build-cmd true 2>&1)"; rc=$?
+  case "$outcome" in
+    failure)
+      [ "$rc" -ne 0 ] && printf '%s\n' "$out" | grep -qF 'PHASE=stopped-at:1' &&
+        printf '%s\n' "$out" | grep -qF 'commit failed' &&
+        ! printf '%s\n' "$out" | grep -qF 'dispatching Task 2' ||
+        { echo "$out"; echo 'FAIL: worktree commit failure stops the phase'; exit 1; } ;;
+    noop)
+      [ "$rc" -eq 0 ] && printf '%s\n' "$out" | grep -qF 'PHASE=ok: tasks' &&
+        ! printf '%s\n' "$out" | grep -qF 'land with:' ||
+        { echo "$out"; echo 'FAIL: all tasks no-op'; exit 1; } ;;
+    worker|residue)
+      outcome_branch="$(printf '%s\n' "$out" | sed -n 's/.*PHASE=ok worktree=[^ ]* branch=\([^ ]*\) .*/\1/p')"
+      expected_count=2; expected_line='committed by the worker ('
+      if [ "$outcome" = residue ]; then expected_count=4; expected_line='committed ('; fi
+      [ "$rc" -eq 0 ] && printf '%s\n' "$out" | grep -qF "$expected_line" &&
+        [ "$(git -C "$outcome_repo" rev-list --count "$outcome_head..$outcome_branch")" -eq "$expected_count" ] ||
+        { echo "$out"; echo "FAIL: worktree $outcome outcome"; exit 1; } ;;
+  esac
+  echo "test worktree $outcome outcome PASS"
+done
+
+# Model a dispatcher reattaching an existing branch between tasks.
+mkdir -p "$TMP/reattachbin"
+cat > "$TMP/reattachbin/coding-dispatch.sh" <<'STUB'
+#!/usr/bin/env bash
+repo="$3"
+slug="$CODING_DISPATCH_WORKTREE"
+if ! git -C "$repo" show-ref --verify --quiet "refs/heads/$slug"; then
+  git -C "$repo" worktree add -q -b "$slug" "$REATTACH_DIR" HEAD || exit 1
+  echo prior > "$REATTACH_DIR/prior.txt"
+  git -C "$REATTACH_DIR" add -A && git -C "$REATTACH_DIR" commit -qm prior || exit 1
+  git -C "$repo" worktree remove "$REATTACH_DIR" || exit 1
+else
+  # shellcheck disable=SC1091
+  . "$PHASE_TEST_LIB/hash.sh"
+  root="$(git -C "$repo" rev-parse --show-toplevel)"
+  base=$(basename "$root" | tr -cs 'A-Za-z0-9_-' '_')
+  hash=$(printf '%s' "$root" | md5_hex | cut -c1-8)
+  target="$(cd "$root/.." && pwd -P)/.worktrees/${base}_${hash}/$slug"
+  mkdir -p "$(dirname "$target")"
+  git -C "$repo" worktree add -q "$target" "$slug" || exit 1
+fi
+STUB
+chmod +x "$TMP/reattachbin/coding-dispatch.sh"
+BRANCH_NOOP="$TMP/branch-noop"; new_phase_repo "$BRANCH_NOOP"
+out="$(PATH="$TMP/reattachbin:$PATH" PHASE_TEST_LIB="$SELF_DIR/lib" REATTACH_DIR="$TMP/prior-wt" "$SELF_DIR/coding-build-phase.sh" codex "$TMP/fail-plan.md" "$BRANCH_NOOP" 1 2 --worktree --build-cmd true 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] && printf '%s\n' "$out" | grep -qF 'Task 2 made no changes' &&
+  ! printf '%s\n' "$out" | grep -qF 'committed by the worker' ||
+  { echo "$out"; echo 'FAIL: no-op on a branch with commits'; exit 1; }
+echo 'test no-op on a branch with commits PASS'
 
 "$SELF_DIR/coding-build-phase.sh" codex "$TMP/plan.md" "$TMP" 1 --build-cmd "pytest -q" >/dev/null 2>&1
 grep -qF "pytest -q" "$CD_ARGS_FILE" || { echo "FAIL: --build-cmd not passed through"; exit 1; }

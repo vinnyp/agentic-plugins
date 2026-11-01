@@ -1204,7 +1204,7 @@ printf '{"status":"complete","files_written":[],"timestamp":"2026-01-01T00:00:00
 STUB
 chmod +x "$TMP/bin/codex"
 # Final gates also apply to marker-backed no-ops.
-for scenario in gate_fails gate_passes require_present require_absent require_directory require_subdir worktree_fails no_gate; do
+for scenario in gate_fails gate_passes require_present require_absent require_ignored require_directory require_subdir worktree_fails no_gate; do
   P_noop_gate="$TMP/noop_$scenario"; new_parent_gitignoring_marker "$P_noop_gate"
   noop_workdir="$P_noop_gate"
   noop_args=()
@@ -1213,6 +1213,11 @@ for scenario in gate_fails gate_passes require_present require_absent require_di
   case "$scenario" in
     gate_fails) noop_gate=false; noop_expected=1 ;;
     require_present) noop_args=(--require-file tracked.txt) ;;
+    require_ignored)
+      echo ignored.txt >> "$P_noop_gate/.gitignore"
+      echo present > "$P_noop_gate/ignored.txt"
+      git -C "$P_noop_gate" add .gitignore; git -C "$P_noop_gate" commit -qm ignore
+      noop_args=(--require-file ignored.txt); noop_expected=1 ;;
     require_absent) noop_args=(--require-file missing.txt); noop_expected=1 ;;
     require_directory|require_subdir)
       mkdir -p "$P_noop_gate/sub"
@@ -1364,6 +1369,14 @@ grep -q "DISPATCH=ok-noop" "$TMP/out_wtnoop" || { cat "$TMP/out_wtnoop"; fail "F
 WT_NOOP="$(expected_wt "$P_wtnoop" slugNoopWT)"
 [ ! -d "$WT_NOOP" ] || fail "FINDING4 --worktree ok-noop should remove the worktree directory"
 git -C "$P_wtnoop" worktree list --porcelain | grep -Fq "worktree $WT_NOOP" && fail "FINDING4 --worktree ok-noop worktree must not appear in 'git worktree list'"
+! git -C "$P_wtnoop" show-ref --verify --quiet refs/heads/slugNoopWT || fail "FINDING4 no-op branch survived"
+git -C "$P_wtnoop" worktree add -q -b reusedNoop "$WT_NOOP" HEAD
+# Reuse requires the dispatcher's exact slug-derived path.
+git -C "$P_wtnoop" worktree move "$WT_NOOP" "$(expected_wt "$P_wtnoop" reusedNoop)"
+CODING_DISPATCH_WORKTREE=reusedNoop bash "$CD" --worktree codex "$P_wtnoop" "$TMP/prompt" true >"$TMP/out_reusednoop" 2>&1; rc=$?
+[ "$rc" -eq 0 ] || { cat "$TMP/out_reusednoop"; fail "FINDING4 reused no-op failed"; }
+grep -q 'DISPATCH=ok-noop' "$TMP/out_reusednoop" || fail "FINDING4 reused no-op missing marker"
+git -C "$P_wtnoop" show-ref --verify --quiet refs/heads/reusedNoop || fail "FINDING4 reused branch deleted"
 echo "test FINDING4 --worktree + ok-noop removes the worktree PASS"
 
 # ============================ FINDING 5: slow-gate heuristic negative cases must NOT warn ============================

@@ -862,7 +862,8 @@ if [ -z "$(git status --porcelain)" ]; then
       if [ "$WORKTREE" -eq 1 ]; then
         trap - HUP INT TERM
         if [ "$CREATED_HERE" -eq 1 ]; then
-          cd "$PARENT_ROOT" && git worktree remove --force "$WT_DIR" 2>/dev/null
+          cd "$PARENT_ROOT" && git worktree remove --force "$WT_DIR" 2>/dev/null &&
+            git branch -D "$SLUG" >/dev/null
         fi
         printf 'DISPATCH=ok-noop base_sha=%s: %s found prior work already complete (no changes needed) — worktree cleaned\n' "${WORKTREE_BASE_SHORT:-unknown}" "$agent"
         exit 0

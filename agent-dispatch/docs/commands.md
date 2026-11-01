@@ -186,9 +186,9 @@ coding-build-phase.sh codex ~/plans/retry.md ~/code/myrepo 1 2 3 \
 
 ```
 ════════ dispatching Task 1 → codex ════════
-✓ Task 1 committed in worktree (4c9ab12)
+✓ Task 1 committed (4c9ab12)
 ════════ dispatching Task 2 → codex ════════
-✓ Task 2 committed in worktree (8ee01f7)
+✓ Task 2 committed (8ee01f7)
 PHASE=ok worktree=… branch=phase-myrepo-20260830131500-4821 tasks=[1 2 3] — land with: git -C '…' merge --ff-only 'phase-…' && git -C '…' worktree remove '…'
 ```
 
