@@ -1,6 +1,6 @@
 HEAD 22d655def6c92ac5944765a9910bf86566ea8d86
 branches
-  cd-20261101024627-86945
+  cd-20261101031655-18259
 * main
 worktrees
 worktree <SCN_TMP>/repo
@@ -10,7 +10,7 @@ tree <SCN_TMP>/repo
 status
 
 result 0
-patch <SCN_TMP>/repo/.git/coding-dispatch-last-fail.patch 0 0
+patch <SCN_TMP>/repo/.git/coding-dispatch-last-fail.patch 0 0 -
 fail-patches
 worktree-directories
-repo__46e166d7
+repo__74a73cfb

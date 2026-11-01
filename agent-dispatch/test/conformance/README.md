@@ -107,11 +107,11 @@ failure verdicts in the scope, newdir, marker, and FM4 captures preserve cutover
 
 Before cleanup, `capture-state.py` runs inside the scenario's hermetic environment.
 It records HEAD, sorted branches, worktree porcelain, each tree's full status and
-result-marker presence, failure patches and line counts, and the sorted sibling
+result-marker presence, failure patches, line counts and SHA-256 digests of their bytes, and the sorted sibling
 `.worktrees` listing. A non-repository scenario records `repository absent`.
 The comparator requires state on both sides and shares SHA numbering with all
 other observations. Failed in-place captures must restore the fixture base and
 leave a clean tree. Empty/unavailable worktrees, interrupted partial edits,
-committed worker salvage, removal overrides, stale bases, timeout/124, no-gate
+marker-backed TDD commits preserved after gate failure or signal, committed worker salvage, removal overrides, stale bases, timeout, no-gate
 and inferred Go gates, marker exemptions, and phase failures have separate cases.
-The edit budgets total under 400 seconds, including the signal retry allowance.
+The edit budgets total under 420 seconds, including the signal retry allowance.

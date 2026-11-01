@@ -9,7 +9,7 @@ tree <SCN_TMP>/repo
 status
 
 result 0
-patch <SCN_TMP>/repo/.git/coding-dispatch-last-fail.patch 0 0
+patch <SCN_TMP>/repo/.git/coding-dispatch-last-fail.patch 0 0 -
 fail-patches
 worktree-directories
-repo__9837b141
+repo__6278d019

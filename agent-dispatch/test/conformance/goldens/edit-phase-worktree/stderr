@@ -1,10 +1,10 @@
 DISPATCH_BASE base_ref=HEAD base_sha=22d655d
 DISPATCH_BASE_TRACKING base_ref=HEAD branch=main status=no-upstream
-Preparing worktree (new branch 'phase-repo-20261101024649-90231')
+Preparing worktree (new branch 'phase-repo-20261101031642-15351')
 HEAD is now at 22d655d fixture
 ▶ brief fingerprint: b7ff081620b5 (1031B); first line: You are implementing ONE task from an implementation plan, EXACTLY as written.
-▶ dispatching to codex in <SCN_TMP>/.worktrees/repo__aedea414/phase-repo-20261101024649-90231 (timeout 5s, base 22d655def6c9)…
+▶ dispatching to codex in <SCN_TMP>/.worktrees/repo__ed833872/phase-repo-20261101031642-15351 (timeout 5s, base 22d655def6c9)…
 gate-env: python=<SCN_TMP>/bin/python3 Python fixture ruff=absent
-GATE_TREE_PRE pwd=<SCN_TMP>/.worktrees/repo__aedea414/phase-repo-20261101024649-90231 top=<SCN_TMP>/.worktrees/repo__aedea414/phase-repo-20261101024649-90231 head=22d655def6c92ac5944765a9910bf86566ea8d86
-GATE_TREE_POST pwd=<SCN_TMP>/.worktrees/repo__aedea414/phase-repo-20261101024649-90231 top=<SCN_TMP>/.worktrees/repo__aedea414/phase-repo-20261101024649-90231 head=22d655def6c92ac5944765a9910bf86566ea8d86 code=0
+GATE_TREE_PRE pwd=<SCN_TMP>/.worktrees/repo__ed833872/phase-repo-20261101031642-15351 top=<SCN_TMP>/.worktrees/repo__ed833872/phase-repo-20261101031642-15351 head=22d655def6c92ac5944765a9910bf86566ea8d86
+GATE_TREE_POST pwd=<SCN_TMP>/.worktrees/repo__ed833872/phase-repo-20261101031642-15351 top=<SCN_TMP>/.worktrees/repo__ed833872/phase-repo-20261101031642-15351 head=22d655def6c92ac5944765a9910bf86566ea8d86 code=0
 ℹ no/incomplete marker, but diff + build passed — marker synthesized from the diff

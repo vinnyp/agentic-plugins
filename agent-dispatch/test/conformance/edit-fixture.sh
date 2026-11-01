@@ -35,6 +35,12 @@ case "$EDIT_MODE" in
   timeout) sleep 3 ;;
   exit124) exit 124 ;;
   committed) git -C "$wd" add tracked.txt; git -C "$wd" -c user.name=Conformance -c user.email=conformance@example.invalid commit -qm worker ;;
+  tdd|tdd-signal)
+    git -C "$wd" add tracked.txt
+    git -C "$wd" -c user.name=Conformance -c user.email=conformance@example.invalid commit -qm worker
+    printf '{"status":"complete","files_written":["tracked.txt"]}' > "$wd/_coding-result.json"
+    if [ "$EDIT_MODE" = tdd-signal ]; then : > "$SCN_TMP/ready"; sleep 2; fi
+    ;;
   task2) if [ -f "$SCN_TMP/task1" ]; then exit 124; else : > "$SCN_TMP/task1"; fi ;;
 esac
 exec bash "$EDIT_REPLAY" "${args[@]}"

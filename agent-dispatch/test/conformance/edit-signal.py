@@ -6,8 +6,9 @@ import subprocess
 import time
 
 env = os.environ
+flags = [] if env.get('EDIT_MODE') == 'tdd-signal' else ['--worktree']
 child = subprocess.Popen([
-    env['IMPL_BIN'] + '/coding-dispatch.sh', '--worktree', 'codex',
+    env['IMPL_BIN'] + '/coding-dispatch.sh', *flags, 'codex',
     env['SCN_REPO'], env['SCN_TMP'] + '/brief', 'true',
 ])
 try:

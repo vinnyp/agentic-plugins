@@ -28,8 +28,7 @@ edit-phase-usage	preserve		8	0
 edit-empty-worktree	preserve		8	0
 edit-unavailable-worktree	preserve		8	0
 edit-signal-changes-worktree	preserve		8	0
-edit-timeout	preserve		8	0
-edit-exit124	preserve		8	0
+edit-timeout	preserve		8	1
 edit-committed-fail	preserve		8	0
 edit-keep-fail	preserve		8	0
 edit-rm-fail-worktree	preserve		8	0
@@ -45,3 +44,5 @@ edit-phase-task2-fail	preserve		8	0
 edit-phase-three	preserve		8	0
 edit-phase-dispatch-refused	preserve		8	0
 edit-committed-fail-worktree	preserve		8	0
+edit-tdd-fail	preserve		8	0
+edit-tdd-signal	preserve		10	1

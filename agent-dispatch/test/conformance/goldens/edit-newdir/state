@@ -9,6 +9,6 @@ tree <SCN_TMP>/repo
 status
 
 result 0
-patch <SCN_TMP>/repo/.git/coding-dispatch-last-fail.patch 1 7
+patch <SCN_TMP>/repo/.git/coding-dispatch-last-fail.patch 1 7 sha256=6fc7c21c1449e87f17c96640b6ded1752f03c72887ccab1e88d8170b03f40dd0
 fail-patches
 worktree-directories

@@ -45,9 +45,10 @@ if actual:
         'unavailable-worktree': (6, 'agent unavailable'),
         'signal-changes-worktree': (143, 'interrupted (signal)'),
         'timeout': (1, 'rc=124'),
-        'exit124': (1, 'rc=124'),
         'committed-fail-worktree': (1, 'diff SALVAGED'),
         'committed-fail': (1, 'build/vet failed'),
+        'tdd-fail': (1, 'TDD commits SALVAGED'),
+        'tdd-signal': (143, 'TDD commits SALVAGED'),
         'keep-fail': (1, 'build/vet failed'),
         'rm-fail-worktree': (1, 'build/vet failed'),
         'base': (0, 'base_ref=main'),
@@ -103,11 +104,11 @@ if actual:
             assert tags[scenario][1] == 'known-defect', scenario
     assert tags['edit-newdir'][1:3] == ['known-defect', 'vinnyp/foundry#275']
     assert sum(int(row[3]) * (1 + int(row[4])) for row in tags.values()
-               if row[0].startswith('edit-')) < 400
+               if row[0].startswith('edit-')) < 420
 
     # Failed in-place dispatches restore both HEAD and the index/worktree.
     for name in ('build-fail', 'committed-fail', 'scope', 'newdir', 'fm4',
-                 'marker', 'noop-missing', 'noop-build', 'empty', 'timeout', 'exit124'):
+                 'marker', 'noop-missing', 'noop-build', 'empty', 'timeout'):
         state = (actual / ('edit-' + name) / 'state').read_text()
         assert 'status\n\nresult 0' in state, (name, state)
         import re

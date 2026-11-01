@@ -1,9 +1,9 @@
 DISPATCH_BASE base_ref=HEAD base_sha=22d655d
 DISPATCH_BASE_TRACKING base_ref=HEAD branch=main status=no-upstream
-Preparing worktree (new branch 'cd-20261101024600-78467')
+Preparing worktree (new branch 'cd-20261101031612-780')
 HEAD is now at 22d655d fixture
 ▶ brief fingerprint: 3a2c9bfff601 (18B); first line: Edit tracked.txt.
-▶ dispatching to codex in <SCN_TMP>/.worktrees/repo__1a527120/cd-20261101024600-78467 (timeout 5s, base 22d655def6c9)…
+▶ dispatching to codex in <SCN_TMP>/.worktrees/repo__7f21c8c3/cd-20261101031612-780 (timeout 5s, base 22d655def6c9)…
 gate-env: python=<SCN_TMP>/bin/python3 Python fixture ruff=absent
-GATE_TREE_PRE pwd=<SCN_TMP>/.worktrees/repo__1a527120/cd-20261101024600-78467 top=<SCN_TMP>/.worktrees/repo__1a527120/cd-20261101024600-78467 head=22d655def6c92ac5944765a9910bf86566ea8d86
-GATE_TREE_POST pwd=<SCN_TMP>/.worktrees/repo__1a527120/cd-20261101024600-78467 top=<SCN_TMP>/.worktrees/repo__1a527120/cd-20261101024600-78467 head=22d655def6c92ac5944765a9910bf86566ea8d86 code=1
+GATE_TREE_PRE pwd=<SCN_TMP>/.worktrees/repo__7f21c8c3/cd-20261101031612-780 top=<SCN_TMP>/.worktrees/repo__7f21c8c3/cd-20261101031612-780 head=22d655def6c92ac5944765a9910bf86566ea8d86
+GATE_TREE_POST pwd=<SCN_TMP>/.worktrees/repo__7f21c8c3/cd-20261101031612-780 top=<SCN_TMP>/.worktrees/repo__7f21c8c3/cd-20261101031612-780 head=22d655def6c92ac5944765a9910bf86566ea8d86 code=1

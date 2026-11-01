@@ -1,30 +1,30 @@
 HEAD 22d655def6c92ac5944765a9910bf86566ea8d86
 branches
 * main
-+ cd-20261101024850-21799
++ cd-20261101031614-2230
 worktrees
 worktree <SCN_TMP>/repo
 HEAD 22d655def6c92ac5944765a9910bf86566ea8d86
 branch refs/heads/main
 
-worktree <SCN_TMP>/.worktrees/repo__538217c0/cd-20261101024850-21799
+worktree <SCN_TMP>/.worktrees/repo__e5d7f548/cd-20261101031614-2230
 HEAD 22d655def6c92ac5944765a9910bf86566ea8d86
-branch refs/heads/cd-20261101024850-21799
+branch refs/heads/cd-20261101031614-2230
 tree <SCN_TMP>/repo
 status
 
 result 0
-patch <SCN_TMP>/repo/.git/coding-dispatch-last-fail.patch 0 0
+patch <SCN_TMP>/repo/.git/coding-dispatch-last-fail.patch 0 0 -
 fail-patches
-tree <SCN_TMP>/.worktrees/repo__538217c0/cd-20261101024850-21799
+tree <SCN_TMP>/.worktrees/repo__e5d7f548/cd-20261101031614-2230
 status
  M tracked.txt
 result 0
-patch <SCN_TMP>/repo/.git/worktrees/cd-20261101024850-21799/coding-dispatch-last-fail.patch 1 7
+patch <SCN_TMP>/repo/.git/worktrees/cd-20261101031614-2230/coding-dispatch-last-fail.patch 1 7 sha256=f28d6722c6ecbc6ba29205e1b252928522ccfe2420ca4069116ecf92b9153dd9
 fail-patches
 worktree-directories
-repo__538217c0
-repo__538217c0/cd-20261101024850-21799
-repo__538217c0/cd-20261101024850-21799/.git
-repo__538217c0/cd-20261101024850-21799/.gitignore
-repo__538217c0/cd-20261101024850-21799/tracked.txt
+repo__e5d7f548
+repo__e5d7f548/cd-20261101031614-2230
+repo__e5d7f548/cd-20261101031614-2230/.git
+repo__e5d7f548/cd-20261101031614-2230/.gitignore
+repo__e5d7f548/cd-20261101031614-2230/tracked.txt
