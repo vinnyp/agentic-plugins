@@ -215,8 +215,10 @@ slice; they describe frozen observations and do not change production behavior.
 `check-mapping.sh <external-census.csv> [--extra <ids>]` accepts a target only
 through `targets.tsv` or `accepted-gaps.tsv`, never both. Accepted gaps require
 one of `other-project`, `agent-behaviour`, `test-tooling`, or `test-only` and an
-explanation. Counts report selected mapped, accepted, and unmapped IDs. The
-external census is never copied into this repository.
+explanation. In-scope census rows must have a nonempty environmental-knowledge
+value. Counts report census targets and additional `--extra` targets separately,
+then mapped, accepted, and unmapped IDs from their deduplicated union.
+An ID selected by both inputs appears in both input counts. The external census is never copied into this repository.
 
 `test-conformance-capture.sh` compares additional baseline captures and asserts
 no-edit failure routing, scope refusal, the deprecated `worktree` output alias,

@@ -10,20 +10,37 @@ rc=0
 repo_state_compare_memory "$before" "$after" >/dev/null || rc=$?
 [ "$rc" = 2 ] || { echo 'FAIL: control did not detect drift'; exit 1; }
 # case: verdict-feed-failure
-for stage in config records; do
+for stage in config records commits; do
   (
     _repo_state_pairs() {
       if [ "$1" = "$stage" ]; then
         if [ "$1" = config ]; then
           builtin printf 'local\tfixture\tcore.hookspath\told\tnew\n'
-        else
+        elif [ "$1" = records ]; then
           builtin printf 'hooks\tfixture\told\tnew\n'
         fi
+      elif [ "$stage" = commits ] && [ "$1" = records ]; then
+        builtin printf 'ref\trefs/heads/fixture\told\tnew\n'
       fi
     }
+    _repo_state_git() {
+      case " $* " in
+        *' cat-file '*) cat >/dev/null ;;
+        *' rev-list '*) cat >/dev/null; builtin printf '%s\n' fixture-commit ;;
+        *' --format=%cn '*) builtin printf '%s\n' fixture-name ;;
+        *' --format=%ce '*) builtin printf '%s\n' fixture-email ;;
+        *) return 1 ;;
+      esac
+    }
+    # Prove the commit-history path is reachable before breaking its producer.
+    if [ "$stage" = commits ]; then
+      rc=0
+      repo_state_compare_memory "$before" "$after" > /dev/null || rc=$?
+      [ "$rc" = 2 ] || { echo 'FAIL: commit-history control did not detect drift'; exit 1; }
+    fi
     printf() {
       case "${2:-}" in
-        local$'\t'fixture$'\t'core.hookspath*|hooks$'\t'fixture*) return 1 ;;
+        local$'\t'fixture$'\t'core.hookspath*|hooks$'\t'fixture*|fixture-commit) return 1 ;;
       esac
       builtin printf "$@"
     }

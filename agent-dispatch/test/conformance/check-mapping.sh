@@ -15,6 +15,8 @@ unmapped = 0
 mapped = set()
 accepted = set()
 selected = set()
+census_targets = set()
+extras = set()
 errors = []
 
 
@@ -43,7 +45,8 @@ def valid_ref(kind, ref):
         label = re.escape(name)
         return bool(re.search(r"(['\"])" + label + r"\1", source) or
                     re.search(r'^\s*#\s*case:\s*' + label + r'\s*$', source, re.M) or
-                    re.search(r'^\s*' + label + r'\)', source, re.M))
+                    re.search(r'^\s*' + label + r'\)', source, re.M) or
+                    re.search(r'\bgroup\s+' + label + r'(?=\s*(?:;|&&|\|\||$))', source, re.M))
     if kind == 'smoke':
         source = (here / 'live-smoke.sh').read_text()
         return bool(re.search(r'^probe\s+' + re.escape(ref) + r'\s', source, re.M))
@@ -70,9 +73,12 @@ try:
         if not required.issubset(reader.fieldnames or []):
             raise ValueError('census requires id, scope, encodes_environmental_knowledge')
         for row in reader:
+            if row['scope'] == 'in' and not (row['encodes_environmental_knowledge'] or '').strip():
+                raise ValueError('empty environmental knowledge value for in-scope row')
             if row['scope'] == 'in' and row['encodes_environmental_knowledge'] == 'Y':
                 if not row['id']:
                     raise ValueError('empty census id')
+                census_targets.add(row['id'])
                 selected.add(row['id'])
     unmapped = len(selected)
     mapped = set()
@@ -113,6 +119,8 @@ except (ValueError, OSError, csv.Error) as error:
     # Do not echo external census text or its private path.
     errors.append('mapping input invalid ({})'.format(type(error).__name__))
 finally:
+    print('census targets: {}'.format(len(census_targets)))
+    print('extra targets: {}'.format(len(extras)))
     print('mapped targets: {}'.format(len(selected & mapped)))
     print('accepted targets: {}'.format(len(selected & accepted)))
     print('unmapped targets: {}'.format(unmapped))

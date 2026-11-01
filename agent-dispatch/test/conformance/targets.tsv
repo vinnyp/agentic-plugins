@@ -40,6 +40,7 @@ D131	scenario	state-clone-isolation	Clone configuration changes must leave sourc
 D131	scenario	worker-agy-review	The launched reviewer must receive a distinct clone and private global configuration
 D139	test	bin/test-mutation-verify.sh#test baseline exit 141 emits SIGPIPE / grep -q hint -> PASS	A pipeline signal failure must produce its specific diagnostic
 D140	test	bin/test-mutation-verify.sh#test --expect-fail-output: unrelated RED -> exit 3 PASS	A failure missing the expected hazard text must remain unverified
+D141	test	bin/test-run-tests-signals.sh#inherited	Inherited ignored signals must be reset so the runner handles interruption
 D142	test	bin/test-coding-dispatch.sh#test #234k PASS	Launch failure before a FIFO writer arrives must finish and reap readers
 D144	test	bin/test-repo-state.sh#userinfo shape leaked	Sensitive URL key components must be absent from snapshots and diagnostics
 D145	scenario	state-compare-exclude	Exclude metadata changes must appear in the drift verdict
@@ -51,7 +52,7 @@ D146	test	bin/test-repo-state-cli.sh#stale or partial snapshot left readable	Blo
 D147	test	bin/test-drive-cold-session.sh#larger agent pane history limit was lowered	Inherited history capacity must remain above the driver minimum
 D148	test	bin/test-repo-state-cli.sh#cleanup killed the bystander	Survivor cleanup must reap owned processes while preserving a bystander
 D149	test	bin/test-review-launch.sh#review launch FIFO matrix and allocation/before-snapshot failures PASS	Blocked launch metadata reads must time out without launching a reviewer
-D150	test	test/test-conformance-feeds.sh#verdict-feed-failure	Failure to produce either verdict feed must return unreadable
+D150	test	test/test-conformance-feeds.sh#verdict-feed-failure	Failure to produce any of the config, commit-history, or records verdict feeds must return unreadable
 D151	test	bin/test-repo-state-memory.sh#concurrent bounded status failed	Parallel descriptor verification must avoid transient status failures
 D152	test	bin/test-review-launch-safety.sh#empty agy review must truncate stale caller output and exit 8	Empty reviewer output must erase previous file content
 D154	test	bin/test-portable-timeout.sh#dispatch_timeout_bin precedence, fallback, probe and source path PASS	With both external timers absent the bundled timer must be selected

@@ -9,7 +9,7 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 mkdir -p "$work/test/conformance/scenarios/sample"
 cp "$here/conformance/check-mapping.sh" "$work/test/conformance/"
 check=$work/test/conformance/check-mapping.sh
-printf '# case: named check\n' > "$work/test/sample.sh"
+printf '# case: named check\nif group inherited && true; then :; fi\n' > "$work/test/sample.sh"
 printf 'probe sample-check stub\n' > "$work/test/conformance/live-smoke.sh"
 printf 'id,scope,encodes_environmental_knowledge,text\r\nA,in,Y,"synthetic, quoted"\r\nB,out,Y,ignored\r\nC,in,N,ignored\r\n' > "$work/census.csv"
 header() { printf 'census_id\tkind\tref\thow\n' > "$work/test/conformance/targets.tsv"; }
@@ -25,13 +25,19 @@ accepted() { printf 'census_id\tcategory\treason\n' > "$work/test/conformance/ac
 accept_row() { printf '%s\t%s\t%s\n' "$1" "$2" "$3" >> "$work/test/conformance/accepted-gaps.tsv"; }
 accepted
 header; run 1 1
+grep -qx 'census targets: 1' "$work/output"
+grep -qx 'extra targets: 0' "$work/output"
 row A scenario absent; run 1 0
 header; row A prose 'a written explanation'; run 1 0
 header; row A scenario sample; run 0 0
 run 1 1 --extra B
 row B test 'test/sample.sh#named check'; run 0 0 --extra B
 run 1 1 --extra B,C
-row C smoke sample-check; run 0 0 --extra B,C
+row C smoke sample-check; run 0 0 --extra A,B,C --extra B
+grep -qx 'census targets: 1' "$work/output"
+grep -qx 'extra targets: 3' "$work/output"
+header; row A test 'test/sample.sh#inherited'; run 0 0
+header; row A test 'test/sample.sh#inherit'; run 1 0
 header; row A test 'test/sample.sh#absent check'; run 1 0
 header; row A test 'test/absent.sh#named check'; run 1 0
 header; row A test test/sample.sh; run 1 0
@@ -59,6 +65,12 @@ done
 accepted; header; row A scenario sample; run 0 0
 grep -qx 'mapped targets: 1' "$work/output"
 grep -qx 'accepted targets: 0' "$work/output"
+# case: empty-environmental-knowledge
+for value in '' '   '; do
+  printf 'id,scope,encodes_environmental_knowledge\nA,in,%s\n' "$value" > "$work/census.csv"
+  run 1 0
+  grep -q '^mapping input invalid' "$work/output"
+done
 # Input failures still report a count without echoing external census contents.
 printf 'wrong,header\nsynthetic,only\n' > "$work/census.csv"
 run 1 0
