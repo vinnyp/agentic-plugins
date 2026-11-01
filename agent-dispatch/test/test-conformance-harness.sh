@@ -61,6 +61,14 @@ normalised_is() {
   actual=$(printf '%s\n' "$2" | sed -E -f "$h/normalise.sed")
   [ "$actual" = "$3" ] || fail "$1: got $actual"
 }
+normalised_is 'terminated job notice dropped' "/tmp/x/scenario.sh: line 23: 86778 Terminated: 15          bash -c 'exec -a \"tagged-sleep-\$RUN_ID\" /bin/sleep 60'" ''
+normalised_is 'hangup job notice dropped' '/tmp/x/scenario.sh: line 23: 86778 Hangup: 1          bash -c x' ''
+normalised_is 'plain terminated job notice dropped' '/tmp/x/scenario.sh: line 23: 86778 Terminated          bash -c x' ''
+normalised_is 'segmentation fault preserved' '/tmp/x/scenario.sh: line 23: 86778 Segmentation fault: 11  bash -c x' '/tmp/x/scenario.sh: line 23: 86778 Segmentation fault: 11  bash -c x'
+normalised_is 'real terminated output preserved' 'worker output: Terminated after cleanup' 'worker output: Terminated after cleanup'
+normalised_is 'config line 11 normalised' 'fatal: bad config line 11 in file .git/config' 'fatal: bad config line <N> in file .git/config'
+normalised_is 'config line 9 normalised' 'fatal: bad config line 9 in file .git/config' 'fatal: bad config line <N> in file .git/config'
+normalised_is 'config value preserved' 'fatal: bad config value in file .git/config' 'fatal: bad config value in file .git/config'
 normalised_is 'epoch pinned_at normalised' 'pinned_at=1793495751' 'pinned_at=<TS>'
 normalised_is 'phase slug normalised' 'branch=phase-my-repo-20261031230803-77539' 'branch=phase-my-repo-<TS>-<PID>'
 normalised_is 'cd slug normalised' 'branch=cd-20261031230803-77539' 'branch=cd-<TS>-<PID>'
@@ -98,6 +106,19 @@ printf 'id\ttag\tissue\tbudget_s\tretry\nsample\tpreserve\t\t2\t0\n' > "$h/golde
 bash "$h/run.sh" --impl "$work/impl" --out "$work/a"
 bash "$h/run.sh" --impl "$work/impl" --out "$work/b"
 bash "$h/compare.sh" "$work/a" "$work/b" || fail 'two runs with tool paths compare clean'
+# A single comparison must report differences across scenarios and files.
+mkdir -p "$work/multi-a" "$work/multi-b"
+for id in first second; do
+  cp -R "$work/a/sample" "$work/multi-a/$id"
+  cp -R "$work/a/sample" "$work/multi-b/$id"
+done
+printf 'changed stdout\n' >> "$work/multi-b/first/stdout"
+printf 'changed stderr\n' >> "$work/multi-b/second/stderr"
+compare_rc=0
+bash "$h/compare.sh" "$work/multi-a" "$work/multi-b" > "$work/multi-diff" || compare_rc=$?
+[ "$compare_rc" = 1 ] || fail 'multiple mismatches exit 1'
+grep -Fxq 'first/stdout differs' "$work/multi-diff" || fail 'first mismatch reported'
+grep -Fxq 'second/stderr differs' "$work/multi-diff" || fail 'second mismatch reported'
 for side in a b; do
   for stream in stdout stderr; do
     cp "$work/$side/sample/$stream" "$work/saved-stream"

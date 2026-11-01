@@ -1,3 +1,7 @@
+# Shell child-reaping notices race with wait and are not command output.
+/^.*\.sh: line [0-9]+: [[:blank:]]*[0-9]+[[:blank:]]+(Terminated|Hangup|Interrupt|Killed)(: [0-9]+)?[[:blank:]]+[^[:blank:]].*$/d
+# Git init writes a platform-dependent number of config lines.
+s/^fatal: bad config line [0-9]+ in file /fatal: bad config line <N> in file /
 /^.*\/lib\/repo-state\.sh: line [0-9]+: warning: command substitution: ignored null byte in input$/d
 # Bash can emit this harmless job-control race under load.
 /^.*: child setpgid \([0-9]+ to [0-9]+\): Operation not permitted$/d

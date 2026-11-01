@@ -56,6 +56,7 @@ for side in 1 2; do
 done
 [ -s "$work/ids.1" ] || { echo 'no scenarios to compare'; exit 1; }
 cmp -s "$work/ids.1" "$work/ids.2" || { echo 'scenario id sets differ'; exit 1; }
+failed=0
 while IFS= read -r id; do
   for side in 1 2; do
     case "$side" in 1) tree=$1 ;; 2) tree=$2 ;; esac
@@ -66,7 +67,7 @@ while IFS= read -r id; do
       done
     } > "$work/files.$side"
   done
-  cmp -s "$work/files.1" "$work/files.2" || { echo "$id: observation sets differ"; exit 1; }
+  cmp -s "$work/files.1" "$work/files.2" || { echo "$id: observation sets differ"; failed=1; }
   if [ -f "$1/$id/retry.log" ] && [ -f "$2/$id/retry.log" ]; then
     printf '%s\n' retry.log >> "$work/files.1"
   elif [ -f "$1/$id/retry.log" ] || [ -f "$2/$id/retry.log" ]; then
@@ -75,13 +76,14 @@ while IFS= read -r id; do
   : > "$work/shas.1"
   : > "$work/shas.2"
   while IFS= read -r file; do
-    if [ ! -f "$1/$id/$file" ] || [ ! -f "$2/$id/$file" ]; then echo "$id/$file differs (missing)"; exit 1; fi
+    if [ ! -f "$1/$id/$file" ] || [ ! -f "$2/$id/$file" ]; then echo "$id/$file differs (missing)"; failed=1; continue; fi
     normalise "$1/$id" "$file" "$work/shas.1" > "$work/a"
     normalise "$2/$id" "$file" "$work/shas.2" > "$work/b"
     if ! cmp -s "$work/a" "$work/b"; then
       echo "$id/$file differs"
       diff -u -L expected -L actual "$work/a" "$work/b" || :
-      exit 1
+      failed=1
     fi
-  done < "$work/files.1"
+  done < <(awk '!seen[$0]++' "$work/files.1" "$work/files.2")
 done < "$work/ids.1"
+exit "$failed"

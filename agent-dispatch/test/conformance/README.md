@@ -160,6 +160,7 @@ entry point is modified by the worker capture task.
 The scripts retain Bash 3.2 syntax. The exact Bash job-control race diagnostic
 `child setpgid (... to ...): Operation not permitted` is normalised on both
 stdout and stderr; other diagnostics remain significant.
+Shell child-reaping job notices are dropped because they race with wait, and Git bad-config line numbers are normalised because git init writes different keys across platforms.
 
 Call records compare physical working directories, source/clone placement,
 global Git config paths and SHA-256 digests, visible sentinels, and source pin
