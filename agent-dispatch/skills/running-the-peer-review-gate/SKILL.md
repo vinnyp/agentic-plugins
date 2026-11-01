@@ -120,17 +120,30 @@ both routes, every persona. It is concatenated, not cited: a reviewer who is onl
 is the shape that left two correct rules unreachable.
 
 ```bash
-PRE="${CLAUDE_PLUGIN_ROOT}/docs/dispatch-preamble.md"
-DIRTY="$(git status --porcelain | sed 's/^...//' | sed 's/^/`/; s/$/`/' | paste -sd ' ' -)"
+PRE="${CLAUDE_PLUGIN_ROOT:-}/docs/dispatch-preamble.md"
+TOK='{{DIRTY_PATHS}}'
+die() { rm -f /tmp/brief-*.md.tmp; echo "preamble: $1; no brief was changed" >&2; exit 1; }
+STATUS="$(git status --porcelain)" || die "git status failed"
+DIRTY="$(printf '%s\n' "$STATUS" | sed -n 's/^...\(.*\)$/`\1`/p' | paste -sd ' ' -)"
 [ -n "$DIRTY" ] || DIRTY='none'
+BLOCK="$(sed -n '/<!-- PREAMBLE:START -->/,/<!-- PREAMBLE:END -->/p' "$PRE" | sed '1d;$d')"
+[ -n "$BLOCK" ] || die "no preamble block in $PRE"
+case "$BLOCK" in *"$TOK"*) ;; *) die "the preamble block has no dirty-paths token" ;; esac
+HEAD=${BLOCK%%"$TOK"*}
+TAIL=${BLOCK#*"$TOK"}
+RENDERED="$HEAD$DIRTY$TAIL"
+case "$RENDERED" in *"$TOK"*) die "the preamble still carries the dirty-paths token" ;; esac
+FIRST="$(printf '%s\n' "$RENDERED" | sed -n 1p)"
 for b in /tmp/brief-*.md; do
-  { sed -n '/<!-- PREAMBLE:START -->/,/<!-- PREAMBLE:END -->/p' "$PRE" | sed '1d;$d' \
-      | sed "s|{{DIRTY_PATHS}}|$DIRTY|"; echo; cat "$b"; } > "$b.tmp" && mv "$b.tmp" "$b"
+  [ -f "$b" ] || die "no brief matched"
+  { printf '%s\n\n' "$RENDERED"; cat "$b"; } > "$b.tmp" || die "could not write $b.tmp"
+  grep -qF -- "$FIRST" "$b.tmp" || die "$b.tmp does not carry the block"
 done
+for b in /tmp/brief-*.md; do mv "$b.tmp" "$b" || die "could not replace $b"; done
 ```
 
-Run it against the tree the reviewers will read — a worktree's dirty paths, not your cwd's — and
-check no brief still contains the literal `{{DIRTY_PATHS}}`. The four clauses are:
+Run it against the tree the reviewers will read — a worktree's dirty paths, not your cwd's.
+The snippet refuses to ship a brief without the block; a nonzero exit means stop and do not dispatch. The four clauses are:
 
 - **Never touch a file you did not create.** `rm`, `git checkout`, `git restore`, `git reset`, `git clean` and `git stash` are forbidden against any path outside your task's declared files. Treat unknown files as foreign and leave them. This binds every dispatched agent — a coding worker, a reviewer, a research or archival subagent, any runtime — not only a `coding-dispatch.sh` run. If your task is to change files, the files it declares are yours to edit, even if they already exist, unless the next clause lists them.
 - **These paths are already dirty and are not yours:** {{DIRTY_PATHS}}. Reverting or deleting one of them is the failure this rule exists to prevent.

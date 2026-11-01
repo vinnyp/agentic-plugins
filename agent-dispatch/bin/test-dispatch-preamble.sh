@@ -53,7 +53,7 @@ CLAUSE
 IFS= read -r C_CLAUSE4 <<'CLAUSE'
 - **Scratch repos fail closed.** Create a throwaway repo only under an absolute `mktemp -d "${TMPDIR:-/tmp}/<name>.XXXXXX"`, in a script running `set -eu`, and abort if the path is empty. Every `git config`, `checkout`, `branch`, `merge`, `commit` or `push` in it carries `-C <that path>`. Pass an identity per command (`-c user.name=… -c user.email=…`, or `GIT_AUTHOR_*`/`GIT_COMMITTER_*` env), never with `git config`, and never `--global`. `git -C ""` silently runs in the current directory, and in a linked worktree `git config` rewrites the shared repository's config. One exception: a new case in an existing test suite may follow that suite's fixture idiom, inside that suite's own temporary directory. Everything else stays under this clause, whether typed or scripted.
 CLAUSE
-C_DIRTY='already dirty and are not yours'
+C_NONE="${C_CLAUSE2%%'{{DIRTY_PATHS}}'*}none${C_CLAUSE2#*'{{DIRTY_PATHS}}'}"
 require_clause() { # <label> <whole line>
   printf '%s\n' "$CLAUSES" | grep -qxF -- "$2" && return 0
   bad "the shipped block has changed the $1 clause"; echo "pass=$pass fail=$fail"; exit 1
@@ -67,6 +67,15 @@ if [ "$(printf '%s\n' "$CLAUSES" | grep -c .)" -eq 4 ] && [ "$(printf '%s\n' "$C
 else
   bad "the shipped block is not exactly four clause lines"
 fi
+
+# Position is independent of both published copies.
+position=1
+for expected in "$C_CLAUSE1" "$C_CLAUSE2" "$C_CLAUSE3" "$C_CLAUSE4"; do
+  if [ "$(printf '%s\n' "$CLAUSES" | sed -n "${position}p")" = "$expected" ]; then
+    ok "clause $position has its absolute position"
+  else bad "clause $position has changed position"; fi
+  position=$((position + 1))
+done
 
 # Nothing private may ship in a public repository. The vendored block came from
 # a private source, so this asserts the copy carries none of that source's
@@ -116,7 +125,7 @@ if [ "$dispatch_rc" -eq 0 ] && [ -s "$CAPTURE" ]; then
   ok "the dispatch reached the agent and the brief was captured"
   miss=""
   grep -qxF -- "$C_CLAUSE1" "$CAPTURE" || miss="$miss cleanup"
-  grep -qF -- "$C_DIRTY"    "$CAPTURE" || miss="$miss dirty-paths"
+  grep -qxF -- "$C_NONE"    "$CAPTURE" || miss="$miss dirty-paths"
   grep -qxF -- "$C_CLAUSE3" "$CAPTURE" || miss="$miss long-gate"
   grep -qxF -- "$C_CLAUSE4" "$CAPTURE" || miss="$miss scratch"
   if [ -z "$miss" ]; then ok "the generated brief carries every clause"
@@ -181,7 +190,7 @@ CODING_DISPATCH_WORKTREE="preamble-clean" PATH="$STUB_DIR:$PATH" \
   bash "$CD" --worktree codex "$REPO" "$TMP/prompt.md" "true" > "$TMP/dispatch5.out" 2>&1
 if [ ! -s "$CAPTURE" ]; then
   bad "the worktree dispatch produced no brief (output: $(tail -3 "$TMP/dispatch5.out"))"
-elif grep -qF 'are not yours:** `none`' "$CAPTURE" || grep -qF 'are not yours:** none' "$CAPTURE"; then
+elif grep -qxF -- "$C_NONE" "$CAPTURE"; then
   ok "the dirty-paths clause resolves to none in a tree this tool guarantees is clean"
 else
   bad "the dirty-paths clause did not resolve to a value: $(grep -o 'are not yours:.\{0,40\}' "$CAPTURE" | head -1)"
@@ -239,5 +248,108 @@ elif (cd "$SNIP_REPO" && CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash -eu "$TMP/review
 else
   bad "the skill's snippet failed: $(tail -2 "$TMP/snippet.out")"
 fi
+
+# Run the actual extracted snippet without errexit: its explicit refusals are the contract.
+# Every case has fresh briefs and a fresh repository under the suite's private TMP.
+case_number=0
+run_reviewer_case() { # <shell> <case> <extracted snippet>
+  local shell="$1" scenario="$2" source="$3" work repo briefs root rc expected line
+  case_number=$((case_number + 1))
+  work="$TMP/case-$case_number"; repo="$work/repo"; briefs="$work/briefs"
+  mkdir -p "$repo" "$briefs" || return 1
+  git -C "$repo" init -q || return 1
+  root="$PLUGIN_ROOT"
+  printf 'FIRST BODY\n' > "$briefs/brief-one.md"
+  printf 'SECOND BODY\n' > "$briefs/brief-two.md"
+  cp "$briefs/brief-one.md" "$work/one.before"
+  cp "$briefs/brief-two.md" "$work/two.before"
+  case "$scenario" in
+    missing) root=/nonexistent ;;
+    markers|token)
+      root="$work/root"; mkdir -p "$root/docs"
+      if [ "$scenario" = markers ]; then
+        printf 'no markers\n' > "$root/docs/dispatch-preamble.md"
+      else
+        printf '<!-- PREAMBLE:START -->\nno token\n<!-- PREAMBLE:END -->\n' > "$root/docs/dispatch-preamble.md"
+      fi ;;
+    outside) repo="$work/outside"; mkdir -p "$repo" ;;
+    no-brief) rm "$briefs/brief-one.md" "$briefs/brief-two.md" ;;
+    unwritable) mkdir "$briefs/brief-two.md.tmp" ;;
+    pipe) printf 'dirty\n' > "$repo/a|b.md" ;;
+    amp) printf 'dirty\n' > "$repo/a&b.md" ;;
+    one) printf 'dirty\n' > "$repo/one.md" ;;
+    two) printf 'dirty\n' > "$repo/one.md"; printf 'dirty\n' > "$repo/two.md" ;;
+    zero) ;;
+    *) return 1 ;;
+  esac
+  sed "s#$RB/brief-#$briefs/brief-#g" "$source" > "$work/snippet.sh"
+  # This guard covers BOTH loops and die's cleanup, and fails rather than skips.
+  if ! grep -qF "for b in $briefs/brief-" "$work/snippet.sh" ||
+     ! grep -qF "rm -f $briefs/brief-" "$work/snippet.sh" ||
+     sed "s#$briefs##g" "$work/snippet.sh" | grep -qF '/tmp/'; then
+    echo "snippet reaches outside the private directory" >&2; return 1
+  fi
+  (cd "$repo" && GIT_CEILING_DIRECTORIES="$work" CLAUDE_PLUGIN_ROOT="$root" \
+    "$shell" "$work/snippet.sh") > "$work/output" 2>&1
+  rc=$?
+  case "$scenario" in
+    missing|markers|token|outside|no-brief|unwritable)
+      [ "$rc" -ne 0 ] || return 1
+      [ "$scenario" = no-brief ] && return 0
+      cmp -s "$work/one.before" "$briefs/brief-one.md" || return 1
+      cmp -s "$work/two.before" "$briefs/brief-two.md" || return 1
+      # The intentional directory is the write obstruction, not a leaked temp file.
+      for line in "$briefs"/*.tmp; do
+        [ ! -e "$line" ] || { [ "$scenario" = unwritable ] && [ -d "$line" ]; } || return 1
+      done ;;
+    *)
+      [ "$rc" -eq 0 ] || return 1
+      case "$scenario" in
+        zero) expected='none' ;;
+        one) expected='`one.md`' ;;
+        two) expected='`one.md` `two.md`' ;;
+        pipe) expected='`a|b.md`' ;;
+        amp) expected='`a&b.md`' ;;
+      esac
+      # HEAD/TAIL also keeps the expectation independent of bash replacement rules.
+      line="${C_CLAUSE2%%'{{DIRTY_PATHS}}'*}$expected${C_CLAUSE2#*'{{DIRTY_PATHS}}'}"
+      for expected in "$briefs/brief-one.md" "$briefs/brief-two.md"; do
+        grep -qxF -- "$line" "$expected" || return 1
+        grep -qF '{{DIRTY_PATHS}}' "$expected" && return 1
+        grep -qF 'BODY' "$expected" || return 1
+      done ;;
+  esac
+  return 0
+}
+
+# Fail if either interpreter cannot run. Compare versions, not symlink paths.
+shells=("$(command -v bash)")
+if [ -e /bin/bash ]; then
+  path_version="$(bash -c 'printf "%s" "$BASH_VERSION"')"
+  system_version="$(/bin/bash -c 'printf "%s" "$BASH_VERSION"')"
+  if [ "$path_version" != "$system_version" ]; then shells+=(/bin/bash); fi
+fi
+# Mutation checks alter only the extracted copy. Each refusal assertion must reject
+# an exit-zero die; the ampersand assertion must reject naive replacement on bash 5.2+.
+sed 's/exit 1; }/exit 0; }/' "$TMP/reviewer-snippet.sh" > "$TMP/false-success.sh"
+sed 's/^RENDERED=.*/RENDERED=${BLOCK\/\/$TOK\/$DIRTY}/' "$TMP/reviewer-snippet.sh" > "$TMP/naive-replacement.sh"
+for shell in "${shells[@]}"; do
+  if ! "$shell" -c 'exit 0'; then bad "interpreter cannot run: $shell"; continue; fi
+  for scenario in missing markers token outside no-brief unwritable pipe amp zero one two; do
+    if run_reviewer_case "$shell" "$scenario" "$TMP/reviewer-snippet.sh"; then
+      ok "$shell reviewer snippet: $scenario"
+    else bad "$shell reviewer snippet: $scenario"; fi
+  done
+  for scenario in missing markers token outside no-brief unwritable; do
+    if run_reviewer_case "$shell" "$scenario" "$TMP/false-success.sh"; then
+      bad "$shell refusal mutation survived: $scenario"
+    else ok "$shell refusal mutation rejected: $scenario"; fi
+  done
+  if "$shell" -c '(( BASH_VERSINFO[0] > 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] >= 2) ))'; then
+    if run_reviewer_case "$shell" amp "$TMP/naive-replacement.sh"; then
+      bad "$shell ampersand mutation survived"
+    else ok "$shell ampersand mutation rejected"; fi
+  fi
+done
 
 echo "pass=$pass fail=$fail"; [ "$fail" -eq 0 ]
