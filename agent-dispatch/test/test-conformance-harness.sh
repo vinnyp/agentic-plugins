@@ -104,6 +104,9 @@ for side in a b; do
     printf '/example/bin/lib/repo-state.sh: line 123: warning: command substitution: ignored null byte in input\n' >> "$work/$side/sample/$stream"
     bash "$h/compare.sh" "$work/a" "$work/b" || fail 'null byte warning ignored'
     cp "$work/saved-stream" "$work/$side/sample/$stream"
+    printf '/example/bin/lib/other.sh: line 123: warning: command substitution: ignored null byte in input\n' >> "$work/$side/sample/$stream"
+    if bash "$h/compare.sh" "$work/a" "$work/b" > "$work/diff"; then fail 'other file command substitution warning still compared'; fi
+    cp "$work/saved-stream" "$work/$side/sample/$stream"
   done
 done
 printf 'different null byte diagnostic\n' >> "$work/b/sample/stderr"

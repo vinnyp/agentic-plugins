@@ -1,1 +1,1 @@
-PASS: codex TERM and HUP to the process group clean child and probe
+PASS: codex INT, TERM and HUP to the process group clean child and probe

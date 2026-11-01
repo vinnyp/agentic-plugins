@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+fail() { echo "FAIL: $*"; exit 1; }
 mkdir "$SCN_TMP/src" "$SCN_TMP/tools"
 src="$SCN_TMP/src"
 git -C "$src" init -q
@@ -29,8 +30,8 @@ chmod +x "$SCN_TMP/tools/git"
 dest="$SCN_TMP/dispatch-review-wt.churn"
 rc=0
 PATH="$SCN_TMP/tools:$PATH" "$IMPL_BIN/review-clone.sh" "$src" "$dest" > "$SCN_TMP/out" 2> "$SCN_TMP/err" || rc=$?
-[ "$rc" = 4 ]
-[ "$(cat "$SCN_TMP/err")" = 'review-clone: dirty checkout or mismatched refs' ]
-[ ! -e "$dest" ]
-[ "$(wc -l < "$CLONE_FETCHES" | tr -d ' ')" = 3 ]
+[ "$rc" = 4 ] || fail "expected clone rc 4, got $rc"
+[ "$(cat "$SCN_TMP/err")" = 'review-clone: dirty checkout or mismatched refs' ] || fail 'missing mismatched-refs diagnostic'
+[ ! -e "$dest" ] || fail "clone destination survived: $dest"
+[ "$(wc -l < "$CLONE_FETCHES" | tr -d ' ')" = 3 ] || fail "expected three mirror fetches"
 echo 'PASS: never converging refs refused and destination removed'

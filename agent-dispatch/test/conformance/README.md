@@ -273,7 +273,7 @@ an incomplete drift diagnostic, and pin release.
 ### Probe test rewrite
 
 Run `bash agent-dispatch/test/test-conformance-probes.sh` for the migrated probe
-cases. Six `probe-*` scenarios exercise `coding-preflight.sh`,
+cases. Seven `probe-*` scenarios exercise `coding-preflight.sh`,
 `agent-dispatch-doctor`, and the existing public `dispatch-worker` flows with
 synthetic runtimes. No scenario sources an implementation file. Fixtures keep
 independent assertions for model parsing, role defaults and overrides,
@@ -285,7 +285,7 @@ metadata requests without launching a turn.
 `rewrite-map.tsv` enumerates the original cases and loop inputs. Public missing
 binary errors replace the private probes' advisory return codes. Empty model
 parser inputs, cached shell variables, and caller traps are explicitly dropped
-with reasons. Public TERM and HUP cancellation is retained in
+with reasons. Public INT, TERM and HUP cancellation is retained in
 `probe-codex-cancellation` by signalling the process group.
 `probe-codex-pid-signal` pins parent-only cancellation as vinnyp/foundry#277. The default form timeout is observed at the timer
 boundary and with a real eleven-second synthetic reply. Codex bounds include
@@ -349,22 +349,28 @@ exit 4, the exact mismatched-refs diagnostic, and removal of the destination.
 `repo-state-query-redaction` checks that a hooksPath query token never appears
 in compare output. Their goldens were captured from the pinned baseline archive.
 
-`repo-state-cli-no-timer` places the fixture's no-op timeout first on PATH.
-Both commands must finish within five seconds and fail closed. On the baseline,
-the no-op prevents the operation from starting: snapshot returns unreadable
-and compare reports missing completion. This checks the bound and refusal,
-but cannot prove slow Git was interrupted by a deadline.
+Together, the value-side hooksPath and key-side URL query cases require query
+redaction without leaking the synthetic secret.
 
-`probe-codex-cancellation` sends TERM and HUP to the preflight process group,
-which is how a public caller cancels. It requires exits 143/129, child disappearance
-within five seconds, and probe directory removal within five seconds after child
-exit. It proves process-group cancellation runs probe cleanup, but does not prove
-that signalling only the preflight PID reaches the probe's cancellation traps.
+`repo-state-cli-timer-claims-success` places a timer that reports success without
+running its command first on PATH. Snapshot must return 3 with an unreadable
+first line; compare must return 2 with exactly one `state: compare ` line.
+This checks refusal only, not any deadline: the watchdog is never entered.
+
+`probe-codex-cancellation` sends INT, TERM and HUP to the preflight process group,
+which is how a public caller cancels. It requires exits 130/143/129, child
+disappearance within five seconds, and removal of the exact probe directory
+recorded by the stub within five seconds after child exit. That directory must
+exist before signalling. It proves process-group cancellation runs probe cleanup,
+but does not prove that signalling only the preflight PID reaches the probe's
+cancellation traps. Its launcher restores default INT, TERM and HUP handling.
 
 `probe-codex-pid-signal` pins vinnyp/foundry#277 by signalling only the preflight
 PID. It requires exits 143/129 and the child still alive when wait returns, then
-observes the child disappear within fifteen seconds under the three-second probe
-timer. It proves parent-only cancellation leaves the child running until the timer;
-it does not prove probe directory cleanup, which varies with how the orphaned
-subshell dies across Bash versions. Both scenarios use a twelve-second stub and
-use its published PID only for liveness checks, never for signalling.
+observes the child disappear within ten seconds under the three-second probe
+timer. Its 30-second stub cannot exit naturally within that window. The launcher
+restores default TERM and HUP handling, including when HUP is ignored on entry,
+without creating a process group. This proves parent-only cancellation leaves the
+child running until the timer; it does not prove probe directory cleanup, which
+varies with how the orphaned subshell dies across Bash versions. Both scenarios
+use the stub's published PID only for liveness checks, never for signalling.

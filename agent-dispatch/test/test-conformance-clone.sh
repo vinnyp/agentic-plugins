@@ -19,18 +19,21 @@ for row in rows:
     assert all(row.values()), row
     assert row['scenario_id'] == 'clone-contract', row
     assert (root / 'scenarios' / row['scenario_id'] / 'scenario.sh').is_file()
-text = (root / 'scenarios/clone-contract/scenario.sh').read_text()
-assert not re.search(r'^\s*(source|\.)\s', text, re.M)
-assert not re.search(r'\b(_?review_clone_\w+|declare -f)\b', text)
+for path in (root / 'scenarios').glob('clone-*/scenario.sh'):
+    text = path.read_text()
+    assert not re.search(r'^\s*(source|\.)\s', text, re.M), path
+    assert not re.search(r'\b(_?review_clone_\w+|declare -f)\b', text), path
 assert not (root.parent.parent / 'bin/test-review-clone.sh').exists()
 PY
 export DISPATCH_CONFORMANCE_ROOT="$work/root"
 bash "$c/run.sh" --impl "${IMPL_BIN:-$here/../bin}" --out "$work/actual" --only clone-
-[ "$(cat "$work/actual/clone-contract/rc")" = 0 ] || {
-  cat "$work/actual/clone-contract/stdout" "$work/actual/clone-contract/stderr"
-  exit 1
-}
-grep -q '^PASS:' "$work/actual/clone-contract/stdout"
+for dir in "$work/actual"/clone-*; do
+  [ "$(cat "$dir/rc")" = 0 ] || {
+    cat "$dir/stdout" "$dir/stderr"
+    exit 1
+  }
+  grep -q '^PASS:' "$dir/stdout"
+done
 mkdir "$work/expected"
 for dir in "$c"/goldens/clone-*; do ln -s "$dir" "$work/expected/${dir##*/}"; done
 bash "$c/compare.sh" "$work/expected" "$work/actual"

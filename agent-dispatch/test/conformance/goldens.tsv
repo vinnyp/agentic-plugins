@@ -171,5 +171,5 @@ probe-unavailable	preserve		15	0
 clone-contract	preserve		60	0
 freshness-contract	preserve		60	0
 repo-state-query-redaction	preserve		30	0
-repo-state-cli-no-timer	preserve		30	0
+repo-state-cli-timer-claims-success	preserve		30	0
 clone-never-converges	preserve		30	0
