@@ -1,10 +1,14 @@
 command	kind	name	meaning	source
+agent-dispatch-doctor	env	FAIL	Each result is `PASS`, `FAIL`, or `NOT RUN`; missing agents are `NOT RUN`.	docs/commands.md
+agent-dispatch-doctor	env	PASS	Each result is `PASS`, `FAIL`, or `NOT RUN`; missing agents are `NOT RUN`.	docs/commands.md
 agent-dispatch-doctor	env	PATH	`PATH`, `--install` tells you and prints the line to add to your shell profile.	docs/commands.md
 agent-dispatch-doctor	exit	0	Exit codes (both modes): 0 = all PASS, 1 = any FAIL, 2 = any WARN (and no FAIL).	help/agent-dispatch-doctor.txt
 agent-dispatch-doctor	exit	0	Exit codes, in **both** verify and `--install` mode: `0` all pass, `1` any FAIL, `2` any WARN and no	docs/commands.md
+agent-dispatch-doctor	exit	0	Live mode exits `0` only when all five pass, otherwise `1`. Only a fully green	docs/commands.md
 agent-dispatch-doctor	exit	0	literal exit 0	bin/agent-dispatch-doctor
 agent-dispatch-doctor	exit	1	Exit codes (both modes): 0 = all PASS, 1 = any FAIL, 2 = any WARN (and no FAIL).	help/agent-dispatch-doctor.txt
 agent-dispatch-doctor	exit	1	Exit codes, in **both** verify and `--install` mode: `0` all pass, `1` any FAIL, `2` any WARN and no	docs/commands.md
+agent-dispatch-doctor	exit	1	Live mode exits `0` only when all five pass, otherwise `1`. Only a fully green	docs/commands.md
 agent-dispatch-doctor	exit	1	literal exit 1	bin/agent-dispatch-doctor
 agent-dispatch-doctor	exit	2	Exit codes (both modes): 0 = all PASS, 1 = any FAIL, 2 = any WARN (and no FAIL).	help/agent-dispatch-doctor.txt
 agent-dispatch-doctor	exit	2	Exit codes, in **both** verify and `--install` mode: `0` all pass, `1` any FAIL, `2` any WARN and no	docs/commands.md
@@ -17,6 +21,9 @@ agent-dispatch-doctor	flag	--install	FAIL. So an `--install` that skipped an ent
 agent-dispatch-doctor	flag	--install	`--install` symlinks every entrypoint into `~/.local/bin`. It is idempotent. It refuses to	docs/commands.md
 agent-dispatch-doctor	flag	--install	`PATH`, `--install` tells you and prints the line to add to your shell profile.	docs/commands.md
 agent-dispatch-doctor	flag	--install	agent-dispatch-doctor --install    # symlink entrypoints into ~/.local/bin	docs/commands.md
+agent-dispatch-doctor	flag	--live	  agent-dispatch-doctor --live     run attended, bounded runtime smoke checks	help/agent-dispatch-doctor.txt
+agent-dispatch-doctor	flag	--live	`--live` runs five bounded runtime checks using `agy`, `codex`, and `claude` from	docs/commands.md
+agent-dispatch-doctor	flag	--live	agent-dispatch-doctor --live       # attended runtime smoke checks	docs/commands.md
 agent-dispatch-doctor	flag	--print-entrypoints	`--print-entrypoints` lists the installed command names.	docs/commands.md
 agent-dispatch-doctor	line	text	  1. Each entrypoint is on PATH and executable	help/agent-dispatch-doctor.txt
 agent-dispatch-doctor	line	text	  2. lib/ is NOT on PATH (guard for future lib extraction)	help/agent-dispatch-doctor.txt
@@ -25,12 +32,17 @@ agent-dispatch-doctor	line	text	  4. agy is on PATH (WARN if missing — agy-run
 agent-dispatch-doctor	line	text	  5. If agy present: probe 'agy models' works	help/agent-dispatch-doctor.txt
 agent-dispatch-doctor	line	text	  agent-dispatch-doctor            run health checks (verify mode)	help/agent-dispatch-doctor.txt
 agent-dispatch-doctor	line	text	  agent-dispatch-doctor --install  symlink entrypoints into ~/.local/bin	help/agent-dispatch-doctor.txt
+agent-dispatch-doctor	line	text	  agent-dispatch-doctor --live     run attended, bounded runtime smoke checks	help/agent-dispatch-doctor.txt
 agent-dispatch-doctor	line	text	  agent-dispatch-doctor -h|--help  show this help	help/agent-dispatch-doctor.txt
 agent-dispatch-doctor	line	text	## `agent-dispatch-doctor`	docs/commands.md
+agent-dispatch-doctor	line	text	(using the failure vocabulary in `agy-auth-probe.sh`), codex read-only refusal,	docs/commands.md
 agent-dispatch-doctor	line	text	2, not 0 — an installer script must not read that as "done". If `~/.local/bin` is not on your	docs/commands.md
+agent-dispatch-doctor	line	text	A HOME cache inside TMPDIR is refused.	docs/commands.md
+agent-dispatch-doctor	line	text	Each result is `PASS`, `FAIL`, or `NOT RUN`; missing agents are `NOT RUN`.	docs/commands.md
 agent-dispatch-doctor	line	text	Exit codes (both modes): 0 = all PASS, 1 = any FAIL, 2 = any WARN (and no FAIL).	help/agent-dispatch-doctor.txt
 agent-dispatch-doctor	line	text	Exit codes, in **both** verify and `--install` mode: `0` all pass, `1` any FAIL, `2` any WARN and no	docs/commands.md
 agent-dispatch-doctor	line	text	FAIL. So an `--install` that skipped an entrypoint (a foreign symlink it refused to replace) exits	docs/commands.md
+agent-dispatch-doctor	line	text	Live mode exits `0` only when all five pass, otherwise `1`. Only a fully green	docs/commands.md
 agent-dispatch-doctor	line	text	PASS    1. all 13 entrypoints on PATH + executable	docs/commands.md
 agent-dispatch-doctor	line	text	PASS    2. lib/ is not on PATH (…/agent-dispatch/bin/../lib)	docs/commands.md
 agent-dispatch-doctor	line	text	PASS    3. codex on PATH (/usr/local/bin/codex)	docs/commands.md
@@ -39,21 +51,36 @@ agent-dispatch-doctor	line	text	PASS    5. agy models: OK	docs/commands.md
 agent-dispatch-doctor	line	text	PASS    5. coding default model present: <coding pin>	docs/commands.md
 agent-dispatch-doctor	line	text	PASS    5. review default model present: <review pin>	docs/commands.md
 agent-dispatch-doctor	line	text	PASS    6. shellcheck clean (entrypoints, severity>=warning)	docs/commands.md
+agent-dispatch-doctor	line	text	PATH: agy output in a clone, its auth response	docs/commands.md
 agent-dispatch-doctor	line	text	Summary: 0 fail, 0 warn	docs/commands.md
+agent-dispatch-doctor	line	text	This mode makes real agent calls and is attended. Each call has a 20-second	docs/commands.md
 agent-dispatch-doctor	line	text	Usage:	help/agent-dispatch-doctor.txt
 agent-dispatch-doctor	line	text	Verify mode checks:	help/agent-dispatch-doctor.txt
 agent-dispatch-doctor	line	text	Verify prints a per-check report:	docs/commands.md
+agent-dispatch-doctor	line	text	`$HOME/.cache/agent-dispatch-live`, physically outside TMPDIR; only the deliberate	docs/commands.md
 agent-dispatch-doctor	line	text	`--install` symlinks every entrypoint into `~/.local/bin`. It is idempotent. It refuses to	docs/commands.md
+agent-dispatch-doctor	line	text	`--live` runs five bounded runtime checks using `agy`, `codex`, and `claude` from	docs/commands.md
 agent-dispatch-doctor	line	text	`--print-entrypoints` lists the installed command names.	docs/commands.md
+agent-dispatch-doctor	line	text	`INFO agy-tmpdir: no output (denial trap active)`, plus the return code. A timeout	docs/commands.md
 agent-dispatch-doctor	line	text	`PATH`, `--install` tells you and prints the line to add to your shell profile.	docs/commands.md
 agent-dispatch-doctor	line	text	```	docs/commands.md
+agent-dispatch-doctor	line	text	a failed or incomplete run preserves the previous success. Agent output stays	docs/commands.md
 agent-dispatch-doctor	line	text	agent-dispatch-doctor              # verify	docs/commands.md
 agent-dispatch-doctor	line	text	agent-dispatch-doctor --help	docs/commands.md
 agent-dispatch-doctor	line	text	agent-dispatch-doctor --install    # symlink entrypoints into ~/.local/bin	docs/commands.md
+agent-dispatch-doctor	line	text	agent-dispatch-doctor --live       # attended runtime smoke checks	docs/commands.md
 agent-dispatch-doctor	line	text	agent-dispatch-doctor — install + verify the agent-dispatch plugin.	help/agent-dispatch-doctor.txt
 agent-dispatch-doctor	line	text	agent-dispatch-doctor: verify	docs/commands.md
+agent-dispatch-doctor	line	text	agy observation runs in a linked git worktree under TMPDIR with a prompt requiring	docs/commands.md
+agent-dispatch-doctor	line	text	budget and a one-second kill grace. Fixtures are disposable clones under	docs/commands.md
+agent-dispatch-doctor	line	text	codex workspace-write inside/outside boundaries, and claude plan-mode refusal.	docs/commands.md
+agent-dispatch-doctor	line	text	in disposable fixtures and is removed after the run.	docs/commands.md
+agent-dispatch-doctor	line	text	or non-zero return code reports `INFO agy-tmpdir: inconclusive`. INFO never affects	docs/commands.md
 agent-dispatch-doctor	line	text	overwrite a real file, and it refuses to re-point a same-named symlink unless that symlink already	docs/commands.md
 agent-dispatch-doctor	line	text	points into an agent-dispatch checkout — so it cannot silently hijack another tool's command.	docs/commands.md
+agent-dispatch-doctor	line	text	run atomically updates `${XDG_STATE_HOME:-$HOME/.local/state}/agent-dispatch/last-live.json`;	docs/commands.md
+agent-dispatch-doctor	line	text	shell command execution. It reports `INFO agy-tmpdir: output present` or	docs/commands.md
+agent-dispatch-doctor	line	text	status and is not counted as a check. The linked worktree is removed on exit.	docs/commands.md
 coding-build-phase.sh	env	CODING_BUILD_CMD	(the dispatch has already reverted or salvaged). `--build-cmd` is required — set `CODING_BUILD_CMD`	docs/commands.md
 coding-build-phase.sh	env	CODING_BUILD_CMD	| `CODING_BUILD_CMD` | `coding-build-phase.sh` | default for `--build-cmd` |	docs/commands.md
 coding-build-phase.sh	env	CODING_BUILD_PLAN_CONTEXT_MAX	context block. The block is capped at `CODING_BUILD_PLAN_CONTEXT_MAX` characters, with a	docs/commands.md
@@ -1238,6 +1265,9 @@ mutation-verify.sh	line	text	| cargo | `cargo test -q`, no positional filter and
 mutation-verify.sh	line	text	| go | `go test -v -count=1 <one package>` | `-skip '^TestName$'`, or `-skip '^TestName$/^row$'` for one table row | `--knockout-delta-line '=== RUN '` |	docs/commands.md
 mutation-verify.sh	line	text	| pytest | `pytest -q <path>` | `--deselect <full node id, including any [param] id>` | `--knockout-expect-output '1 deselected'` |	docs/commands.md
 mutation-verify.sh	line	text	|---|---|---|---|	docs/commands.md
+repo-state-check	env	DISPATCH_CONFORMANCE_ROOT	by design; set `DISPATCH_CONFORMANCE_ROOT` to a neutral path outside HOME and	docs/commands.md
+repo-state-check	env	DISPATCH_CONFORMANCE_TIMEOUT	TMPDIR. `DISPATCH_CONFORMANCE_TIMEOUT` and `DISPATCH_LIVE_TIMEOUT` can shorten	docs/commands.md
+repo-state-check	env	DISPATCH_LIVE_TIMEOUT	TMPDIR. `DISPATCH_CONFORMANCE_TIMEOUT` and `DISPATCH_LIVE_TIMEOUT` can shorten	docs/commands.md
 repo-state-check	env	DISPATCH_SNAPSHOT_TIMEOUT_SECS	once complete. The git reads are killed after `DISPATCH_SNAPSHOT_TIMEOUT_SECS`	docs/commands.md
 repo-state-check	env	DISPATCH_SNAPSHOT_TIMEOUT_SECS	| `DISPATCH_SNAPSHOT_TIMEOUT_SECS` | review setup and snapshots, `review-pin.sh`, `repo-state-check` | 1–86400 decimal seconds; default 120 for dispatcher/pins, 60 for `repo-state-check`; invalid values warn and use the default |	docs/commands.md
 repo-state-check	env	TMPDIR	`repo-state-*` directories in `TMPDIR` (they hold no secrets). A successful snapshot	docs/commands.md
@@ -1286,6 +1316,7 @@ repo-state-check	line	text	(`state: compare timed out` or `state: compare could 
 repo-state-check	line	text	--help, -h: print usage and exit 0	help/repo-state-check.txt
 repo-state-check	line	text	A timeout message lists special files found in git metadata (what was found, not a proven	docs/commands.md
 repo-state-check	line	text	Compare prints named change lines and exits 0 for clean, 1 for warn-only drift or 2 for	docs/commands.md
+repo-state-check	line	text	Conformance capture (`test/conformance/record.sh`) bounds each runtime to 20	docs/commands.md
 repo-state-check	line	text	DISPATCH_SNAPSHOT_TIMEOUT_SECS: seconds (1-86400) the git reads may run before they are killed; default 60 here, 120 for dispatch-worker; an invalid value uses the default with a warning	help/repo-state-check.txt
 repo-state-check	line	text	Hook changes and new local-only commits with a committer different from the initial identity	docs/commands.md
 repo-state-check	line	text	In `dispatch-worker` review runs, snapshots and changes stay in shell memory.	docs/commands.md
@@ -1294,6 +1325,7 @@ repo-state-check	line	text	Results use an unlinked channel with a checked exit s
 repo-state-check	line	text	Snapshot exit 3 also means "not evaluated": a timeout, a missing completion record or an	docs/commands.md
 repo-state-check	line	text	Snapshot records effective config (including worktree config), hook hashes and modes, refs,	docs/commands.md
 repo-state-check	line	text	Snapshots also hash `info/exclude`, `info/attributes`, and	docs/commands.md
+repo-state-check	line	text	TMPDIR. `DISPATCH_CONFORMANCE_TIMEOUT` and `DISPATCH_LIVE_TIMEOUT` can shorten	docs/commands.md
 repo-state-check	line	text	The dispatcher never reopens snapshot or changes paths to decide the verdict.	docs/commands.md
 repo-state-check	line	text	```	docs/commands.md
 repo-state-check	line	text	```text	docs/commands.md
@@ -1306,6 +1338,8 @@ repo-state-check	line	text	`repo-state-*` directories in `TMPDIR` (they hold no 
 repo-state-check	line	text	`sort`, `comm` or `awk` that exits abnormally or is killed) is never read as a verdict:	docs/commands.md
 repo-state-check	line	text	are critical. Ref, worktree and working-tree movement warn. Sensitive values are hashed in	docs/commands.md
 repo-state-check	line	text	before any other work, so a stale or partial snapshot is never left readable (any special	docs/commands.md
+repo-state-check	line	text	by design; set `DISPATCH_CONFORMANCE_ROOT` to a neutral path outside HOME and	docs/commands.md
+repo-state-check	line	text	capture and live-probe bounds for stub tests. Live probes inspect stdout only,	docs/commands.md
 repo-state-check	line	text	cause), or says none were found, or that the pre-sweep failed (naming any special files it	docs/commands.md
 repo-state-check	line	text	check failed: stop and investigate, never clean. `dispatch-worker` treats a compare	docs/commands.md
 repo-state-check	line	text	compare exits: 0 clean, 1 warn, 2 critical or not evaluated (a "state:" line or "config: <unreadable after review>"), 3 input error (unreadable before file, internal temp failure or a failed helper), 64 usage	help/repo-state-check.txt
@@ -1324,12 +1358,15 @@ repo-state-check	line	text	over 64 MiB are not evaluated and produce exit 3 befo
 repo-state-check	line	text	present before the review or is `.` (the local repository);	docs/commands.md
 repo-state-check	line	text	repo-state-check compare <before> <after>	docs/commands.md
 repo-state-check	line	text	repo-state-check snapshot <abs-repo-dir> <file>	docs/commands.md
+repo-state-check	line	text	require explicit reply markers, and ignore global/system Git configuration.	docs/commands.md
 repo-state-check	line	text	runs under the same bound and limit as snapshot. A helper that fails during compare (a	docs/commands.md
+repo-state-check	line	text	seconds, uses Codex read-only and Claude plan mode, and refuses unsanitized	docs/commands.md
 repo-state-check	line	text	snapshot exits: 0 ok, 3 failure or not evaluated (<file> then reads "unreadable"), 64 usage	help/repo-state-check.txt
 repo-state-check	line	text	snapshots and output is redacted. Treat compare exit 2 as review rc 10; exits 3/64 mean	docs/commands.md
 repo-state-check	line	text	temp directory and remove them after inspection. Snapshot exits 0 on success or 3 for an	docs/commands.md
 repo-state-check	line	text	that cannot complete as critical and returns rc 10.	docs/commands.md
 repo-state-check	line	text	the `unreadable` pre-mark cannot be made by rename, snapshot exits 3 without writing to the	docs/commands.md
+repo-state-check	line	text	transcripts. Its default root under `$HOME` makes real Codex recordings refused	docs/commands.md
 repo-state-check	line	text	unexpected failure of the bounded git reads. The output file is replaced with `unreadable`	docs/commands.md
 repo-state-check	line	text	usage: repo-state-check snapshot <repo> <file> | compare <before> <after>	help/repo-state-check.txt
 repo-state-check	line	text	whose baseline already holds special files warns on stderr and still exits 0.	docs/commands.md

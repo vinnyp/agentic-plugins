@@ -77,3 +77,14 @@ Runtime recordings resolve `<runtime>/<n>/`, then `<n>/`, then flat files.
 A retry.log on only one side prints a warning; other observations still compare.
 Literal exit contracts live in `contract/exits.tsv`, independently of script
 extraction, so new implementation exits require an explicit contract update.
+
+Recordings use a 20-second bound per runtime through `bin/lib/timeout-bin.sh`
+(`DISPATCH_CONFORMANCE_TIMEOUT` overrides it). Codex runs read-only and Claude
+runs in plan mode. The default recording root under `$HOME` makes a real Codex
+recording refused by design: its diagnostic includes the private home path.
+Set `DISPATCH_CONFORMANCE_ROOT` to a neutral path outside both the home directory
+and TMPDIR before recording. Work directories are private (mode 700).
+
+Live checks separate stdout from stderr and require explicit reply markers.
+`DISPATCH_LIVE_TIMEOUT` overrides the default 20-second probe bound for tests.
+Each probe ignores global and system Git configuration. Silent replies fail.
