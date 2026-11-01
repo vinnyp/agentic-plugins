@@ -32,7 +32,8 @@ inert, so an assembling path substitutes it or does not ship the brief.
   target tree, and prepends it to the brief the agent receives. A missing or
   empty block is a hard failure, not a silently shorter brief.
 - `skills/running-the-peer-review-gate/SKILL.md` — every reviewer brief, on both
-  the Claude Agent-tool route and the different-model route.
+  the Claude Agent-tool route and the different-model route. A missing or empty
+  block is a hard failure here too, leaving every brief untouched.
 
 `bin/test-dispatch-preamble.sh` asserts the clauses reach a **generated** brief,
 so deleting one from this file turns that suite red. Grepping for a citation
