@@ -6,7 +6,32 @@ here=$(CDPATH='' cd "$(dirname "$0")" && pwd -P)
 bin=$(CDPATH='' cd "$here/../../bin" && pwd -P)
 # shellcheck source=../../bin/lib/timeout-bin.sh
 . "$bin/lib/timeout-bin.sh"
+# shellcheck source=../../bin/lib/agy-models.sh
+. "$bin/lib/agy-models.sh"
 timer=$(dispatch_timeout_bin) || { echo 'NOT RUN timer unavailable'; exit 1; }
+# Model metadata probes do not need a repository or a worker prompt.
+model_probe() {
+  case "$1" in
+    agy-models)
+      roster=$("$timer" -k 1 "${DISPATCH_LIVE_TIMEOUT:-20}" agy models) || return 1
+      agy_model_present "$roster" "$AGY_MODEL_CODING_DEFAULT" &&
+        agy_model_present "$roster" "$AGY_MODEL_REVIEW_DEFAULT" ;;
+    codex-models)
+      "$timer" -k 1 "${DISPATCH_LIVE_TIMEOUT:-20}" python3 "$here/model-roster.py" codex ;;
+  esac
+}
+if [ "${1:-}" = --models-only ]; then
+  model_failed=0
+  for model_id in agy-models codex-models; do
+    if model_probe "$model_id"; then
+      printf 'PASS %s\n' "$model_id"
+    else
+      printf 'FAIL %s\n' "$model_id"
+      model_failed=1
+    fi
+  done
+  exit "$model_failed"
+fi
 # Fixtures must be physically outside the runtime's TMPDIR trap.
 root=$HOME/.cache/agent-dispatch-live
 mkdir -p "$root"
@@ -54,6 +79,11 @@ probe() {
     return
   fi
   case "$id" in
+    agy-models|codex-models)
+      if model_probe "$id"; then report PASS "$id"; else report FAIL "$id"; fi
+      return ;;
+  esac
+  case "$id" in
     agy-clone|agy-auth) input=$work/prompt ;;
     agy-tmpdir) input=$work/shell-prompt ;;
   esac
@@ -81,6 +111,8 @@ probe() {
         grep -qxF "$content" "$cwd/live-smoke-inside" && [ ! -e "$work/outside" ] ;;
   esac && report PASS "$id" || report FAIL "$id"
 }
+probe agy-models agy "$work"
+probe codex-models codex "$work"
 printf '%s\n' 'Reply with the uppercase letters live, underscore, smoke, underscore, ok, joined together.' > "$work/prompt"
 probe agy-clone agy "$work/agy-clone" --dangerously-skip-permissions
 printf '%s\n' 'Use the shell command tool to run: ls -a . Then reply with DONE.' > "$work/shell-prompt"
@@ -96,5 +128,5 @@ state=${XDG_STATE_HOME:-$HOME/.local/state}/agent-dispatch
 mkdir -p "$state"
 chmod 700 "$state"
 last=$(mktemp "$state/last-live.XXXXXX")
-printf '{"status":"PASS","checks":5,"completed_at":"%s"}\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" > "$last"
+printf '{"status":"PASS","checks":7,"completed_at":"%s"}\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" > "$last"
 mv "$last" "$state/last-live.json"

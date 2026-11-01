@@ -1,0 +1,6 @@
+agy auth probe healthy
+dispatch-worker: agy model: fixture-model (review, --model/MODEL)
+dispatch-worker: review output must be a regular file
+DISPATCH_REVIEW_STATE=skipped(not-launched) original_rc=3
+observed_rc=3
+predictable output symlink and target retained; failure status=3

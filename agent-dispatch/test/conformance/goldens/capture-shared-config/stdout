@@ -1,0 +1,13 @@
+DISPATCH_BASE base_ref=HEAD base_sha=22d655d
+DISPATCH_BASE_TRACKING base_ref=HEAD branch=main status=no-upstream
+Preparing worktree (new branch 'cd-20261101065948-35089')
+HEAD is now at 22d655d fixture
+▶ brief fingerprint: 3a2c9bfff601 (18B); first line: Edit tracked.txt.
+▶ dispatching to codex in <SCN_TMP>/.worktrees/repo__d057ae96/cd-20261101065948-35089 (timeout 5s, base 22d655def6c9)…
+gate-env: python=<SCN_TMP>/bin/python3 Python fixture ruff=absent
+GATE_TREE_PRE pwd=<SCN_TMP>/.worktrees/repo__d057ae96/cd-20261101065948-35089 top=<SCN_TMP>/.worktrees/repo__d057ae96/cd-20261101065948-35089 head=22d655def6c92ac5944765a9910bf86566ea8d86
+GATE_TREE_POST pwd=<SCN_TMP>/.worktrees/repo__d057ae96/cd-20261101065948-35089 top=<SCN_TMP>/.worktrees/repo__d057ae96/cd-20261101065948-35089 head=22d655def6c92ac5944765a9910bf86566ea8d86 code=0
+ℹ no/incomplete marker, but diff + build passed — marker synthesized from the diff
+DISPATCH=ok worktree_ns=<SCN_TMP>/.worktrees/repo__d057ae96/cd-20261101065948-35089 worktree=<SCN_TMP>/.worktrees/repo__d057ae96/cd-20261101065948-35089 branch=cd-20261101065948-35089 base_sha=22d655d head=22d655def6c92ac5944765a9910bf86566ea8d86 files=tracked.txt
+observed_rc=0
+known-defect vinnyp/foundry#239: shared config write accepted

@@ -1,0 +1,15 @@
+▶ brief fingerprint: 3a2c9bfff601 (18B); first line: Edit tracked.txt.
+agy model: fixture-model
+▶ dispatching to agy in <SCN_TMP>/repo (timeout 5s, base 22d655def6c9)…
+Done. All requested work is complete.
+DISPATCH=fail: empty diff (agent changed nothing, rc=0) — nothing to revert
+observed_rc=1
+════════ dispatching Task 1 → agy ════════
+▶ brief fingerprint: b7ff081620b5 (1031B); first line: You are implementing ONE task from an implementation plan, EXACTLY as written.
+agy model: fixture-model
+▶ dispatching to agy in <SCN_TMP>/repo (timeout 5s, base 22d655def6c9)…
+Done. All requested work is complete.
+DISPATCH=fail: empty diff (agent changed nothing, rc=0) — nothing to revert
+✗ Task 1 FAILED (dispatch reverted the tree). Stopping phase — Opus takes this task.
+PHASE=stopped-at:1
+observed_rc=1

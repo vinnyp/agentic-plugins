@@ -36,7 +36,8 @@ tags = {r[0]: r for r in rows('goldens.tsv')[1:] if r[0].startswith('state-')}
 assert sum(int(r[3]) * (1 + int(r[4])) for r in tags.values()) < 400
 for name in ('filter', 'socket', 'deleted', 'truncated'):
     assert tags['state-compare-'+name][1:3] == [
-        'known-defect', 'README.md#state-known-defects'], name
+        'known-defect', ('vinnyp/foundry#267' if name == 'socket'
+                         else 'README.md#state-known-defects')], name
 if not actual:
     sys.exit(0)
 assert set(tags) == {p.name for p in actual.iterdir() if p.is_dir()}

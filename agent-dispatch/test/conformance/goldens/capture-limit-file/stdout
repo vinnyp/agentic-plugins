@@ -1,0 +1,6 @@
+▶ brief fingerprint: 3a2c9bfff601 (18B); first line: Edit tracked.txt.
+▶ dispatching to codex in <SCN_TMP>/repo (timeout 5s, base 22d655def6c9)…
+Selected model is at capacity
+DISPATCH=fail: agent unavailable (capacity/rate limit) — rc=0, no work attempted: Selected model is at capacity — nothing to revert
+observed_rc=6
+known-defect vinnyp/foundry#263: printed file mistaken for service limit

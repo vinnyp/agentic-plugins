@@ -1,0 +1,9 @@
+census_id	category	reason
+D014	other-project	Auditing unrelated suites for real runtime launches belongs to their owning projects.
+D032	agent-behaviour	Instruction loading by an attended interactive agent cannot be guaranteed by dispatch replay.
+D039	agent-behaviour	Whether reviewers obey shared-checkout restrictions depends on their actual tool choices.
+D133	agent-behaviour	An agent choosing to rewrite operator configuration is outside dispatch port equivalence.
+D157	agent-behaviour	Agent willingness to perform an authorized edit requires an attended behavioural evaluation.
+D040	test-tooling	Cache validity belongs to the test execution infrastructure rather than dispatch semantics.
+D141	test-tooling	Full runner launch and inherited signal handling belong to the excluded test runner.
+D116	test-only	This concerns fixture implementation parity rather than a published dispatch outcome.

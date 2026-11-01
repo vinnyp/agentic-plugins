@@ -57,3 +57,13 @@ D152	test	bin/test-review-launch-safety.sh#empty agy review must truncate stale 
 D154	test	bin/test-portable-timeout.sh#dispatch_timeout_bin precedence, fallback, probe and source path PASS	With both external timers absent the bundled timer must be selected
 D155	test	bin/test-dispatch-worker-signals.sh#agent survived	Caller signals must terminate the launched runtime
 D155	test	bin/test-dispatch-worker-signals.sh#descendant survived	A pipe-holding descendant must be gone when dispatch returns
+D007	scenario	capture-agy-done	Exit-zero completion prose with no edits returns failure 1; the phase consumer stops at task 1 and routes it to Opus rather than success or capacity blocking.
+D034	scenario	capture-review-collision	A symlink at the predictable review output path retains its target bytes and link while dispatch reports failure 3.
+D037	scenario	capture-scope-cleanup	Out-of-scope edits are refused and reverted; injected prompt files are removed.
+D037	scenario	capture-alias-cleanup	The deprecated worktree field equals worktree_ns on success and the injected prompt is removed.
+D069	scenario	capture-no-setsid	With setsid absent from PATH the finite gate runs in another session and completes through synchronous wait.
+D132	scenario	capture-shared-config	Known defect vinnyp/foundry#239: a linked worker writes shared config and succeeds undetected; the golden changes when cutover change 7 lands.
+D158	scenario	capture-limit-file	Known defect vinnyp/foundry#263: Codex prints a document containing a limit phrase and is incorrectly classified unavailable (6).
+D161	scenario	state-compare-socket	Known defect vinnyp/foundry#267: legitimate fsmonitor socket currently produces critical rather than clean.
+D120	smoke	agy-models	Attended metadata-only probe checks both defaults from bin/lib/agy-models.sh against real agy models output.
+D120	smoke	codex-models	Attended metadata-only app-server config/read and model/list check the configured Codex default against the real service roster without a turn.

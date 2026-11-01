@@ -21,6 +21,9 @@ run() {
   [ "$rc" = "$expected" ] || fail "expected status $expected, got $rc"
   grep -qx "unmapped targets: $count" "$work/output" || fail 'missing unmapped count'
 }
+accepted() { printf 'census_id\tcategory\treason\n' > "$work/test/conformance/accepted-gaps.tsv"; }
+accept_row() { printf '%s\t%s\t%s\n' "$1" "$2" "$3" >> "$work/test/conformance/accepted-gaps.tsv"; }
+accepted
 header; run 1 1
 row A scenario absent; run 1 0
 header; row A prose 'a written explanation'; run 1 0
@@ -38,6 +41,24 @@ header; row A scenario sample; row B prose ignored; run 1 0
 # Missing and whitespace-only explanations must be rejected.
 header; row A scenario sample ''; run 1 1
 header; row A scenario sample '   '; run 1 1
+# case: accepted-gap-validation
+header; accepted; accept_row A other-project 'Owned elsewhere'; run 0 0
+grep -qx 'mapped targets: 0' "$work/output"
+grep -qx 'accepted targets: 1' "$work/output"
+row A scenario sample; run 1 0
+header; accepted; accept_row A unknown reason; run 1 1
+accepted; accept_row A test-only ''; run 1 1
+accepted; accept_row A test-only '   '; run 1 1
+accepted; printf 'A\ttest-only\n' >> "$work/test/conformance/accepted-gaps.tsv"; run 1 1
+accepted; accept_row '' test-only reason; run 1 1
+accepted; accept_row A test-only reason; accept_row A test-only reason; run 1 0
+printf 'wrong\theader\n' > "$work/test/conformance/accepted-gaps.tsv"; run 1 1
+for category in other-project agent-behaviour test-tooling test-only; do
+  header; accepted; accept_row A "$category" reason; run 0 0
+done
+accepted; header; row A scenario sample; run 0 0
+grep -qx 'mapped targets: 1' "$work/output"
+grep -qx 'accepted targets: 0' "$work/output"
 # Input failures still report a count without echoing external census contents.
 printf 'wrong,header\nsynthetic,only\n' > "$work/census.csv"
 run 1 0

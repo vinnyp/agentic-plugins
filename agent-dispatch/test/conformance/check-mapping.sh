@@ -12,6 +12,9 @@ from pathlib import Path
 here = Path(sys.argv[1]).resolve()
 root = here.parent.parent
 unmapped = 0
+mapped = set()
+accepted = set()
+selected = set()
 errors = []
 
 
@@ -89,11 +92,29 @@ try:
                 valid = False
             if not valid:
                 errors.append('invalid target reference at row {}'.format(number))
-    unmapped = len(selected - mapped)
+    with (here / 'accepted-gaps.tsv').open(newline='', encoding='utf-8') as stream:
+        reader = csv.DictReader(stream, delimiter='\t')
+        if reader.fieldnames != ['census_id', 'category', 'reason']:
+            raise ValueError('invalid accepted gaps header')
+        categories = {'other-project', 'agent-behaviour', 'test-tooling', 'test-only'}
+        for number, row in enumerate(reader, 2):
+            if (None in row or any(v is None for v in row.values()) or
+                    not row['census_id'] or row['category'] not in categories or
+                    not row['reason'].strip()):
+                errors.append('invalid accepted row {}'.format(number))
+                continue
+            if row['census_id'] in accepted:
+                errors.append('duplicate accepted row {}'.format(number))
+            accepted.add(row['census_id'])
+    if mapped & accepted:
+        errors.append('target is both mapped and accepted')
+    unmapped = len(selected - mapped - accepted)
 except (ValueError, OSError, csv.Error) as error:
     # Do not echo external census text or its private path.
     errors.append('mapping input invalid ({})'.format(type(error).__name__))
 finally:
+    print('mapped targets: {}'.format(len(selected & mapped)))
+    print('accepted targets: {}'.format(len(selected & accepted)))
     print('unmapped targets: {}'.format(unmapped))
 for error in errors:
     print(error, file=sys.stderr)

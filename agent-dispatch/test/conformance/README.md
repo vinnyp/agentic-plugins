@@ -209,3 +209,31 @@ slice; they describe frozen observations and do not change production behavior.
   `.git/fsmonitor--daemon.ipc` is classified as nonregular/critical even though
   Git's fsmonitor socket can be legitimate. The fixture binds a relative path
   to avoid platform Unix-socket path-length limits, then closes its own socket.
+
+### Capture mapping
+
+`check-mapping.sh <external-census.csv> [--extra <ids>]` accepts a target only
+through `targets.tsv` or `accepted-gaps.tsv`, never both. Accepted gaps require
+one of `other-project`, `agent-behaviour`, `test-tooling`, or `test-only` and an
+explanation. Counts report selected mapped, accepted, and unmapped IDs. The
+external census is never copied into this repository.
+
+`test-conformance-capture.sh` compares additional baseline captures and asserts
+no-edit failure routing, scope refusal, the deprecated `worktree` output alias,
+injected prompt cleanup, output symlink protection, and detached finite execution
+without `setsid` in PATH. It never runs a full gate or a real agent.
+
+`capture-shared-config` freezes vinnyp/foundry#239: a synthetic worker in a
+linked worktree writes the shared Git configuration, yet dispatch succeeds.
+Its golden must change when cutover change 7 detects this write.
+`capture-limit-file` freezes vinnyp/foundry#263: printing a document containing a
+capacity phrase is mistaken for an unavailable service. The existing socket
+capture explicitly preserves vinnyp/foundry#267.
+
+`live-smoke.sh --models-only` is an attended metadata-only check. It compares
+both agy pins from `bin/lib/agy-models.sh` with `agy models`, then uses Codex's
+app-server `config/read` and paginated `model/list` to check its configured
+default (or the roster default when unset). It sends no thread or turn request.
+Missing tools, failed metadata requests, and absent pins fail the check.
+The capture suite tests the Codex protocol with a synthetic server, including
+pagination, configured and implicit defaults, and an absent model.
