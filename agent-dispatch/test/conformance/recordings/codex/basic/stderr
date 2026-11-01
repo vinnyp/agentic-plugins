@@ -1,0 +1,33 @@
+OpenAI Codex v0.164.0
+--------
+workdir: /private/var/tmp/adc-rec/record.PSfOxt/repo
+model: gpt-6.1-sol
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: low
+reasoning summaries: none
+session id: 01a195c1-cb7c-7623-a388-7cd1257cec84
+--------
+user
+Read README.md and reply with exactly: fixture ready. Do not change files or run other commands.
+
+hook: SessionStart
+hook: SessionStart Completed
+hook: UserPromptSubmit
+hook: UserPromptSubmit Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/opt/homebrew/bin/bash -lc 'cat README.md' in /private/var/tmp/adc-rec/record.PSfOxt/repo
+ succeeded in 0ms:
+Public recording fixture.
+
+hook: PostToolUse
+hook: PostToolUse Completed
+codex
+fixture ready.
+hook: Stop
+hook: Stop Completed
+tokens used
+8,382
