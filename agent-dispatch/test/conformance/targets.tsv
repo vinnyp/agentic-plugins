@@ -10,7 +10,7 @@ D013	scenario	worker-agy-review	The launched reviewer must run in a separate clo
 D016	scenario	edit-phase-ok	Build phase must execute the installed dispatch command successfully
 D019	test	test/test-conformance-empty-phase.sh#empty-task-list	An empty task list must return the usage diagnostic under both Bash interpreters
 D021	scenario	worker-agy-auth	Failed authentication must stop reviewer launch
-D023	test	bin/test-agy-auth-preflight.sh#test 1b (coding-preflight agy symlink resolves helper) PASS	A PATH symlink must still find the sibling authentication helper
+D023	scenario	probe-agy-auth-preflight	A PATH symlink must still find the sibling authentication helper
 D030	test	bin/test-mutation-verify-slow.sh#test --cover-check unreachable function -> MUTANT-UNREACHABLE PASS	An unexecuted changed function must be identified as unreachable
 D030	test	bin/test-mutation-verify.sh#test no-op mutation -> exit 2 PASS	An edit expression that changes no bytes must be rejected
 D031	test	bin/test-mutation-verify.sh#test uncommitted-work preserved exactly (not reverted to HEAD) PASS	Uncommitted source bytes must survive the verification run exactly
@@ -19,11 +19,11 @@ D047	scenario	worker-agy-retry-blocked	Repeated timeout must preserve the blocke
 D054	test	bin/test-coding-dispatch.sh#test FINDING1 legitimate TDD commit with gitignored marker is not unwound PASS	A completed worker commit must retain its identity
 D054	test	bin/test-coding-dispatch.sh#test FINDING3 --worktree report_fail RM_ON_FAIL=1 patch survives worktree removal PASS	Removing a failed worktree must leave a retrievable patch
 D054	test	bin/test-coding-dispatch.sh#test FINDING4 --worktree report_fail RM_ON_FAIL=0 patch retrievable + pristine index PASS	Salvage must retain the patch without staging untracked files
-D060	test	bin/test-agy-print-form-probe.sh#test 10 (real 30s default: an 11s-equivalent round trip passes) PASS	A valid response slower than ten seconds must pass the default probe
+D060	scenario	probe-agy-print-form-probe	A valid response slower than ten seconds must pass the default probe
 D067	test	bin/test-dispatch-env-reset.sh#regression: test-coding-dispatch.sh is green under CODING_DISPATCH_TIMEOUT=1s AGY_MODEL=zzz	Perturbed operator variables must not change suite results
 D071	test	bin/test-run-long-gate.sh#Test 12 PASS	A dead lock owner must not prevent a subsequent gate
 D086	test	bin/test-run-long-gate.sh#Test 9 PASS	A second gate for the same workdir must refuse before execution
-D092	test	bin/test-agy-auth-preflight.sh#test probe 3 (absent creds ignored; live models healthy) PASS	Healthy runtime authentication must work without another client credential file
+D092	scenario	probe-agy-auth-preflight	Healthy runtime authentication must work without another client credential file
 D093	scenario	edit-agy	Captured invocation must deliver the brief through stdin
 D094	test	bin/test-dispatch-worker.sh#test 13b (review prose about 429 is not a limit banner) PASS	Substantive discussion of throttling must succeed instead of returning six
 D099	scenario	worker-agy-review	Reviewer cwd must be a separate clone outside runtime temporary storage

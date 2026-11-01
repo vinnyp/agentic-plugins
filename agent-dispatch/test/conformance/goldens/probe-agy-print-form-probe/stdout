@@ -1,0 +1,9 @@
+test 1 (bare stdin works -> rc 0) PASS
+test 2 (rc=0 with wrong content is NOT reported healthy) PASS
+test 3 (bare stdin broken + legacy works -> rc 1 fail closed) PASS
+test 4 (bare stdin hangs -> probe still returns promptly, rc 1) PASS
+test 7 (coding-preflight agy: healthy bare stdin proceeds) PASS
+test 8 (coding-preflight agy: broken bare stdin fails closed even if legacy works) PASS
+test 10 (real 30s default: an 11s-equivalent round trip passes) PASS
+test 11 (short cap + slower bare-stdin response fails closed) PASS
+ALL PASS

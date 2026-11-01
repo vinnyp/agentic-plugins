@@ -1,0 +1,13 @@
+test probe 1 (network error advisory) PASS
+test probe 2 (unknown non-zero advisory) PASS
+test probe 3 (absent creds ignored; live models healthy) PASS
+test probe 4 (not logged into Antigravity -> preflight rc1) PASS
+test 1 (coding-preflight agy healthy) PASS
+test 1b (coding-preflight agy symlink resolves helper) PASS
+test 2 (coding-preflight agy dead token) PASS
+test 3 (coding-preflight agy no creds still probes live models) PASS
+test 4 (coding-preflight agy timeout proceeds) PASS
+test 6 (dispatch_agy review healthy proceeds) PASS
+test 6b (dispatch_agy review symlink resolves helper) PASS
+test 7 (dispatch_agy non-review live auth and bare stdin) PASS
+ALL PASS

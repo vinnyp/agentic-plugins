@@ -267,3 +267,28 @@ These goldens are recorded through `baseline-tree.sh` at the pinned BASELINE
 SHA. Fixtures use fixed identities and synthetic reviewers; each child is
 waited for and no real agent is invoked. The worker bound cases assert exit 10,
 an incomplete drift diagnostic, and pin release.
+
+### Probe test rewrite
+
+Run `bash agent-dispatch/test/test-conformance-probes.sh` for the migrated probe
+cases. Five `probe-*` scenarios exercise `coding-preflight.sh`,
+`agent-dispatch-doctor`, and the existing public `dispatch-worker` flows with
+synthetic runtimes. No scenario sources an implementation file. Fixtures keep
+independent assertions for model parsing, role defaults and overrides,
+authentication, symlink resolution, bare-stdin sentinel validation, timeout
+bounds, nonce execution, cache isolation and digest-tool selection. The doctor
+case checks both role defaults, missing models, unparseable rosters and failed
+metadata requests without launching a turn.
+
+`rewrite-map.tsv` enumerates the original cases and loop inputs. Public missing
+binary errors replace the private probes' advisory return codes. Empty model
+parser inputs, cached shell variables, caller traps and signals aimed at a
+private function subshell are explicitly dropped with reasons; these are not
+published command interfaces. The default form timeout is observed at the timer
+boundary and with a real eleven-second synthetic reply. Codex bounds include
+invalid inputs and all accepted integer units. No real agent or long gate runs.
+
+Goldens are captured through `baseline-tree.sh` at the pinned `BASELINE` SHA.
+Each scenario returns zero only after its public-command assertions pass;
+its output records the completed cases. All five have finite budgets and no
+retry. Scratch and implementation paths use the standard harness placeholders.

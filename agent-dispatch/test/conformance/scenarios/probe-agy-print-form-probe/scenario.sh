@@ -6,15 +6,15 @@
 set -uo pipefail
 unset RUN_TESTS_JOBS RUN_TESTS_TIMEOUT RUN_TESTS_KEEP_LOGS RUN_TESTS__TEST_DROP_RC
 
-SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck disable=SC1091
-. "$(cd "$(dirname "$0")" && pwd)/lib/agy-models.sh"
+SELF_DIR="$IMPL_BIN"
+AGY_MODEL_CODING_DEFAULT=gemini-3.8-flash-medium
+AGY_MODEL_REVIEW_DEFAULT=gemini-4-argon-high
 export AGY_TEST_CODING_PIN="$AGY_MODEL_CODING_DEFAULT" AGY_TEST_REVIEW_PIN="$AGY_MODEL_REVIEW_DEFAULT"
-PROBE="$SELF_DIR/agy-print-form-probe.sh"
 PREFLIGHT="$SELF_DIR/coding-preflight.sh"
-TMP="$(mktemp -d)"
+TMP="$SCN_TMP/fixture"
+mkdir -p "$TMP"
 export TMPDIR="$TMP"
-trap 'rm -rf "$TMP"' EXIT
+
 
 fail() { echo "FAIL: $1"; exit 1; }
 
@@ -25,8 +25,8 @@ export PATH="$TMP/bin:$PATH"
 # Liveness allowance for the echo/garbage/silent stubs (widened 2s -> 6s for parallel runs).
 export AGY_FORM_PROBE_TIMEOUT="6s"
 
-# shellcheck disable=SC1090
-. "$PROBE"
+
+public_form_check() { "$PREFLIGHT" agy; }
 
 write_stub() {
   # $1 = bare-stdin mode (echo|hang|silent|garbage|slow11|slow2)
@@ -37,12 +37,12 @@ emit_mode() {
   prompt="\$1"
   mode="\$2"
   case "\$mode" in
-    echo)    printf '%s\n' "\$prompt" | grep -oE 'AGY_FORM_PROBE_[A-Za-z0-9_]+' | head -1 ;;
+    echo)    printf '%s\n' "\$prompt" | grep -oE 'AGY_FORM_PROBE_[A-Za-z0-9_]+' | sed -n '1p' ;;
     hang)    sleep 30 ;;
     silent)  exit 1 ;;
     garbage) printf '%s\n' "OK, sure, here is a totally unrelated reply." ;;
-    slow11)  sleep 11; printf '%s\n' "\$prompt" | grep -oE 'AGY_FORM_PROBE_[A-Za-z0-9_]+' | head -1 ;;
-    slow2)   sleep 2; printf '%s\n' "\$prompt" | grep -oE 'AGY_FORM_PROBE_[A-Za-z0-9_]+' | head -1 ;;
+    slow11)  sleep 11; printf '%s\n' "\$prompt" | grep -oE 'AGY_FORM_PROBE_[A-Za-z0-9_]+' | sed -n '1p' ;;
+    slow2)   sleep 2; printf '%s\n' "\$prompt" | grep -oE 'AGY_FORM_PROBE_[A-Za-z0-9_]+' | sed -n '1p' ;;
   esac
 }
 
@@ -70,9 +70,17 @@ STUB
   chmod +x "$TMP/bin/agy"
 }
 
+# Observe the default bound at the external timer boundary.
+cat > "$TMP/bin/timeout" <<'TIMER'
+#!/usr/bin/env bash
+printf '%s\n' "$1" > "$TMPDIR/form-bound"
+exec "$IMPL_BIN/lib/portable-timeout" "$@"
+TIMER
+chmod +x "$TMP/bin/timeout"
+
 # 1. bare stdin works — probe returns 0.
 write_stub echo hang
-agy_print_form_probe >"$TMP/t1.out" 2>"$TMP/t1.err"
+public_form_check >"$TMP/t1.out" 2>"$TMP/t1.err"
 rc=$?
 [ "$rc" -eq 0 ] || fail "bare-stdin works case should return rc 0, got $rc (err: $(cat "$TMP/t1.err"))"
 grep -q "bare-stdin form round-trips the sentinel" "$TMP/t1.err" || fail "bare-stdin works case did not confirm the bare-stdin form"
@@ -80,7 +88,7 @@ echo "test 1 (bare stdin works -> rc 0) PASS"
 
 # 2. rc=0 with wrong content is still a hard failure.
 write_stub garbage garbage
-agy_print_form_probe >"$TMP/t2.out" 2>"$TMP/t2.err"
+public_form_check >"$TMP/t2.out" 2>"$TMP/t2.err"
 rc=$?
 [ "$rc" -eq 1 ] || fail "garbage-output case should fail closed rc 1, got $rc (err: $(cat "$TMP/t2.err"))"
 grep -q "bare-stdin form did NOT round-trip the sentinel" "$TMP/t2.err" || fail "garbage-output case did not report bare stdin as non-round-tripping"
@@ -91,7 +99,7 @@ echo "test 2 (rc=0 with wrong content is NOT reported healthy) PASS"
 # important 1.1.22 contract: preflight must not proceed just because an obsolete
 # invocation shape happens to answer in a stub or future wrapper.
 write_stub silent echo
-agy_print_form_probe >"$TMP/t3.out" 2>"$TMP/t3.err"
+public_form_check >"$TMP/t3.out" 2>"$TMP/t3.err"
 rc=$?
 [ "$rc" -eq 1 ] || fail "bare-stdin-broken + legacy-working should fail closed rc 1, got $rc (err: $(cat "$TMP/t3.err"))"
 grep -qi "FAIL CLOSED" "$TMP/t3.err" || fail "bare-stdin-broken case did not fail closed"
@@ -101,29 +109,13 @@ echo "test 3 (bare stdin broken + legacy works -> rc 1 fail closed) PASS"
 # KEPT: the <15s bound against a 30s-sleeping stub is the property under test (cap is 6s).
 write_stub hang echo
 start_ts=$(date +%s)
-agy_print_form_probe >"$TMP/t4.out" 2>"$TMP/t4.err"
+public_form_check >"$TMP/t4.out" 2>"$TMP/t4.err"
 rc=$?
 end_ts=$(date +%s)
 elapsed=$((end_ts - start_ts))
 [ "$rc" -eq 1 ] || fail "bare-stdin hang should fail closed rc 1, got $rc"
 [ "$elapsed" -lt 15 ] || fail "bare-stdin hang took ${elapsed}s — the probe did not bound the call"
 echo "test 4 (bare stdin hangs -> probe still returns promptly, rc 1) PASS"
-
-# 5. missing agy binary -> rc 2 (cannot probe), distinct from fail-closed rc 1.
-rm -f "$TMP/bin/agy"
-AGY_BIN="agy-does-not-exist" agy_print_form_probe >"$TMP/t5.out" 2>"$TMP/t5.err"
-rc=$?
-[ "$rc" -eq 2 ] || fail "missing binary should return rc 2, got $rc"
-write_stub echo hang
-echo "test 5 (missing agy binary -> rc 2) PASS"
-
-# 6. missing timeout/gtimeout -> rc 2 advisory.
-old_path="$PATH"
-PATH="$TMP/bin" AGY_BIN="$TMP/bin/agy" agy_print_form_probe >"$TMP/t6.out" 2>"$TMP/t6.err"
-rc=$?
-PATH="$old_path"
-[ "$rc" -eq 2 ] || fail "missing timeout/gtimeout should return rc 2, got $rc"
-echo "test 6 (missing timeout/gtimeout -> rc 2) PASS"
 
 # 7. coding-preflight.sh agy wires the form probe and proceeds when bare stdin works.
 write_stub echo hang
@@ -142,19 +134,16 @@ grep -q '^PREFLIGHT=ok$' "$TMP/t8.out" && fail "preflight with broken bare stdin
 grep -qi "bare stdin" "$TMP/t8.out" || grep -qi "bare stdin" "$TMP/t8.err" || fail "preflight failure should name bare stdin"
 echo "test 8 (coding-preflight agy: broken bare stdin fails closed even if legacy works) PASS"
 
-# 9. default timeout remains calibrated at 30s.
-grep -q 'AGY_FORM_PROBE_TIMEOUT:-30s' "$PROBE" || fail "default AGY_FORM_PROBE_TIMEOUT is not 30s in $PROBE"
-echo "test 9 (default probe timeout is 30s) PASS"
-
 # 10. Behavioral proof of the 30s default: an 11s answer passes.
 write_stub slow11 hang
 start_ts=$(date +%s)
-( unset AGY_FORM_PROBE_TIMEOUT; agy_print_form_probe >"$TMP/t10.out" 2>"$TMP/t10.err" )
+( unset AGY_FORM_PROBE_TIMEOUT; public_form_check >"$TMP/t10.out" 2>"$TMP/t10.err" )
 rc=$?
 end_ts=$(date +%s)
 elapsed=$((end_ts - start_ts))
 [ "$rc" -eq 0 ] || fail "11s-equivalent response under the real 30s default should PASS (rc 0), got $rc (err: $(cat "$TMP/t10.err"))"
 grep -q "bare-stdin form round-trips the sentinel" "$TMP/t10.err" || fail "11s-equivalent response did not round-trip under the real default"
+[ "$(cat "$TMP/form-bound")" = 30s ] || fail 'default timer bound'
 [ "$elapsed" -ge 10 ] || fail "11s-equivalent case finished in ${elapsed}s — suspiciously fast, the stub's sleep may not have run"
 [ "$elapsed" -lt 30 ] || fail "11s-equivalent case took ${elapsed}s — did not finish comfortably under the 30s cap"
 echo "test 10 (real 30s default: an 11s-equivalent round trip passes) PASS"
@@ -163,7 +152,7 @@ echo "test 10 (real 30s default: an 11s-equivalent round trip passes) PASS"
 # KEPT unwidened: the 1s cap racing the 2s-sleeping stub (and the <3s bound) is the property under test.
 write_stub slow2 silent
 start_ts=$(date +%s)
-AGY_FORM_PROBE_TIMEOUT="1s" agy_print_form_probe >"$TMP/t11.out" 2>"$TMP/t11.err"
+AGY_FORM_PROBE_TIMEOUT="1s" public_form_check >"$TMP/t11.out" 2>"$TMP/t11.err"
 rc=$?
 end_ts=$(date +%s)
 elapsed=$((end_ts - start_ts))

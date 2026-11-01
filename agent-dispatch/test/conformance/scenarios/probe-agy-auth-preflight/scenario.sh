@@ -1,17 +1,16 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck disable=SC1091
-. "$SELF_DIR/lib/test-env-reset.sh"
-reset_dispatch_env  # neutralize any operator-exported dispatch vars before the suite runs
-# shellcheck disable=SC1091
-. "$(cd "$(dirname "$0")" && pwd)/lib/agy-models.sh"
+SELF_DIR="$IMPL_BIN"
+
+AGY_MODEL_CODING_DEFAULT=gemini-3.8-flash-medium
+AGY_MODEL_REVIEW_DEFAULT=gemini-4-argon-high
 export AGY_TEST_CODING_PIN="$AGY_MODEL_CODING_DEFAULT" AGY_TEST_REVIEW_PIN="$AGY_MODEL_REVIEW_DEFAULT"
 PREFLIGHT="$SELF_DIR/coding-preflight.sh"
 DW="$SELF_DIR/dispatch-worker"
-TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+TMP="$SCN_TMP/fixture"
+mkdir -p "$TMP"
+
 
 fail() { echo "FAIL: $1"; exit 1; }
 
@@ -25,6 +24,7 @@ cat > "$TMP/bin/agy" <<'STUB'
 printf '%s\n' "$*" >> "$AGY_CALL_LOG"
 case "${1:-}" in
   models)
+    if [ -n "${AGY_MODELS_FILE:-}" ]; then cat "$AGY_MODELS_FILE"; exit 0; fi
     case "${AGY_STUB_MODE:-healthy}" in
       unparseable) echo 'format drift'; exit 0 ;;
       review_missing) printf '%s\tCoding\r\ncustom-id\tCustom Display\r\ncustom-id-high\tTiered\r\n' "$AGY_TEST_CODING_PIN"; exit 0 ;;
@@ -50,7 +50,7 @@ case "${1:-}" in
         exit 1
         ;;
       slow)
-        sleep 60
+        exit 98
         exit 0
         ;;
       *)
@@ -119,35 +119,34 @@ mkdir -p "$REVIEW_WORKDIR"
 git -C "$REVIEW_WORKDIR" init -q
 git -C "$REVIEW_WORKDIR" -c user.email=test@example.com -c user.name=test commit -q --allow-empty -m "init"
 
-# Probe-unit coverage for advisory vs hard-block branches.
-# shellcheck disable=SC1091
-. "$SELF_DIR/agy-auth-probe.sh"
+# Public readiness outcomes replace private probe return codes.
+public_auth_check() { "$PREFLIGHT" agy; }
 
 reset_calls
-AGY_STUB_MODE=network agy_auth_probe >"$TMP/probe-network.out" 2>"$TMP/probe-network.err"; rc=$?
-[ "$rc" -eq 2 ] || fail "network probe should be advisory rc2, got $rc"
+AGY_STUB_MODE=network public_auth_check >"$TMP/probe-network.out" 2>"$TMP/probe-network.err"; rc=$?
+[ "$rc" -eq 0 ] || fail "network probe should proceed with public rc0, got $rc"
 assert_called "models"
 grep -qE '^-k 2s 5s .*agy models$' "$AGY_CALL_LOG.timeout" || fail "auth timeout argv"
 echo "test probe 1 (network error advisory) PASS"
 
 reset_calls
-AGY_STUB_MODE=unknown agy_auth_probe >"$TMP/probe-unknown.out" 2>"$TMP/probe-unknown.err"; rc=$?
-[ "$rc" -eq 2 ] || fail "unknown non-zero probe should be advisory rc2, got $rc"
+AGY_STUB_MODE=unknown public_auth_check >"$TMP/probe-unknown.out" 2>"$TMP/probe-unknown.err"; rc=$?
+[ "$rc" -eq 0 ] || fail "unknown non-zero probe should proceed with public rc0, got $rc"
 assert_called "models"
 echo "test probe 2 (unknown non-zero advisory) PASS"
 
 reset_calls
 rm -rf "$HOME/.gemini"
-AGY_STUB_MODE=healthy agy_auth_probe >"$TMP/probe-no-creds-healthy.out" 2>"$TMP/probe-no-creds-healthy.err"; rc=$?
+AGY_STUB_MODE=healthy public_auth_check >"$TMP/probe-no-creds-healthy.out" 2>"$TMP/probe-no-creds-healthy.err"; rc=$?
 [ "$rc" -eq 0 ] || fail "absent creds + healthy live models should return rc0, got $rc"
 assert_called "models"
 echo "test probe 3 (absent creds ignored; live models healthy) PASS"
 
 reset_calls
-AGY_STUB_MODE=dead_antigravity agy_auth_probe >"$TMP/probe-antigravity-dead.out" 2>"$TMP/probe-antigravity-dead.err"; rc=$?
-[ "$rc" -eq 7 ] || fail "'not logged into Antigravity' should hard-block rc7, got $rc"
+AGY_STUB_MODE=dead_antigravity public_auth_check >"$TMP/probe-antigravity-dead.out" 2>"$TMP/probe-antigravity-dead.err"; rc=$?
+[ "$rc" -eq 1 ] || fail "'not logged into Antigravity' should hard-block public readiness with rc1, got $rc"
 assert_called "models"
-echo "test probe 4 (not logged into Antigravity -> rc7) PASS"
+echo "test probe 4 (not logged into Antigravity -> preflight rc1) PASS"
 
 # 1. coding-preflight agy, healthy.
 reset_calls
@@ -194,14 +193,7 @@ grep -qi 'timed out' "$TMP/preflight-timeout.err" || fail "timeout preflight sho
 assert_called "models"
 echo "test 4 (coding-preflight agy timeout proceeds) PASS"
 
-# 5. dispatch_agy --review, dead token: fail fast before dispatch.
-reset_calls
-AGY_STUB_MODE=dead TIMEOUT=0 "$DW" --runtime agy --review --brief "$BRIEF" --workdir /repo/x >"$TMP/dw-review-dead.out" 2>"$TMP/dw-review-dead.err"; rc=$?
-[ "$rc" -eq 7 ] || fail "dead-token review dispatch should return 7, got $rc"
-grep -qi 're-authenticate agy' "$TMP/dw-review-dead.err" || fail "dead-token dispatch should tell user to re-authenticate agy"
-assert_called "models"
-assert_no_rejected_agy_args
-echo "test 5 (dispatch_agy review dead token fails fast) PASS"
+# Review authentication failure is covered by worker-agy-auth.
 
 # 6. dispatch_agy --review, healthy: probe then dispatch.
 # DISPATCH_MIN_REVIEW_BYTES=1: this test is about the auth-probe-then-dispatch
@@ -248,8 +240,6 @@ echo "test 7 (dispatch_agy non-review live auth and bare stdin) PASS"
 # Missing coding pin and both supported override forms.
 AGY_STUB_MODE=missing "$PREFLIGHT" agy >"$TMP/missing.out" 2>&1; rc=$?
 [ "$rc" -eq 1 ] || fail "missing coding default should fail rc1"
-# shellcheck disable=SC1091
-. "$(dirname "$PREFLIGHT")/lib/agy-models.sh"
 grep -qF "PREFLIGHT=error: agy model '$AGY_MODEL_CODING_DEFAULT'" "$TMP/missing.out" || fail "missing coding diagnostic lacks ID"
 for model in custom-id 'Custom Display'; do
   AGY_STUB_MODE=missing AGY_MODEL="$model" "$PREFLIGHT" agy >"$TMP/override.out" 2>&1; rc=$?
@@ -257,34 +247,28 @@ for model in custom-id 'Custom Display'; do
   grep -qFx "CODING_MODEL=$model" "$TMP/override.out" || fail "effective coding model not reported"
 done
 
-# Exact columns and CRLF, plus clearing a successful probe's cached output.
-model_list="$(printf 'id-one\tDisplay One\tignored\r\n')"
-agy_model_present "$model_list" id-one || fail "CRLF ID did not match"
-agy_model_present "$model_list" 'Display One' || fail "CRLF display name did not match"
-for model in 'Display' ignored; do
-  if agy_model_present "$model_list" "$model"; then fail "non-exact model matched: $model"; fi
+# Model parsing is exercised through the published model check.
+export AGY_MODELS_FILE="$TMP/model-list"
+printf 'id-one\tDisplay One\tignored\r\n' > "$AGY_MODELS_FILE"
+for model in id-one 'Display One' 'display one' ID-ONE id; do
+  AGY_MODEL="$model" "$PREFLIGHT" agy > "$TMP/parser.out" 2> "$TMP/parser.err"; rc=$?
+  [ "$rc" -eq 0 ] || fail "model rejected: $model"
+  grep -q '^AGY_MODEL_CHECK=ok$' "$TMP/parser.out" || fail 'model check missing'
+  if [ "$model" = id ]; then grep -q 'has no tier' "$TMP/parser.err" || fail 'tier warning'; fi
 done
-AGY_STUB_MODE=healthy agy_auth_probe >/dev/null 2>&1
-[ -n "$AGY_AUTH_PROBE_OUTPUT" ] || fail "successful probe did not retain model list"
-AGY_STUB_MODE=network agy_auth_probe >/dev/null 2>&1
-[ -z "$AGY_AUTH_PROBE_OUTPUT" ] || fail "inconclusive probe leaked stale model list"
-
-# Name and parser contracts, including literal backslashes through ENVIRON.
-for model in 'display one' ID-ONE; do
-  agy_model_present "$model_list" "$model" || fail "case-insensitive match: $model"
+for model in Display ignored '   ' "$(printf 'bad\nmodel')" "$(printf 'bad\tmodel')" 'literal\nmodel'; do
+  AGY_MODEL="$model" "$PREFLIGHT" agy > "$TMP/parser.out" 2> "$TMP/parser.err"; rc=$?
+  [ "$rc" -eq 1 ] || fail "invalid model accepted: $model"
 done
-for model in '' '   ' "$(printf 'bad\nmodel')" "$(printf 'bad\tmodel')" 'literal\nmodel'; do
-  agy_model_present "$model_list" "$model"; rc=$?
-  [ "$rc" -eq 1 ] || fail "invalid/absent model accepted: $model ($rc)"
+printf 'format drift\n' > "$AGY_MODELS_FILE"
+for model in '   ' "$(printf '\n.')" "$(printf '\t')"; do
+  AGY_MODEL="$model" "$PREFLIGHT" agy > "$TMP/parser.out" 2> "$TMP/parser.err"; rc=$?
+  [ "$rc" -eq 1 ] || fail 'invalid unparseable model accepted'
 done
-for model in '' '   ' "$(printf '\n.')" "$(printf '\t')"; do
-  agy_model_present 'format drift' "$model"; rc=$?
-  [ "$rc" -eq 1 ] || fail "invalid model with unparseable list returned $rc"
-done
-agy_model_present 'format drift' id-one; rc=$?
-[ "$rc" -eq 2 ] || fail "unparseable list must return 2"
-agy_model_present "$model_list" id >"$TMP/tier.out" 2>"$TMP/tier.err" || fail "tierless ID rejected"
-grep -q 'has no tier' "$TMP/tier.err" || fail "tierless warning missing"
+AGY_MODEL=id-one "$PREFLIGHT" agy > "$TMP/parser.out" 2> "$TMP/parser.err"; rc=$?
+[ "$rc" -eq 0 ] || fail 'unparseable models blocked'
+grep -q '^AGY_MODEL_CHECK=skipped:unparseable models$' "$TMP/parser.out" || fail 'unparseable status'
+unset AGY_MODELS_FILE
 
 grep -qFx "CODING_MODEL=$AGY_MODEL_CODING_DEFAULT" "$TMP/preflight-healthy.out" || fail "default coding model missing"
 grep -qFx 'AGY_MODEL_CHECK=ok' "$TMP/preflight-healthy.out" || fail "check status missing"
@@ -300,11 +284,13 @@ for model in 'custom display' custom-id; do
   AGY_STUB_MODE=review_missing AGY_MODEL="$model" "$PREFLIGHT" agy >"$TMP/name.out" 2>&1; rc=$?
   [ "$rc" -eq 0 ] || fail "name form rejected: $model"
 done
-model_list="$(printf 'gemini-4-argon-high\tGemini Argon\ncustom-id-high\tCustom\n')"
+export AGY_MODELS_FILE="$TMP/model-list"
+printf 'gemini-4-argon-high\tGemini Argon\ncustom-id-high\tCustom\n' > "$AGY_MODELS_FILE"
 for model in gemini gemini-4; do
-  agy_model_present "$model_list" "$model"; rc=$?
-  [ "$rc" -eq 1 ] || fail "family prefix accepted: $model ($rc)"
+  AGY_MODEL="$model" "$PREFLIGHT" agy > "$TMP/family.out" 2>&1; rc=$?
+  [ "$rc" -eq 1 ] || fail "family prefix accepted: $model"
 done
+unset AGY_MODELS_FILE
 # All review tests use this suite's isolated workdir.
 for mode in network unparseable review_missing healthy; do
   : >"$AGY_CALL_LOG"

@@ -161,3 +161,8 @@ repo-state-worker-snapshot-bound	preserve		45	0
 repo-state-worker-compare-bound	preserve		45	0
 repo-state-worker-limits	preserve		120	0
 repo-state-hash-failure	preserve		30	0
+probe-agy-auth-preflight	preserve		120	0
+probe-agy-print-form-probe	preserve		120	0
+probe-codex-exec-probe	preserve		120	0
+probe-agy-doctor	preserve		120	0
+probe-unavailable	preserve		15	0
