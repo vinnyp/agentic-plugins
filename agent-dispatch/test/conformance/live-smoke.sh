@@ -35,12 +35,13 @@ report() {
   printf '%-7s %s\n' "$1" "$2"
   [ "$1" = PASS ] || failed=1
 }
-# No config writes or commits; agents operate in fresh clones of an empty repo.
+# Agents operate in fresh clones of an empty repo; seed only the TMPDIR probe afterward.
 git -C "$work" init -q seed
 for id in agy-clone agy-auth codex-read-only codex-workspace-write claude-plan; do
   git -C "$work" clone -q "$work/seed" "$work/$id" 2>/dev/null
 done
-git -C "$work/seed" worktree add -q --orphan -b tmpdir-probe "$trap_dir/worktree"
+git -C "$work/seed" -c user.name='Fixture Author' -c user.email='fixture@example.invalid' -c commit.gpgsign=false -c core.hooksPath=/dev/null commit -q --allow-empty -m 'Initial fixture'
+git -C "$work/seed" worktree add -q -b tmpdir-probe "$trap_dir/worktree"
 probe() {
   local id=$1 runtime=$2 cwd=$3 rc=0 input=/dev/null
   shift 3

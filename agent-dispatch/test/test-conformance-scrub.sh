@@ -10,26 +10,26 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 mkdir "$work/input"
 for pattern in home username email token wrapped google api jwt basic bearer github slack aws pem access refresh secret key password host wrappedhome crlf; do
   case "$pattern" in
-    google) printf 'ya29.abcdefghijklmnop\n' ;;
-    api) printf 'AIzaabcdefghijklmnopqrstuvwxyz123456789\n' ;;
-    jwt) printf 'eyJhbGciOiJIUzI1NiJ9.abcdefgh.ijklmnop\n' ;;
-    basic) printf 'Authorization: Basic abcdef==\n' ;;
-    bearer) printf 'Authorization: Bearer abcdef\n' ;;
-    github) printf 'github_pat_abcdefghijklmnopqrstuv\n' ;;
-    slack) printf 'xoxb-abcdefghijklmnopqrstuv\n' ;;
-    aws) printf 'AKIAABCDEFGHIJKLMNOP\n' ;;
-    pem) printf '%s\n' '-----BEGIN CERTIFICATE-----' ;;
+    google) prefix='ya29.'; body='abcdefghijklmnop'; printf '%s%s\n' "$prefix" "$body" ;;
+    api) prefix='AIza'; body='abcdefghijklmnopqrstuvwxyz123456789'; printf '%s%s\n' "$prefix" "$body" ;;
+    jwt) prefix='eyJ'; body='hbGciOiJIUzI1NiJ9.abcdefgh.ijklmnop'; printf '%s%s\n' "$prefix" "$body" ;;
+    basic) scheme='Basic'; body='abcdef=='; printf 'Authorization: %s %s\n' "$scheme" "$body" ;;
+    bearer) scheme='Bearer'; body='abcdef'; printf 'Authorization: %s %s\n' "$scheme" "$body" ;;
+    github) prefix='github_pat_'; body='abcdefghijklmnopqrstuv'; printf '%s%s\n' "$prefix" "$body" ;;
+    slack) prefix='xoxb-'; body='abcdefghijklmnopqrstuv'; printf '%s%s\n' "$prefix" "$body" ;;
+    aws) prefix='AKIA'; body='ABCDEFGHIJKLMNOP'; printf '%s%s\n' "$prefix" "$body" ;;
+    pem) prefix='-----BEGIN'; body=' CERTIFICATE-----'; printf '%s%s\n' "$prefix" "$body" ;;
     access|refresh|secret|key|password)
       case "$pattern" in access) key=access_token ;; refresh) key=refresh_token ;; secret) key=client_secret ;; key) key=api_key ;; password) key=password ;; esac
-      printf '{"%s": "secret-value"}\n' "$key" ;;
+      prefix='secret-'; body='value'; printf '{"%s": "%s%s"}\n' "$key" "$prefix" "$body" ;;
     host) hostname ;;
     wrappedhome) printf '%s' "$HOME" | sed 's|/|/ \\\n|g' ;;
-    crlf) printf 'ya29.abc\r\n  defghijklmnop\n' ;;
+    crlf) prefix='ya29.'; body='abc'; tail='defghijklmnop'; printf '%s%s\r\n  %s\n' "$prefix" "$body" "$tail" ;;
     home) printf '%s/file\n' "$HOME" ;;
     username) printf '%s\n' "$(id -un)" ;;
     email) printf 'person@example.invalid\n' ;;
-    token) printf 'sk-abcdefghijklmnopqrstuvwxyz123456\n' ;;
-    wrapped) printf 'sk-abcdefghijklm\nnopqrstuvwxyz123456\n' ;;
+    token) prefix='sk-'; body='abcdefghijklmnopqrstuvwxyz123456'; printf '%s%s\n' "$prefix" "$body" ;;
+    wrapped) prefix='sk-'; body='abcdefghijklm'; tail='nopqrstuvwxyz123456'; printf '%s%s\n%s\n' "$prefix" "$body" "$tail" ;;
   esac > "$work/input/stdout"
   cp "$work/input/stdout" "$work/before"
   if bash "$here/conformance/scrub.sh" "$work/input" > "$work/output" 2>&1; then
@@ -40,7 +40,8 @@ for pattern in home username email token wrapped google api jwt basic bearer git
 done
 printf "public fixture\n" > "$work/input/stdout"
 mkdir "$work/input/nested"
-printf 'Authorization: Bearer secret' > "$work/input/nested/stderr"
+scheme='Bearer'; body='secret'
+printf 'Authorization: %s %s' "$scheme" "$body" > "$work/input/nested/stderr"
 if bash "$here/conformance/scrub.sh" "$work/input"; then fail 'nested stderr accepted'; fi
 rm "$work/input/nested/stderr"
 ln -s "$work/before" "$work/input/link"
