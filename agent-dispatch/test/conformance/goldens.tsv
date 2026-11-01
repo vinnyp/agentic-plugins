@@ -118,3 +118,10 @@ state-long-pending	preserve	-	12	0
 state-pin-invalid	preserve	-	12	0
 worker-codex-dep-pass	preserve		5	0
 worker-pin-fail	known-defect	README.md#worker-known-defects	5	0
+state-compare-alternates	preserve	-	5	0
+state-compare-grafts	preserve	-	5	0
+state-compare-shallow	preserve	-	5	0
+state-compare-exclude	preserve	-	5	0
+state-clone-nonempty	preserve	-	5	0
+state-clone-mode	preserve	-	5	0
+state-clone-source	preserve	-	5	0

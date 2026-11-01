@@ -43,6 +43,10 @@ assert set(tags) == {p.name for p in actual.iterdir() if p.is_dir()}
 for name in tags:
     directory = actual / name
     expected = {
+        'state-clone-nonempty': '3', 'state-clone-mode': '3',
+        'state-clone-source': '3',
+        'state-compare-alternates': '2', 'state-compare-grafts': '2',
+        'state-compare-shallow': '2', 'state-compare-exclude': '1',
         'state-clone-filter': '4', 'state-clone-unsafe': '3',
         'state-compare-config': '2', 'state-compare-hook': '2',
         'state-compare-ref': '2', 'state-compare-filter': '2',
@@ -93,3 +97,15 @@ assert 'observed_rc=2' in output('long-missing')
 assert 'observed_rc=3' in output('long-pending')
 assert 'observed_rc=124' in output('long-pending')
 assert 'observed_rc=2' in output('pin-invalid')
+
+# These metadata paths are critical even when ordinary info files are benign.
+for name in ('alternates', 'grafts', 'shallow'):
+    assert 'observed_rc=2\n' in output('compare-' + name), name
+    assert name in output('compare-' + name), name
+assert 'observed_rc=1\n' in output('compare-exclude')
+for name, reason in [('nonempty', 'destination is not empty'),
+                     ('mode', 'destination mode is not 700'),
+                     ('source', 'source is not a work tree')]:
+    directory = actual / ('state-clone-' + name)
+    assert 'observed_rc=3\n' in output('clone-' + name), name
+    assert 'review-clone: ' + reason in (directory / 'stderr').read_text(), name

@@ -43,6 +43,10 @@ case "$id" in
       *hook) printf '#!/bin/sh\nexit 0\n' > .git/hooks/pre-commit; chmod +x .git/hooks/pre-commit ;;
       *ref) git -C "$SCN_REPO" update-ref refs/replace/1111111111111111111111111111111111111111 HEAD ;;
       *harmless) touch tracked.txt ;;
+      *alternates) printf '%s\n' "$SCN_REPO/.git/objects" > .git/objects/info/alternates ;;
+      *grafts) git -C "$SCN_REPO" rev-parse HEAD > .git/info/grafts ;;
+      *shallow) git -C "$SCN_REPO" rev-parse HEAD > .git/shallow ;;
+      *exclude) printf 'ignored-fixture\n' >> .git/info/exclude ;;
       *filter)
         printf '*.txt filter=fixture\n' > .gitattributes
         printf '\n[filter "fixture"]\n clean = "echo filter-ran >> %s; cat"\n' "$SCN_TMP/filter-ran" >> .git/config
@@ -94,7 +98,13 @@ case "$id" in
       *filter) printf '\n[filter "fixture"]\n clean = cat\n' >> .git/config ;;
       *unsafe) dest="$SCN_TMP/unsafe" ;;
     esac
-    observe "$IMPL_BIN/review-clone.sh" "$SCN_REPO" "$dest"
+    source_repo=$SCN_REPO
+    case "$id" in
+      *nonempty) mkdir -m 700 "$dest"; printf 'retain\n' > "$dest/foreign" ;;
+      *mode) mkdir -m 755 "$dest" ;;
+      *source) source_repo="$SCN_TMP/not-a-worktree"; mkdir "$source_repo" ;;
+    esac
+    observe "$IMPL_BIN/review-clone.sh" "$source_repo" "$dest"
     if [ "$id" = state-clone-isolation ]; then
       printf 'clone edit\n' > "$dest/tracked.txt"
       printf '\n[fixture]\n clone = true\n' >> "$dest/.git/config"
