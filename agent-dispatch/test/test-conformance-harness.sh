@@ -1,6 +1,27 @@
 #!/usr/bin/env bash
 set -eu
 here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+# Migrated suites and scenarios must not regain implementation sourcing.
+python3 - "$here" <<'SOURCE_GUARD'
+import csv
+from pathlib import Path
+import re
+import sys
+root = Path(sys.argv[1]).parent
+conformance = root / 'test/conformance'
+with (conformance / 'source-allowlist.tsv').open() as stream:
+    allowed = {row['source_test']: row['reason']
+               for row in csv.DictReader(stream, delimiter='\t')}
+with (conformance / 'rewrite-map.tsv').open() as stream:
+    migrated = {row['source_test'] for row in csv.DictReader(stream, delimiter='\t')}
+paths = set((conformance / 'scenarios').glob('*/scenario.sh'))
+paths.update(root / name for name in migrated if (root / name).exists())
+pattern = re.compile(r'^[ \t]*(source|\.)[ \t]+.*lib/', re.M)
+for path in sorted(paths):
+    name = str(path.relative_to(root))
+    if pattern.search(path.read_text()):
+        assert allowed.get(name), f'{name}: implementation sourcing without allowlist reason'
+SOURCE_GUARD
 work=$(mktemp -d "${TMPDIR:-/tmp}/conformance-test.XXXXXX")
 [ -n "$work" ] || exit 1
 export DISPATCH_CONFORMANCE_ROOT="$work/root"

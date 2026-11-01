@@ -167,3 +167,4 @@ probe-codex-exec-probe	preserve		120	0
 probe-agy-doctor	preserve		120	0
 probe-unavailable	preserve		15	0
 clone-contract	preserve		60	0
+freshness-contract	preserve		60	0

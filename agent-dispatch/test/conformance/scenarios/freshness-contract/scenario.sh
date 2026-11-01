@@ -1,17 +1,10 @@
 #!/usr/bin/env bash
-set -uo pipefail
+set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CD="$SCRIPT_DIR/coding-dispatch.sh"
-# shellcheck disable=SC1091
-. "$SCRIPT_DIR/lib/test-env-reset.sh"
-reset_dispatch_env
-# shellcheck disable=SC1091
-. "$SCRIPT_DIR/lib/hash.sh"
+CD="$IMPL_BIN/coding-dispatch.sh"
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
-TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+TMP=$SCN_TMP
 mkdir -p "$TMP/bin"
 cat > "$TMP/bin/codex" <<'STUB'
 #!/usr/bin/env bash
@@ -44,8 +37,6 @@ init_repo() {
   local dir="$1"
   mkdir -p "$dir"
   git -C "$dir" init -q
-  git -C "$dir" config user.email test@example.invalid
-  git -C "$dir" config user.name "Dispatch Freshness Test"
   git -C "$dir" checkout -q -b main
   printf 'base\n' > "$dir/file.txt"
   git -C "$dir" add file.txt
@@ -64,24 +55,10 @@ init_remote_repo() {
 advance_remote() {
   local remote="$1" checkout="$2"
   git clone -q "$remote" "$checkout"
-  git -C "$checkout" config user.email test@example.invalid
-  git -C "$checkout" config user.name "Dispatch Freshness Test"
   printf 'remote ahead\n' >> "$checkout/file.txt"
   git -C "$checkout" add file.txt
   git -C "$checkout" commit -q -m remote-ahead
   git -C "$checkout" push -q origin main
-}
-
-expected_wt() {
-  local p="$1" slug="$2" p_real p_bn p_hash
-  p_real="$(cd "$p" && git rev-parse --show-toplevel)"
-  p_bn=$(basename "$p_real" | tr -cs 'A-Za-z0-9_-' '_')
-  if command -v md5sum >/dev/null 2>&1; then
-    p_hash=$(printf '%s' "$p_real" | md5sum | cut -c1-8)
-  else
-    p_hash=$(printf '%s' "$p_real" | md5_hex | cut -c1-8)
-  fi
-  printf '%s/.worktrees/%s_%s/%s\n' "$(cd "$p_real/.." && pwd -P)" "$p_bn" "$p_hash" "$slug"
 }
 
 run_dispatch() {
@@ -96,7 +73,8 @@ run_dispatch() {
 
 remove_wt() {
   local repo="$1" slug="$2" wt
-  wt="$(expected_wt "$repo" "$slug")"
+  wt=$(git -C "$repo" worktree list --porcelain | sed -n "s|^worktree \(.*\)/$slug$|\1/$slug|p")
+  [ -n "$wt" ] || fail "missing worktree $slug"
   git -C "$repo" worktree remove --force "$wt" 2>/dev/null || true
 }
 

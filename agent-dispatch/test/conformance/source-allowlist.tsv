@@ -29,3 +29,5 @@ test/conformance/scenarios/repo-state-worker-compare-bound/scenario.sh	Sources o
 test/conformance/scenarios/repo-state-worker-snapshot-bound/scenario.sh	Sources only black-box test fixtures, never implementation libraries.
 test/conformance/scenarios/repo-state-worker-limits/scenario.sh	Sources only black-box test fixtures, never implementation libraries.
 test/conformance/scenarios/repo-state-hash-failure/scenario.sh	Sources only black-box test fixtures, never implementation libraries.
+bin/test-review-launch.sh	Calls published dispatch-worker; timeout-bin.sh selects a portable outer test deadline and test-env-reset.sh isolates caller settings. Retains real-Git FIFO matrix without adding a timer tool.
+bin/test-portable-stat.sh	Direct stat dialect, uid, mtime and special-bit helper results have no published CLI; tree-identity integration invokes mutation tools and retains installed BSD/GNU coverage. Small helper exception; execution requires mutation-tool authorization.

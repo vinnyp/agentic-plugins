@@ -305,3 +305,20 @@ listing; it calls no implementation functions. Private result variables are
 observed through CLI stdout and single-line stderr. No cases are dropped and
 no implementation sourcing remains in this group. The baseline golden is
 recorded through `baseline-tree.sh` at the SHA in `BASELINE`.
+
+The freshness rewrite runs with `bash agent-dispatch/test/test-conformance-freshness.sh`.
+`freshness-contract` retains all six cases from `bin/test-dispatch-freshness.sh`
+through `coding-dispatch.sh`: fetched staleness, failed-fetch fallback, current
+base, origin fallback without an upstream, stale-base override, and detached
+HEAD. Goldens were recorded using `baseline-tree.sh` at the SHA in `BASELINE`.
+The scenario locates disposable worktrees with Git's public porcelain output.
+
+`rewrite-map.tsv` also accounts for the retained review-launch FIFO matrix,
+allocation and snapshot failures, and portable-stat helper/integration checks.
+Their `scenario_id` cells name the retained test paths; reasons live in
+`source-allowlist.tsv`. Review-launch sources only test environment reset and
+portable timer selection. Portable-stat directly tests helper return values
+and invokes mutation verification/sweep commands; it is retained as the small
+helper exception and cannot run when mutation tools are prohibited.
+The harness suite checks the anchored implementation-sourcing pattern across
+all scenarios and migrated suites, requiring an explicit allowlist reason.

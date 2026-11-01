@@ -14,9 +14,14 @@ with (root / 'rewrite-map.tsv').open() as f:
     rows = list(csv.DictReader(f, delimiter='\t'))
 assert {r['source_test'] for r in rows} >= {'bin/test-repo-state.sh', 'bin/test-repo-state-cli.sh', 'bin/test-repo-state-memory.sh'}
 assert rows and set(rows[0]) == {'source_test', 'behaviour', 'scenario_id', 'reason'}
+with (root / 'source-allowlist.tsv').open() as f:
+    retained = {r['source_test']: r['reason'] for r in csv.DictReader(f, delimiter='\t')}
 for row in rows:
     assert all(row.values()), row
-    if row['scenario_id'] != 'dropped':
+    if row['scenario_id'] == row['source_test']:
+        assert retained.get(row['source_test']), row
+        assert (root.parent.parent / row['source_test']).is_file(), row
+    elif row['scenario_id'] != 'dropped':
         assert (root / 'scenarios' / row['scenario_id'] / 'scenario.sh').is_file(), row
 for path in list((root / 'scenarios').glob('repo-state-*/scenario.sh')) + list(root.glob('repo-state*fixture.sh')):
     text = path.read_text()
