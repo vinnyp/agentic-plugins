@@ -34,6 +34,68 @@ write_review_pin_marker() {
   } > "$marker"
 }
 
+# Task outcome reporting: a successful dispatch need not produce a commit.
+NOOP="$TMP/noop"; new_phase_repo "$NOOP"
+noop_head="$(git -C "$NOOP" rev-parse HEAD)"
+out="$("$SELF_DIR/coding-build-phase.sh" codex "$TMP/plan.md" "$NOOP" 1 --build-cmd true 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] && printf '%s\n' "$out" | grep -qF 'Task 1 made no changes' &&
+  ! printf '%s\n' "$out" | grep -q committed &&
+  [ "$(git -C "$NOOP" rev-parse HEAD)" = "$noop_head" ] ||
+  { echo "$out"; echo 'FAIL: no-op task, no false line'; exit 1; }
+echo 'test no-op task, no false line PASS'
+
+mkdir -p "$TMP/outcomebin"
+cat > "$TMP/outcomebin/coding-dispatch.sh" <<'STUB'
+#!/usr/bin/env bash
+echo change >> "$2/tracked.txt"
+if [ "${WORKER_COMMITS:-0}" -eq 1 ]; then
+  git -C "$2" add -A && git -C "$2" commit -qm worker
+fi
+STUB
+chmod +x "$TMP/outcomebin/coding-dispatch.sh"
+OWN="$TMP/worker-commit"; new_phase_repo "$OWN"
+out="$(PATH="$TMP/outcomebin:$PATH" WORKER_COMMITS=1 "$SELF_DIR/coding-build-phase.sh" codex "$TMP/plan.md" "$OWN" 1 --build-cmd true 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] && printf '%s\n' "$out" | grep -qF 'Task 1 committed by the worker (' &&
+  ! printf '%s\n' "$out" | grep -qF 'made no changes' ||
+  { echo "$out"; echo 'FAIL: worker committed its own work'; exit 1; }
+echo 'test worker committed its own work PASS'
+
+FAIL_COMMIT="$TMP/fail-commit"; new_phase_repo "$FAIL_COMMIT"
+printf '#!/usr/bin/env bash\nexit 1\n' > "$FAIL_COMMIT/.git/hooks/pre-commit"
+chmod +x "$FAIL_COMMIT/.git/hooks/pre-commit"
+out="$(PATH="$TMP/outcomebin:$PATH" "$SELF_DIR/coding-build-phase.sh" codex "$TMP/plan.md" "$FAIL_COMMIT" 1 --build-cmd true 2>&1)"; rc=$?
+[ "$rc" -ne 0 ] && ! printf '%s\n' "$out" | grep -q committed ||
+  { echo "$out"; echo 'FAIL: commit failure stops the phase'; exit 1; }
+echo 'test commit failure stops the phase PASS'
+
+mkdir -p "$TMP/noopbin"
+cat > "$TMP/noopbin/codex" <<'STUB'
+#!/usr/bin/env bash
+wd=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = -C ]; then wd="$2"; shift 2; else shift; fi
+done
+if [ ! -e "$NOOP_SEEN" ]; then
+  touch "$NOOP_SEEN"
+  printf '{"status":"complete","files_written":[],"timestamp":"2026-01-01T00:00:00Z"}\n' > "$wd/_coding-result.json"
+else
+  echo change >> "$wd/agent_made_this.txt"
+fi
+STUB
+chmod +x "$TMP/noopbin/codex"
+NEXT="$TMP/noop-next"; new_phase_repo "$NEXT"
+next_head="$(git -C "$NEXT" rev-parse HEAD)"
+printf '### Task 1: noop\nnoop\n### Task 2: change\nchange\n' > "$TMP/noop-next.md"
+out="$(PATH="$SELF_DIR:$TMP/noopbin:$PATH" NOOP_SEEN="$TMP/noop-seen" "$SELF_DIR/coding-build-phase.sh" codex "$TMP/noop-next.md" "$NEXT" 1 2 --worktree --build-cmd true 2>&1)"; rc=$?
+next_branch="$(printf '%s\n' "$out" | sed -n 's/.*PHASE=ok worktree=[^ ]* branch=\([^ ]*\) .*/\1/p')"
+[ "$rc" -eq 0 ] && [ -n "$next_branch" ] &&
+  printf '%s\n' "$out" | grep -qF 'Task 1 made no changes' &&
+  printf '%s\n' "$out" | grep -qF 'Task 2 committed (' &&
+  [ "$(git -C "$NEXT" rev-list --count "$next_head..$next_branch")" -eq 1 ] &&
+  [ "$(git -C "$NEXT" show "$next_branch:agent_made_this.txt")" = change ] ||
+  { echo "$out"; echo 'FAIL: worktree no-op, then next task'; exit 1; }
+echo 'test worktree no-op, then next task PASS'
+
 "$SELF_DIR/coding-build-phase.sh" codex "$TMP/plan.md" "$TMP" 1 --build-cmd "pytest -q" >/dev/null 2>&1
 grep -qF "pytest -q" "$CD_ARGS_FILE" || { echo "FAIL: --build-cmd not passed through"; exit 1; }
 grep -q "go build" "$CD_ARGS_FILE" && { echo "FAIL: hardcoded go gate leaked"; exit 1; }
