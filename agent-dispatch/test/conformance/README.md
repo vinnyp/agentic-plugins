@@ -36,8 +36,8 @@ Perl SHA numbering shared across each scenario’s files (`<SHA1>`, `<SHA2>`,
 with unambiguous `base_sha` prefixes sharing their full SHA token), then
 `normalise.sed` for
 `cd-<timestamp>-<pid>` and `phase-<name>-<timestamp>-<pid>` slugs, and whitespace-delimited
-`pid=`, epoch `pinned_at=`, and `elapsed=<seconds>s` fields. No lines are
-dropped. Generated `REVIEW_OUTFILE` paths named `dispatch-review.<random>`
+`pid=`, epoch `pinned_at=`, and `elapsed=<seconds>s` fields. Only the exact Bash setpgid race and
+repo-state null-byte command-substitution warning lines are dropped. Generated `REVIEW_OUTFILE` paths named `dispatch-review.<random>`
 and eight-digit namespace hashes under `/.worktrees/` also normalise; the
 latter depend on the fresh scratch repo's absolute path. Brief fingerprints
 remain significant because they are derived from the input brief's contents.
@@ -260,8 +260,10 @@ The obsolete watchdog-only wrapper was also removed. Bash descriptor channels,
 function serialization, payload framing, completion tokens, caller shell flags,
 and implementation allocation/batching policies are dropped because the spec
 removes that transport. Deterministic slow Git substitutes for Git-version
-dependent FIFO blocking probes. `source-allowlist.tsv` explains test-helper
-sourcing and the small existing producer fault-injection suite.
+dependent FIFO blocking probes. The sourcing check permits scenarios to source
+fixtures under
+`test/conformance/`, never implementation files under `bin/`.
+`source-allowlist.tsv` lists only accepted suite exceptions.
 
 These goldens are recorded through `baseline-tree.sh` at the pinned BASELINE
 SHA. Fixtures use fixed identities and synthetic reviewers; each child is
@@ -271,7 +273,7 @@ an incomplete drift diagnostic, and pin release.
 ### Probe test rewrite
 
 Run `bash agent-dispatch/test/test-conformance-probes.sh` for the migrated probe
-cases. Five `probe-*` scenarios exercise `coding-preflight.sh`,
+cases. Six `probe-*` scenarios exercise `coding-preflight.sh`,
 `agent-dispatch-doctor`, and the existing public `dispatch-worker` flows with
 synthetic runtimes. No scenario sources an implementation file. Fixtures keep
 independent assertions for model parsing, role defaults and overrides,
@@ -282,15 +284,15 @@ metadata requests without launching a turn.
 
 `rewrite-map.tsv` enumerates the original cases and loop inputs. Public missing
 binary errors replace the private probes' advisory return codes. Empty model
-parser inputs, cached shell variables, caller traps and signals aimed at a
-private function subshell are explicitly dropped with reasons; these are not
-published command interfaces. The default form timeout is observed at the timer
+parser inputs, cached shell variables, and caller traps are explicitly dropped
+with reasons. Public TERM and HUP cancellation is retained in
+`probe-codex-cancellation`. The default form timeout is observed at the timer
 boundary and with a real eleven-second synthetic reply. Codex bounds include
 invalid inputs and all accepted integer units. No real agent or long gate runs.
 
 Goldens are captured through `baseline-tree.sh` at the pinned `BASELINE` SHA.
 Each scenario returns zero only after its public-command assertions pass;
-its output records the completed cases. All five have finite budgets and no
+its output records the completed cases. All six have finite budgets and no
 retry. Scratch and implementation paths use the standard harness placeholders.
 
 ### Review clone test rewrite
@@ -316,8 +318,9 @@ The scenario locates disposable worktrees with Git's public porcelain output.
 `rewrite-map.tsv` also accounts for the retained review-launch FIFO matrix,
 allocation and snapshot failures, and portable-stat helper/integration checks.
 Their `scenario_id` cells name the retained test paths; reasons live in
-`source-allowlist.tsv`. Review-launch sources only test environment reset and
-portable timer selection. Portable-stat directly tests helper return values
+`source-allowlist.tsv`. `test-review-launch.sh` sources `timeout-bin.sh` and
+`test-env-reset.sh` as accepted exceptions. `test-portable-stat.sh` has no published CLI for its
+direct helper checks; it directly tests helper return values
 and invokes mutation verification/sweep commands; it is retained as the small
 helper exception and cannot run when mutation tools are prohibited.
 The harness suite checks the anchored implementation-sourcing pattern across
@@ -337,3 +340,25 @@ fixture path in the scenario, keeping scratch paths out of its stderr golden.
 That empty stderr observation was recaptured from the pinned baseline archive;
 the remaining observations are unchanged. A comparison failure now prints a
 normalized unified diff labelled `expected` and `actual`.
+
+### Audit additions
+
+`clone-never-converges` moves a source tag after every mirror fetch and requires
+exit 4, the exact mismatched-refs diagnostic, and removal of the destination.
+`repo-state-query-redaction` checks that a hooksPath query token never appears
+in compare output. Their goldens were captured from the pinned baseline archive.
+
+`repo-state-cli-no-timer` places the fixture's no-op timeout first on PATH.
+Both commands must finish within five seconds and fail closed. On the baseline,
+the no-op prevents the operation from starting: snapshot returns unreadable
+and compare reports missing completion. This checks the bound and refusal,
+but cannot prove slow Git was interrupted by a deadline.
+
+`probe-codex-cancellation` signals only the public preflight PID it started.
+The sleeping stub publishes its own PID for liveness checks; no ancestry lookup
+or signal to that PID occurs. It requires exits 143/129, child disappearance
+within five seconds, and removal of probe directories. CANCEL-001: the pinned
+baseline fails the child-disappearance assertion for public cancellation.
+Failure cleanup waits for the finite stub to exit before returning. Its baseline
+golden records the failure; the probe suite deliberately still requires success.
+A production cancellation fix is outside this test-only change.

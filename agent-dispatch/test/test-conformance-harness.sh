@@ -16,11 +16,32 @@ with (conformance / 'rewrite-map.tsv').open() as stream:
     migrated = {row['source_test'] for row in csv.DictReader(stream, delimiter='\t')}
 paths = set((conformance / 'scenarios').glob('*/scenario.sh'))
 paths.update(root / name for name in migrated if (root / name).exists())
-pattern = re.compile(r'^[ \t]*(source|\.)[ \t]+.*lib/', re.M)
+pattern = re.compile(r'^[ \t]*(?:source|\.)[ \t]+(.+)$', re.M)
+def scenario_source_allowed(operand):
+    match = re.fullmatch(
+        r'"\$\((?:CDPATH=\'\' )?cd (?:-- )?"\$\(dirname (?:-- )?"\$0"\)/\.\./\.\." && pwd\)/([a-zA-Z0-9_/.-]+\.sh)"',
+        operand)
+    if not match:
+        return False
+    target = (conformance / match[1]).resolve()
+    return conformance.resolve() in target.parents and target.is_file()
+
+
+assert scenario_source_allowed('"$(cd "$(dirname "$0")/../.." && pwd)/repo-state-fixture.sh"')
+for operand in [
+    '"$(cd "$(dirname "$0")/../.." && pwd)/../../bin/lib/repo-state.sh"',
+    '"$IMPL_BIN/lib/repo-state.sh"',
+    '"$IMPL_BIN/codex-exec-probe.sh"',
+]:
+    assert not scenario_source_allowed(operand), operand
+
 for path in sorted(paths):
     name = str(path.relative_to(root))
-    if pattern.search(path.read_text()):
-        assert allowed.get(name), f'{name}: implementation sourcing without allowlist reason'
+    for operand in pattern.findall(path.read_text()):
+        if path.parent.parent == conformance / 'scenarios':
+            assert scenario_source_allowed(operand), (name, operand)
+        else:
+            assert allowed.get(name), f'{name}: sourcing without allowlist reason'
 SOURCE_GUARD
 work=$(mktemp -d "${TMPDIR:-/tmp}/conformance-test.XXXXXX")
 [ -n "$work" ] || exit 1
@@ -77,6 +98,17 @@ printf 'id\ttag\tissue\tbudget_s\tretry\nsample\tpreserve\t\t2\t0\n' > "$h/golde
 bash "$h/run.sh" --impl "$work/impl" --out "$work/a"
 bash "$h/run.sh" --impl "$work/impl" --out "$work/b"
 bash "$h/compare.sh" "$work/a" "$work/b" || fail 'two runs with tool paths compare clean'
+for side in a b; do
+  for stream in stdout stderr; do
+    cp "$work/$side/sample/$stream" "$work/saved-stream"
+    printf '/example/bin/lib/repo-state.sh: line 123: warning: command substitution: ignored null byte in input\n' >> "$work/$side/sample/$stream"
+    bash "$h/compare.sh" "$work/a" "$work/b" || fail 'null byte warning ignored'
+    cp "$work/saved-stream" "$work/$side/sample/$stream"
+  done
+done
+printf 'different null byte diagnostic\n' >> "$work/b/sample/stderr"
+if bash "$h/compare.sh" "$work/a" "$work/b" > "$work/diff"; then fail 'other null byte text still compared'; fi
+sed -i.bak '$d' "$work/b/sample/stderr"
 for stream in stdout stderr; do
 for side in a b; do
   cp "$work/$side/sample/$stream" "$work/saved-stream"

@@ -1,33 +1,4 @@
 source_test	reason
 test/test-conformance-feeds.sh	Internal verdict-feed write failures cannot be induced independently through a published command; this small fault-injection suite retains producer failure coverage.
-test/conformance/scenarios/repo-state-cli/scenario.sh	Sources only black-box test fixtures, never implementation libraries.
-test/conformance/scenarios/repo-state-cli-11-cli-invalid-limit/scenario.sh	Sources only black-box test fixtures, never implementation libraries.
-test/conformance/scenarios/repo-state-cli-13-hostile-output-path/scenario.sh	Sources only black-box test fixtures, never implementation libraries.
-test/conformance/scenarios/repo-state-cli-2-snapshot-slow-git/scenario.sh	Sources only black-box test fixtures, never implementation libraries.
-test/conformance/scenarios/repo-state-cli-4-compare-slow-git/scenario.sh	Sources only black-box test fixtures, never implementation libraries.
-test/conformance/scenarios/repo-state-cli-5-clean-repo/scenario.sh	Sources only black-box test fixtures, never implementation libraries.
-test/conformance/scenarios/repo-state-cli-8-external-kill/scenario.sh	Sources only black-box test fixtures, never implementation libraries.
-test/conformance/scenarios/repo-state-cli-9-healthy-special-file/scenario.sh	Sources only black-box test fixtures, never implementation libraries.
-test/conformance/scenarios/repo-state-cli-cli-signals/scenario.sh	Sources only black-box test fixtures, never implementation libraries.
-test/conformance/scenarios/repo-state-cli-compare-helper-failure/scenario.sh	Sources only black-box test fixtures, never implementation libraries.
-test/conformance/scenarios/repo-state-cli-failed-sweep/scenario.sh	Sources only black-box test fixtures, never implementation libraries.
-test/conformance/scenarios/repo-state-cli-fifo-over-temp/scenario.sh	Sources only black-box test fixtures, never implementation libraries.
-test/conformance/scenarios/repo-state-cli-premark-rename-failure/scenario.sh	Sources only black-box test fixtures, never implementation libraries.
-test/conformance/scenarios/repo-state-cli-slow-alternates-fifo/scenario.sh	Sources only black-box test fixtures, never implementation libraries.
-test/conformance/scenarios/repo-state-cli-slow-linked-worktree/scenario.sh	Sources only black-box test fixtures, never implementation libraries.
-test/conformance/scenarios/repo-state-cli-stale-bound-env/scenario.sh	Sources only black-box test fixtures, never implementation libraries.
-test/conformance/scenarios/repo-state-cli-symlink-path/scenario.sh	Sources only black-box test fixtures, never implementation libraries.
-test/conformance/scenarios/repo-state-cli-symlinked-gitdir/scenario.sh	Sources only black-box test fixtures, never implementation libraries.
-test/conformance/scenarios/repo-state-config/scenario.sh	Sources only black-box test fixtures, never implementation libraries.
-test/conformance/scenarios/repo-state-hooks-history/scenario.sh	Sources only black-box test fixtures, never implementation libraries.
-test/conformance/scenarios/repo-state-inputs/scenario.sh	Sources only black-box test fixtures, never implementation libraries.
-test/conformance/scenarios/repo-state-limits/scenario.sh	Sources only black-box test fixtures, never implementation libraries.
-test/conformance/scenarios/repo-state-parallel-pin/scenario.sh	Sources only black-box test fixtures, never implementation libraries.
-test/conformance/scenarios/repo-state-redaction/scenario.sh	Sources only black-box test fixtures, never implementation libraries.
-test/conformance/scenarios/repo-state-security/scenario.sh	Sources only black-box test fixtures, never implementation libraries.
-test/conformance/scenarios/repo-state-worker-compare-bound/scenario.sh	Sources only black-box test fixtures, never implementation libraries.
-test/conformance/scenarios/repo-state-worker-snapshot-bound/scenario.sh	Sources only black-box test fixtures, never implementation libraries.
-test/conformance/scenarios/repo-state-worker-limits/scenario.sh	Sources only black-box test fixtures, never implementation libraries.
-test/conformance/scenarios/repo-state-hash-failure/scenario.sh	Sources only black-box test fixtures, never implementation libraries.
 bin/test-review-launch.sh	Calls published dispatch-worker; timeout-bin.sh selects a portable outer test deadline and test-env-reset.sh isolates caller settings. Retains real-Git FIFO matrix without adding a timer tool.
 bin/test-portable-stat.sh	Direct stat dialect, uid, mtime and special-bit helper results have no published CLI; tree-identity integration invokes mutation tools and retains installed BSD/GNU coverage. Small helper exception; execution requires mutation-tool authorization.

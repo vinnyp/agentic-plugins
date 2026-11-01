@@ -32,6 +32,6 @@ bash "$c/run.sh" --impl "${IMPL_BIN:-$here/../bin}" --out "$work/actual" --only 
 }
 grep -q '^PASS:' "$work/actual/clone-contract/stdout"
 mkdir "$work/expected"
-ln -s "$c/goldens/clone-contract" "$work/expected/clone-contract"
+for dir in "$c"/goldens/clone-*; do ln -s "$dir" "$work/expected/${dir##*/}"; done
 bash "$c/compare.sh" "$work/expected" "$work/actual"
 echo 'PASS: review clone public-command rewrite and complete mapping'

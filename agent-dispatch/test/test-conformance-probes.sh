@@ -39,7 +39,7 @@ python3 - "$work/actual" <<'PY'
 from pathlib import Path
 import sys
 paths = [p for p in Path(sys.argv[1]).iterdir() if p.is_dir()]
-assert len(paths) == 5, len(paths)
+assert len(paths) == 6, len(paths)
 for path in paths:
     assert (path / 'rc').read_text().strip() == '0', (path.name, (path / 'stdout').read_text(), (path / 'stderr').read_text())
     assert 'PASS' in (path / 'stdout').read_text(), path.name

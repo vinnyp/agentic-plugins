@@ -1,3 +1,4 @@
+/^.*\/lib\/repo-state\.sh: line [0-9]+: warning: command substitution: ignored null byte in input$/d
 # Bash can emit this harmless job-control race under load.
 /^.*: child setpgid \([0-9]+ to [0-9]+\): Operation not permitted$/d
 :again
