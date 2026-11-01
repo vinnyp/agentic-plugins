@@ -1,0 +1,2 @@
+agy auth probe healthy
+dispatch-worker: agy model: fixture model (coding, --model/MODEL)

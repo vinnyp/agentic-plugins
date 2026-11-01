@@ -1,0 +1,5 @@
+agy auth probe healthy
+dispatch-worker: agy model: gemini-4-argon-high (review, default)
+REVIEW_OUTFILE=<REVIEW_TMP> (rc=0)
+dispatch-worker: REVIEW FAILED — output too short (16B < 1200B min). A rc=0-but-empty/short agy review is NOT a pass; do NOT accept it. Fall back to a LOCAL reviewer (Claude Agent-tool peer-*-reviewer, or Opus verify-the-reviewer) — do NOT retry the wedged agy.
+DISPATCH_REVIEW_STATE=clean original_rc=8

@@ -1,0 +1,4 @@
+agy auth probe healthy
+dispatch-worker: agy model: gemini-4-argon-high (review, default)
+dispatch-worker: unknown agy persona: fixture-reviewer
+DISPATCH_REVIEW_STATE=skipped(not-launched) original_rc=2

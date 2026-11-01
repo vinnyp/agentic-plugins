@@ -1,0 +1,1 @@
+claude -p --model fixture\ model --permission-mode plan

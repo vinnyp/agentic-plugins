@@ -1,0 +1,5 @@
+agy auth probe healthy
+dispatch-worker: agy model: gemini-4-argon-high (review, default)
+dispatch-worker: review runs against committed HEAD in an isolated workspace; the real tree has uncommitted changes that are NOT included — commit them first or include the diff in the brief.
+dispatch-worker: brief names uncommitted files: tracked.txt — commit them or pass --allow-dirty
+DISPATCH_REVIEW_STATE=skipped(not-launched) original_rc=2

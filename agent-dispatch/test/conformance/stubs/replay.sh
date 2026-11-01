@@ -23,6 +23,12 @@ else
     exit 97
   done
 fi
+for file in stdout stderr rc; do
+  if [ ! -f "$recording/$file" ]; then
+    echo "stub $runtime: missing recording step $n ($file)" >&2
+    exit 97
+  fi
+done
 cat "$recording/stdout"
 cat "$recording/stderr" >&2
 rc=$(cat "$recording/rc")

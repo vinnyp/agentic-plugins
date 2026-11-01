@@ -1,0 +1,3 @@
+all models were rejected
+dispatch-worker: codex rejected the request at the auth/config layer (not a build failure) — every model was refused.
+dispatch-worker: fix codex auth/config, do NOT retry this as a build: run 'codex login' (ChatGPT) or set a valid OpenAI API key provider, and check ~/.codex/config.toml for a bad model_provider override or a stray Authorization header.

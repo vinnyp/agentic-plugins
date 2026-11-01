@@ -1,0 +1,1 @@
+dispatch-worker: --require-dep set but no go.mod at <SCN_TMP>/repo/go.mod

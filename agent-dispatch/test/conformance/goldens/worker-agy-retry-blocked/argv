@@ -1,0 +1,4 @@
+agy models
+agy agent
+agy --model gemini-4-argon-high --agent=fixture-reviewer --dangerously-skip-permissions
+agy --model gemini-4-argon-high --agent=fixture-reviewer --dangerously-skip-permissions

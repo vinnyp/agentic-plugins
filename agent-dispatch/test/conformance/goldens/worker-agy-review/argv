@@ -1,0 +1,3 @@
+agy models
+agy agent
+agy --model fixture\ model --agent=fixture-reviewer --dangerously-skip-permissions

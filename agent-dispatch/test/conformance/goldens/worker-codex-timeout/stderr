@@ -1,0 +1,2 @@
+dispatch-worker: peer agent exceeded the external 1s bound and was killed — treat as a BLOCKED phase, not a result (the agent's own --print-timeout is not a trustworthy bound)
+DISPATCH_REVIEW_STATE=clean original_rc=124

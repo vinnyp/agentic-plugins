@@ -1,0 +1,4 @@
+agy auth probe healthy
+dispatch-worker: agy model: fixture model (review, --model/MODEL)
+REVIEW_OUTFILE=<SCN_TMP>/review.md (rc=0)
+DISPATCH_REVIEW_STATE=clean original_rc=0

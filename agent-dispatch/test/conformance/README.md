@@ -115,3 +115,47 @@ leave a clean tree. Empty/unavailable worktrees, interrupted partial edits,
 marker-backed TDD commits preserved after gate failure or signal, committed worker salvage, removal overrides, stale bases, timeout, no-gate
 and inferred Go gates, marker exemptions, and phase failures have separate cases.
 The edit budgets total under 420 seconds, including the signal retry allowance.
+
+The worker slice runs with `bash agent-dispatch/test/test-conformance-worker.sh`
+(`IMPL_BIN` optionally selects another implementation). Its 45 scenarios use
+synthetic, numbered runtime recordings, including agy's models probe, persona
+roster, dispatch and retry. Short codex and Claude reviews preserve their ungated
+behavior; agy independently exercises the byte floor, evidence, each requirements
+row verdict, dirty brief refusal and opt-outs. Runtime wrappers create real
+source-config drift during review and sleep under the dispatcher's timeout.
+They never invoke a real agent or search for processes to signal.
+
+Worker goldens were captured with `baseline-tree.sh` at the SHA in `BASELINE`.
+Literal scratch, run and implementation paths use the same placeholders as the
+edit slice; context-specific temporary review names are normalised too, including
+BSD `mktemp -t` prefixes, longer suffixes and trailing punctuation. Stdin is part
+of comparison, including the injected preambles and retry's unchanged brief.
+The suite also asserts intent independently of golden comparison, and rejects
+missing recordings for any runtime with exit 97.
+
+`worker-coverage.tsv` accounts for exact dispatch-worker exit, output, flag and
+environment inventory rows. `worker-exemptions.tsv` gives a reason for each
+remaining row: documentation context, historical rejected runtime flags,
+coding-only census attribution, and state/clone/signal/environment details
+reserved for later slices. Both lists are closed: adding an inventory row of
+any of the four kinds fails the suite. The worker scenario budgets sum to 384
+seconds, with no harness retries.
+
+### Worker known defects
+
+- `worker-codex-child-env` preserves `CODING_DISPATCH_CHILD_ENV` reaching the
+  runtime. The synthetic child prints the received value to make leakage visible.
+- `worker-codex-orphan` preserves an orphaned `_coding-result.json` after a
+  successful direct worker dispatch. The synthetic child writes the marker;
+  automatic repository-state capture proves that it remains.
+
+These local references identify frozen observations, not fixes. No production
+entry point is modified by the worker capture task.
+
+The scripts retain Bash 3.2 syntax. On macOS, both the system Bash 3.2 and
+an already installed Bash 5.3 emitted intermittent `child setpgid: Operation not
+permitted` diagnostics from the existing bounded state probes during repeated
+verification. These diagnostics are neither discarded nor normalised, and can
+fail exact stderr comparison despite the independent scenario assertions passing.
+Two clean repeated local runs remain unverified; changing the production probe
+is outside this task's test-only scope.

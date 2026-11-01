@@ -1,0 +1,7 @@
+agy auth probe healthy
+dispatch-worker: agy model: gemini-4-argon-high (review, default)
+dispatch-worker: peer agent exceeded the external 5s bound and was killed — treat as a BLOCKED phase, not a result (the agent's own --print-timeout is not a trustworthy bound)
+REVIEW_OUTFILE=<REVIEW_TMP> (rc=124)
+dispatch-worker: agy review timed out (rc=124, 15B written before the kill) — retrying ONCE before falling back.
+REVIEW_OUTFILE=<REVIEW_TMP> (rc=0) [retry]
+DISPATCH_REVIEW_STATE=clean original_rc=0

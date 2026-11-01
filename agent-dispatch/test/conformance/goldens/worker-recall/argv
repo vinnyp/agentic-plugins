@@ -1,0 +1,1 @@
+codex exec --skip-git-repo-check -C <SCN_TMP>/repo --sandbox danger-full-access -
