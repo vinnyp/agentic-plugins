@@ -1,0 +1,9 @@
+command	flag	reason
+coding-build-phase.sh	--no-recall	Retired recall compatibility option; no longer part of the advertised interface.
+coding-build-phase.sh	--recall-project	Retired recall compatibility option; accepted and ignored with a warning.
+dispatch-worker	--network	Legacy alias for the documented --ceremony flag.
+mutation-sweep.sh	--control-cmd	Recognised in sweep-file records forwarded to mutation-verify; not a sweep CLI option.
+mutation-sweep.sh	--control-sed	Recognised in sweep-file records forwarded to mutation-verify; not a sweep CLI option.
+mutation-verify.sh	--help	Conventional help option; usage text describes the operation rather than listing itself.
+run-long-gate.sh	--help	Conventional help option; usage text describes the operation rather than listing itself.
+wrap-merge-body.sh	--help	Conventional help option; usage text describes the operation rather than listing itself.

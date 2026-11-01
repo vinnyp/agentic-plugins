@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# shellcheck source=replay.sh
+source "$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/replay.sh"
