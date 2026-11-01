@@ -1,30 +1,31 @@
+review-pinned 0
 HEAD 22d655def6c92ac5944765a9910bf86566ea8d86
 branches
 * main
-+ phase-repo-20261101031642-15351
++ phase-repo-<TS>-<PID>
 worktrees
 worktree <SCN_TMP>/repo
 HEAD 22d655def6c92ac5944765a9910bf86566ea8d86
 branch refs/heads/main
 
-worktree <SCN_TMP>/.worktrees/repo__ed833872/phase-repo-20261101031642-15351
+worktree <SCN_TMP>/.worktrees/repo__<HASH>/phase-repo-<TS>-<PID>
 HEAD 17835a27a657f6a68ef042352edfe0b4fc8c564b
-branch refs/heads/phase-repo-20261101031642-15351
+branch refs/heads/phase-repo-<TS>-<PID>
 tree <SCN_TMP>/repo
 status
 
 result 0
 patch <SCN_TMP>/repo/.git/coding-dispatch-last-fail.patch 0 0 -
 fail-patches
-tree <SCN_TMP>/.worktrees/repo__ed833872/phase-repo-20261101031642-15351
+tree <SCN_TMP>/.worktrees/repo__<HASH>/phase-repo-<TS>-<PID>
 status
 
 result 0
-patch <SCN_TMP>/repo/.git/worktrees/phase-repo-20261101031642-15351/coding-dispatch-last-fail.patch 0 0 -
+patch <SCN_TMP>/repo/.git/worktrees/phase-repo-<TS>-<PID>/coding-dispatch-last-fail.patch 0 0 -
 fail-patches
 worktree-directories
-repo__ed833872
-repo__ed833872/phase-repo-20261101031642-15351
-repo__ed833872/phase-repo-20261101031642-15351/.git
-repo__ed833872/phase-repo-20261101031642-15351/.gitignore
-repo__ed833872/phase-repo-20261101031642-15351/tracked.txt
+repo__<HASH>
+repo__<HASH>/phase-repo-<TS>-<PID>
+repo__<HASH>/phase-repo-<TS>-<PID>/.git
+repo__<HASH>/phase-repo-<TS>-<PID>/.gitignore
+repo__<HASH>/phase-repo-<TS>-<PID>/tracked.txt

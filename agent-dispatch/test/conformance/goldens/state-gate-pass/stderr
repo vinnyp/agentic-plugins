@@ -1,0 +1,3 @@
+gate-env: python=<SCN_TMP>/bin/python3 Python fixture ruff=<SCN_TMP>/bin/ruff ruff fixture
+GATE_TREE_PRE pwd=<SCN_TMP>/repo top=<SCN_TMP>/repo head=66390dafc65009e5d5a99ef60615e2b1b9dd06d3
+GATE_TREE_POST pwd=<SCN_TMP>/repo top=<SCN_TMP>/repo head=66390dafc65009e5d5a99ef60615e2b1b9dd06d3 code=0

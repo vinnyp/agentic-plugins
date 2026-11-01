@@ -1,0 +1,2 @@
+config fixture.changed (local:file:.git/config): (absent) -> <changed>
+observed_rc=2

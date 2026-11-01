@@ -1,0 +1,10 @@
+AUTONOMOUS-EXECUTION MODE (headless --print): there is NO human to approve.
+Do NOT produce a plan and stop, and do NOT ask for confirmation. Implement the change directly.
+Then run the build/vet/test gate (e.g. go build ./... && go vet ./... && go test ./...).
+ONLY when the gate is green, write the success marker as a JSON file at the ABSOLUTE path:
+  <SCN_TMP>/repo/_coding-result.json
+That marker file at that absolute path is the ONLY success signal. Your chat/narration output is IGNORED;
+do not claim success in prose — the marker is the proof. Work in the repo at: <SCN_TMP>/repo
+---- TASK BRIEF BELOW ----
+Review tracked.txt.
+

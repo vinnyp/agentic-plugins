@@ -1,0 +1,4 @@
+agy auth probe healthy
+dispatch-worker: agy model: gemini-4-argon-high (review, default)
+REVIEW_OUTFILE=<REVIEW_TMP> (rc=0)
+DISPATCH_REVIEW_STATE=clean original_rc=0

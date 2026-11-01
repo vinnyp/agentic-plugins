@@ -1,30 +1,31 @@
+review-pinned 0
 HEAD 22d655def6c92ac5944765a9910bf86566ea8d86
 branches
 * main
-+ cd-20261101031628-8314
++ cd-<TS>-<PID>
 worktrees
 worktree <SCN_TMP>/repo
 HEAD 22d655def6c92ac5944765a9910bf86566ea8d86
 branch refs/heads/main
 
-worktree <SCN_TMP>/.worktrees/repo__9cb482d1/cd-20261101031628-8314
+worktree <SCN_TMP>/.worktrees/repo__<HASH>/cd-<TS>-<PID>
 HEAD 22d655def6c92ac5944765a9910bf86566ea8d86
-branch refs/heads/cd-20261101031628-8314
+branch refs/heads/cd-<TS>-<PID>
 tree <SCN_TMP>/repo
 status
 
 result 0
 patch <SCN_TMP>/repo/.git/coding-dispatch-last-fail.patch 0 0 -
 fail-patches
-tree <SCN_TMP>/.worktrees/repo__9cb482d1/cd-20261101031628-8314
+tree <SCN_TMP>/.worktrees/repo__<HASH>/cd-<TS>-<PID>
 status
  M tracked.txt
 result 0
-patch <SCN_TMP>/repo/.git/worktrees/cd-20261101031628-8314/coding-dispatch-last-fail.patch 0 0 -
+patch <SCN_TMP>/repo/.git/worktrees/cd-<TS>-<PID>/coding-dispatch-last-fail.patch 0 0 -
 fail-patches
 worktree-directories
-repo__9cb482d1
-repo__9cb482d1/cd-20261101031628-8314
-repo__9cb482d1/cd-20261101031628-8314/.git
-repo__9cb482d1/cd-20261101031628-8314/.gitignore
-repo__9cb482d1/cd-20261101031628-8314/tracked.txt
+repo__<HASH>
+repo__<HASH>/cd-<TS>-<PID>
+repo__<HASH>/cd-<TS>-<PID>/.git
+repo__<HASH>/cd-<TS>-<PID>/.gitignore
+repo__<HASH>/cd-<TS>-<PID>/tracked.txt

@@ -1,0 +1,9 @@
+agy auth probe healthy
+dispatch-worker: agy model: gemini-4-argon-high (review, default)
+dispatch-worker: peer agent exceeded the external 5s bound and was killed — treat as a BLOCKED phase, not a result (the agent's own --print-timeout is not a trustworthy bound)
+REVIEW_OUTFILE=<REVIEW_TMP> (rc=124)
+dispatch-worker: agy review timed out (rc=124, 15B written before the kill) — retrying ONCE before falling back.
+dispatch-worker: peer agent exceeded the external 5s bound and was killed — treat as a BLOCKED phase, not a result (the agent's own --print-timeout is not a trustworthy bound)
+REVIEW_OUTFILE=<REVIEW_TMP> (rc=124) [retry]
+dispatch-worker: REVIEW FAILED — agy timed out again (rc=124, 1540B written) after one retry (returning rc 124 BLOCKED). A timed-out review is TRUNCATED and NOT a pass regardless of byte count; do NOT accept it. Re-run an agy lens once on codex if codex egress is approved, else use a Claude reviewer; a primary codex lens at rc 124 goes to Claude.
+DISPATCH_REVIEW_STATE=clean original_rc=124

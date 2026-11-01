@@ -1,0 +1,2 @@
+dispatch-worker: a2a-endpoint runtime not yet wired (deferred until a runtime exposes A2A)
+DISPATCH_REVIEW_STATE=skipped(not-launched) original_rc=3

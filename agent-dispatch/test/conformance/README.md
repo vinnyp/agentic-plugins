@@ -115,3 +115,97 @@ leave a clean tree. Empty/unavailable worktrees, interrupted partial edits,
 marker-backed TDD commits preserved after gate failure or signal, committed worker salvage, removal overrides, stale bases, timeout, no-gate
 and inferred Go gates, marker exemptions, and phase failures have separate cases.
 The edit budgets total under 420 seconds, including the signal retry allowance.
+
+The worker slice runs with `bash agent-dispatch/test/test-conformance-worker.sh`
+(`IMPL_BIN` optionally selects another implementation). Its 47 scenarios use
+synthetic, numbered runtime recordings, including agy's models probe, persona
+roster, dispatch and retry. Short codex and Claude reviews preserve their ungated
+behavior; agy independently exercises the byte floor, evidence, each requirements
+row verdict, dirty brief refusal and opt-outs. Runtime wrappers create real
+source-config drift during review and sleep under the dispatcher's timeout.
+They never invoke a real agent or search for processes to signal.
+
+Worker goldens were captured with `baseline-tree.sh` at the SHA in `BASELINE`.
+Literal scratch, run and implementation paths use the same placeholders as the
+edit slice; context-specific temporary review names are normalised too, including
+BSD `mktemp -t` prefixes, longer suffixes and trailing punctuation. Stdin is part
+of comparison, including the injected preambles and retry's unchanged brief.
+The suite also asserts intent independently of golden comparison, and rejects
+missing recordings for any runtime with exit 97.
+
+`worker-coverage.tsv` accounts for exact dispatch-worker exit, output, flag and
+environment inventory rows. `worker-exemptions.tsv` gives a reason for each
+remaining row: documentation context, historical rejected runtime flags,
+coding-only census attribution, and state/clone/signal/environment details
+reserved for later slices. Both lists are closed: adding an inventory row of
+any of the four kinds fails the suite. The worker scenario budgets sum to 394
+seconds, with no harness retries.
+
+### Worker known defects
+
+- `worker-pin-fail` stubs `review-pin.sh` to return 3. Both baseline and current
+  dispatchers call `review_launch_failure 125`, which unconditionally exits 3;
+  the requested exit 125 cannot be captured without changing production code.
+  The golden preserves exit 3 and verifies that no reviewer launches.
+
+- `worker-codex-child-env` preserves `CODING_DISPATCH_CHILD_ENV` reaching the
+  runtime. The synthetic child prints the received value to make leakage visible.
+- `worker-codex-orphan` preserves an orphaned `_coding-result.json` after a
+  successful direct worker dispatch. The synthetic child writes the marker;
+  automatic repository-state capture proves that it remains.
+
+These local references identify frozen observations, not fixes. No production
+entry point is modified by the worker capture task.
+
+The scripts retain Bash 3.2 syntax. The exact Bash job-control race diagnostic
+`child setpgid (... to ...): Operation not permitted` is normalised on both
+stdout and stderr; other diagnostics remain significant.
+
+Call records compare physical working directories, source/clone placement,
+global Git config paths and SHA-256 digests, visible sentinels, and source pin
+presence. State capture also checks pin release and the configured review directory.
+
+The state slice runs with `bash agent-dispatch/test/test-conformance-state.sh`
+(`IMPL_BIN` optionally selects another implementation). Its 25 scenarios call
+only public entry points. Pin status, duplicate pin refusal, release, invalid TTL,
+and a two-second clock advance with a one-second TTL exercise the lifecycle.
+The pinned coding dispatch must return 9 without invoking a runtime or changing
+tracked content. Clone scenarios exercise private content/config/refs, absence
+of alternates, guarded removal, filter refusal and unsuitable destinations.
+
+State comparisons snapshot real configuration, hooks and replacement refs;
+each change must return critical (2). Touching a tracked file without changing
+its bytes is harmless and must return clean (0). Gate scenarios exercise venv
+selection and opt-out, command exit propagation, and expected-root refusal.
+Long-gate scenarios use only immediate finite commands and synchronously wait
+for their completion; pending-log timeout uses an empty log with zero wait.
+No full gate or real runtime is launched. The scenario budgets total 300 seconds,
+with no retries. `state-coverage.tsv` accounts for exact inventory rows across
+all five commands; `state-exemptions.tsv` records individual exemptions for
+contextual documentation and interfaces outside this slice. The suite injects
+new rows for every command/kind pair to prove that accounting fails closed.
+
+Goldens use BASELINE 1.9.5's full SHA from `BASELINE`. The capture used a read-only
+`git archive` export of that tree's entry points and accompanying docs, avoiding
+worktree metadata changes. Scratch, run and implementation paths are replaced
+literally with the existing harness placeholders. Fixture clocks and tool
+version replies keep host differences out of observations. All implementation
+verdicts, diagnostics, statuses and automatic Git-state observations remain
+significant. Independent assertions check intent before golden comparison.
+
+### State known defects
+
+These local issue records use the same issue-reference convention as the worker
+slice; they describe frozen observations and do not change production behavior.
+
+- STATE-001 (`state-compare-filter`): a newly configured `filter.*.clean` actually
+  runs during snapshotting, before config comparison reports critical. The
+  fixture's filter writes a sentinel, and the scenario asserts it exists.
+- STATE-002 (`state-compare-deleted`, `state-compare-truncated`): deleting or
+  emptying a standalone baseline yields input error 3, rather than critical 2.
+  Both are refused; neither is clean. Preserve these observations as known
+  defects against the requested critical contract.
+- Issue #267 (`state-compare-socket`): a real Unix-domain socket at
+  `.git/fsmonitor--daemon.ipc` is classified as nonregular/critical even though
+  Git's fsmonitor socket can be legitimate. The fixture binds a relative path
+  to avoid platform Unix-socket path-length limits, then closes its own socket.

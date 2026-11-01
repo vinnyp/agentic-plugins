@@ -1,1 +1,1 @@
-codex exec --dangerously-bypass-approvals-and-sandbox -C <SCN_TMP>/.worktrees/repo__7f21c8c3/cd-20261101031612-780 -
+codex exec --dangerously-bypass-approvals-and-sandbox -C <SCN_TMP>/.worktrees/repo__<HASH>/cd-<TS>-<PID> -

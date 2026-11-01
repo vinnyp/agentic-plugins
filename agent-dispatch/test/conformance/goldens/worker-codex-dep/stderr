@@ -1,0 +1,1 @@
+dispatch-worker: MISSING promised dep 'example.invalid/required' in <SCN_TMP>/repo/go.mod — likely a silent dep-substitution; FAIL the phase and treat as STATUS: blocked.

@@ -1,0 +1,92 @@
+dispatch-worker — dispatch a worker brief to a runtime.
+
+  --brief <path>     Path to the brief (markdown). Required for actual dispatch.
+  --runtime R        codex (default, token-frugal) | agy | claude | workflow | a2a-endpoint
+                     Env-var: RUNTIME=codex (or agy|claude|workflow|a2a-endpoint). Explicit flag wins.
+                     claude: native headless one-shot ('claude -p'); --model sets the model;
+                     --ceremony auto-approves tools (--dangerously-skip-permissions) for an
+                     unattended tool-using task; bounded by the same external --timeout.
+  --shape S          mechanical (default — codex sweet spot) | parallel-with-claude-reasoning (suggests workflow)
+  --review           Read-only PEER-REVIEW mode. The brief is a reviewer persona, not an
+                     edit task; the deliverable is the review on STDOUT (redirect to a file).
+                     For agy this swaps the autonomous-EDIT preamble (implement + write
+                     _coding-result.json marker, "narration ignored") for a read-only REVIEW
+                     preamble (do not edit, no marker, stdout IS the deliverable) — the edit
+                     preamble otherwise corrupts a review by telling it its output doesn't
+                     count. For codex it keeps the read-only sandbox and skips the dep gate.
+                     Env-var: REVIEW=1. Use with --runtime agy|codex.
+                     For the agy runtime, a dirty real tree whose brief names an
+                     uncommitted/untracked path REFUSES (exit 2, path listed) before any
+                     review clone is created or the worker is launched, instead of only
+                     warning — a stderr warning alone has twice failed to stop a long
+                     review running against a tree missing the file it was briefed to
+                     review. A dirty tree whose dirty files are NOT
+                     named in the brief still only warns. See --allow-dirty to opt out.
+  --allow-dirty      Keep the old warn-and-proceed behavior even when the brief names an
+                     uncommitted/untracked path in a dirty tree (--review, agy runtime).
+                     Env-var: DISPATCH_ALLOW_DIRTY=1.
+  Review gate env:   DISPATCH_MIN_REVIEW_BYTES sets the byte backstop (default 1200).
+                     DISPATCH_REVIEW_REQUIRE_EVIDENCE=0 disables the evidence gate;
+                     only the exact value 0 disables it. DISPATCH_REVIEW_WT_DIR sets
+                     the preferred parent for isolated review workspaces.
+  --model M          Model to pass to agy (--model M). Multi-word names with spaces/parens
+                     are kept intact as a single argument. Role defaults are defined in
+                     bin/lib/agy-models.sh: review "gemini-4-argon-high";
+                     edit/coding "gemini-3.8-flash-medium".
+                     An explicit --model always overrides the default. For codex, threaded
+                     as 'codex exec -m M'; unset lets codex pick its config model.
+  --agent NAME       Installed agy persona to dispatch as. agy-only; the name is
+                     validated against 'agy agent' before dispatch so a typo cannot
+                     silently fall back to agy's general assistant.
+  --ceremony         Allow the worker network + out-of-cwd writes (codex: --sandbox
+                     danger-full-access). OFF by default (codex stays read-only/no-network).
+                     Use ONLY for briefs that legitimately need git/gh network ceremony.
+  --require-dep M    Assert module M is present in go.mod AFTER the worker returns.
+                     Repeatable. Catches codex's silent dep-substitution: a green
+                     build that swapped a promised driver for a hand-built
+                     alternative FAILS this gate (exit 4) instead of being narrated
+                     past. Substring match against go.mod require lines.
+
+Dedicated exit codes (so the orchestrator can tell an environment/account block
+from a real build failure and NOT retry it as a build):
+  4   --require-dep gate failed (a promised dep is missing from go.mod).
+  5   codex rejected every model at the auth/config layer (run 'codex login' /
+      fix ~/.codex/config.toml — do NOT retry as a build).
+  6   codex hit a usage/rate limit (it can EXIT 0 on a zero-edit no-op — wait for
+      the reset shown in the output, then re-dispatch; treat as BLOCKED).
+  7   agy not authenticated (run `agy` to sign in) — do NOT retry as a build.
+  8   review ran but output is below the byte floor or lacks review evidence
+      (a requirements-mode per-row ALIGN/OBJECT/ABSTAIN table counts as evidence).
+      Fall back to a LOCAL reviewer.
+  9   agy effective model missing from live models; update bin/lib/agy-models.sh
+      or pass --model (MODEL). No dispatch was started.
+  10  --review: the source repo's config, hooks, commit identity, an unreadable after-snapshot, or a compare that could not complete triggered a review failure (see DISPATCH_REVIEW_STATE)
+  DISPATCH_REVIEW_STATE=clean|warn(<n>)|critical(<n>)|skipped(<reason>) original_rc=<n> is emitted on stderr for every --review run.
+  124 blocked (timeout; after one internal retry for agy --review).
+      Other runtimes/modes surface 124 on the first timeout.
+  --module-dir D     Directory containing the go.mod to verify with --require-dep
+                     (default: $MODULE_DIR or the current dir).
+  --workdir D        Repo root the worker edits (absolute). For the agy runtime this
+                     pins the success-marker path in the injected autonomous preamble to
+                     $D/_coding-result.json so agy doesn't write it to a sandbox cwd the
+                     orchestrator can't find. Env-var: WORKDIR. Default: the current dir.
+  --timeout T        External wall-clock bound on a peer-agent exec (codex/agy),
+                     passed to the external timer (e.g. 15m, 600s). A peer agent's
+                     OWN --print-timeout is NOT a trustworthy bound (agy 2026-05-31:
+                     hung 6.5h past a 15m setting, retry hung past 8m), so the
+                     dispatch path imposes an EXTERNAL one. A timeout kill surfaces
+                     as a blocked phase (exit 124), not a silent success.
+                     Env-var: TIMEOUT=15m. Set to `0` or `none` to disable.
+                     Grace before SIGKILL: $KILL_AFTER (default 30s).
+  --recall-project P Deprecated no-op. Accepted for compatibility; emits a
+                     deprecation notice because recall is retired.
+  --no-recall        Deprecated no-op. Accepted for compatibility.
+  --help             Show this.
+
+Dispatch priority (the calling agent's contract):
+
+  1. Direct execution by the calling session — bounded sequential ceremony work.
+  2. codex / agy — PREFERRED for delegation (separate runtime, doesn't load
+     main session, token-frugal). default: codex
+  3. Claude dynamic workflow — ONLY when each fan-out step requires Claude
+     reasoning AND user confirms the substantial token cost.

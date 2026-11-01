@@ -1,0 +1,1 @@
+Error: --log path is a symlink, refusing to append through it: <SCN_TMP>/gate.log

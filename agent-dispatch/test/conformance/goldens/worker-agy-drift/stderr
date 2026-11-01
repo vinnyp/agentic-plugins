@@ -1,0 +1,8 @@
+agy auth probe healthy
+dispatch-worker: agy model: gemini-4-argon-high (review, default)
+REVIEW_OUTFILE=<REVIEW_TMP> (rc=0)
+dispatch-worker: SOURCE REPO CHANGED DURING THE REVIEW WINDOW (reviewer or a concurrent session; cause not attributed).
+Inspect and restore these before committing in that repo; the review body stands only if every change is known concurrent work:
+  config conformance.drift (local:file:.git/config): (absent) -> <changed>
+(the run would otherwise have exited 0)
+DISPATCH_REVIEW_STATE=critical(1) original_rc=0

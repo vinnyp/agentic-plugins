@@ -1,0 +1,2 @@
+dispatch-worker: --review forces read-only (plan mode) for claude; ignoring --ceremony.
+DISPATCH_REVIEW_STATE=clean original_rc=0

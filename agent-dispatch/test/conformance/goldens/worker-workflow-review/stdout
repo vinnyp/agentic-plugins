@@ -1,0 +1,7 @@
+{
+  "runtime": "workflow",
+  "next_action": "request_claude_workflow",
+  "brief": "Review tracked.txt.\n",
+  "shape": "mechanical",
+  "warn": "Claude dynamic workflows consume substantially more tokens than a typical session. Confirm before dispatch."
+}

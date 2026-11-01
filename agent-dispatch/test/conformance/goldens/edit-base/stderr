@@ -1,10 +1,10 @@
 DISPATCH_BASE base_ref=main base_sha=22d655d
 DISPATCH_BASE_TRACKING base_ref=main branch=main status=no-upstream
-Preparing worktree (new branch 'cd-20261101031610-99667')
+Preparing worktree (new branch 'cd-<TS>-<PID>')
 HEAD is now at 22d655d fixture
 ▶ brief fingerprint: 3a2c9bfff601 (18B); first line: Edit tracked.txt.
-▶ dispatching to codex in <SCN_TMP>/.worktrees/repo__a3202b63/cd-20261101031610-99667 (timeout 5s, base 22d655def6c9)…
+▶ dispatching to codex in <SCN_TMP>/.worktrees/repo__<HASH>/cd-<TS>-<PID> (timeout 5s, base 22d655def6c9)…
 gate-env: python=<SCN_TMP>/bin/python3 Python fixture ruff=absent
-GATE_TREE_PRE pwd=<SCN_TMP>/.worktrees/repo__a3202b63/cd-20261101031610-99667 top=<SCN_TMP>/.worktrees/repo__a3202b63/cd-20261101031610-99667 head=22d655def6c92ac5944765a9910bf86566ea8d86
-GATE_TREE_POST pwd=<SCN_TMP>/.worktrees/repo__a3202b63/cd-20261101031610-99667 top=<SCN_TMP>/.worktrees/repo__a3202b63/cd-20261101031610-99667 head=22d655def6c92ac5944765a9910bf86566ea8d86 code=0
+GATE_TREE_PRE pwd=<SCN_TMP>/.worktrees/repo__<HASH>/cd-<TS>-<PID> top=<SCN_TMP>/.worktrees/repo__<HASH>/cd-<TS>-<PID> head=22d655def6c92ac5944765a9910bf86566ea8d86
+GATE_TREE_POST pwd=<SCN_TMP>/.worktrees/repo__<HASH>/cd-<TS>-<PID> top=<SCN_TMP>/.worktrees/repo__<HASH>/cd-<TS>-<PID> head=22d655def6c92ac5944765a9910bf86566ea8d86 code=0
 ℹ no/incomplete marker, but diff + build passed — marker synthesized from the diff

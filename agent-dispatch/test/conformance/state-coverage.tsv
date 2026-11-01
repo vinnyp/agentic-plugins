@@ -1,0 +1,75 @@
+gate-run.sh	env	DISPATCH_NO_VENV	`<cwd>/.venv/bin` to `PATH` when that directory exists (unless `--no-venv` / `DISPATCH_NO_VENV`)	docs/commands.md	state-gate-venv	stdout:Python fixture
+gate-run.sh	env	DISPATCH_NO_VENV	| `DISPATCH_NO_VENV` | `gate-run.sh` via `lib/gate-env.sh` | any value = same as `--no-venv` |	docs/commands.md	state-gate-venv	stdout:Python fixture
+gate-run.sh	env	GATE_TREE_POST	It also stamps `GATE_TREE_PRE`/`GATE_TREE_POST` (pwd, toplevel, HEAD) around the command, and with	docs/commands.md	state-gate-pass	stderr:GATE_TREE_POST
+gate-run.sh	env	GATE_TREE_PRE	It also stamps `GATE_TREE_PRE`/`GATE_TREE_POST` (pwd, toplevel, HEAD) around the command, and with	docs/commands.md	state-gate-pass	stderr:GATE_TREE_PRE
+gate-run.sh	env	GATE_TREE_UNTRUSTWORTHY	`--expect-root` exits `2` with `GATE_TREE_UNTRUSTWORTHY` if the gate ended up in a different repo	docs/commands.md	state-gate-moved	stderr:GATE_TREE_UNTRUSTWORTHY
+gate-run.sh	env	PATH	`<cwd>/.venv/bin` to `PATH` when that directory exists (unless `--no-venv` / `DISPATCH_NO_VENV`)	docs/commands.md	state-gate-venv	stdout:venv fixture
+gate-run.sh	exit	2	`--expect-root` exits `2` with `GATE_TREE_UNTRUSTWORTHY` if the gate ended up in a different repo	docs/commands.md	state-gate-moved	stdout:observed_rc=2
+gate-run.sh	exit	2	literal exit 2	bin/gate-run.sh	state-gate-moved	stdout:observed_rc=2
+gate-run.sh	flag	--expect-root	`--expect-root` exits `2` with `GATE_TREE_UNTRUSTWORTHY` if the gate ended up in a different repo	docs/commands.md	state-gate-moved	stderr:GATE_TREE_UNTRUSTWORTHY
+gate-run.sh	flag	--expect-root	gate-run.sh [--expect-root <path>] [--no-venv] -- <command...>	docs/commands.md	state-gate-moved	stderr:GATE_TREE_UNTRUSTWORTHY
+gate-run.sh	flag	--no-venv	`<cwd>/.venv/bin` to `PATH` when that directory exists (unless `--no-venv` / `DISPATCH_NO_VENV`)	docs/commands.md	state-gate-pass	stdout:gate passed
+gate-run.sh	flag	--no-venv	gate-run.sh [--expect-root <path>] [--no-venv] -- <command...>	docs/commands.md	state-gate-pass	stdout:gate passed
+repo-state-check	exit	0	--help, -h: print usage and exit 0	help/repo-state-check.txt	state-compare-clean	stdout:observed_rc=0
+repo-state-check	exit	0	Compare prints named change lines and exits 0 for clean, 1 for warn-only drift or 2 for	docs/commands.md	state-compare-clean	stdout:observed_rc=0
+repo-state-check	exit	0	"compare exits: 0 clean, 1 warn, 2 critical or not evaluated (a ""state:"" line or ""config: <unreadable after review>""), 3 input error (unreadable before file, internal temp failure or a failed helper), 64 usage"	help/repo-state-check.txt	state-compare-clean	stdout:observed_rc=0
+repo-state-check	exit	0	literal exit 0	bin/repo-state-check	state-compare-clean	stdout:observed_rc=0
+repo-state-check	exit	0	"snapshot exits: 0 ok, 3 failure or not evaluated (<file> then reads ""unreadable""), 64 usage"	help/repo-state-check.txt	state-compare-clean	stdout:observed_rc=0
+repo-state-check	exit	0	temp directory and remove them after inspection. Snapshot exits 0 on success or 3 for an	docs/commands.md	state-compare-clean	stdout:observed_rc=0
+repo-state-check	exit	0	whose baseline already holds special files warns on stderr and still exits 0.	docs/commands.md	state-compare-clean	stdout:observed_rc=0
+repo-state-check	exit	0	| `0` | Snapshot succeeded, compare clean, or help printed |	docs/commands.md	state-compare-clean	stdout:observed_rc=0
+repo-state-check	exit	2	Compare prints named change lines and exits 0 for clean, 1 for warn-only drift or 2 for	docs/commands.md	state-compare-config	stdout:observed_rc=2
+repo-state-check	exit	2	"compare exits: 0 clean, 1 warn, 2 critical or not evaluated (a ""state:"" line or ""config: <unreadable after review>""), 3 input error (unreadable before file, internal temp failure or a failed helper), 64 usage"	help/repo-state-check.txt	state-compare-config	stdout:observed_rc=2
+repo-state-check	exit	2	"critical drift. Exit 2 also means ""not evaluated"" when the output is a `state:` line"	docs/commands.md	state-compare-config	stdout:observed_rc=2
+repo-state-check	exit	2	snapshots and output is redacted. Treat compare exit 2 as review rc 10; exits 3/64 mean	docs/commands.md	state-compare-config	stdout:observed_rc=2
+repo-state-check	exit	2	| `2` | Compare found critical drift (including an unreadable after-snapshot), or not evaluated |	docs/commands.md	state-compare-config	stdout:observed_rc=2
+repo-state-check	exit	2	| `64` | Usage error; unlike the usual house exit 2, which here means critical drift |	docs/commands.md	state-compare-config	stdout:observed_rc=2
+repo-state-check	exit	3	"Snapshot exit 3 also means ""not evaluated"": a timeout, a missing completion record or an"	docs/commands.md	state-compare-deleted	stdout:observed_rc=3
+repo-state-check	exit	3	"compare exits: 0 clean, 1 warn, 2 critical or not evaluated (a ""state:"" line or ""config: <unreadable after review>""), 3 input error (unreadable before file, internal temp failure or a failed helper), 64 usage"	help/repo-state-check.txt	state-compare-deleted	stdout:observed_rc=3
+repo-state-check	exit	3	compare writes `state: compare could not complete (<helper> failed)` and exits 3. Config changes are critical except these benign keys: `branch.*.*`	docs/commands.md	state-compare-deleted	stdout:observed_rc=3
+repo-state-check	exit	3	literal exit 3	bin/repo-state-check	state-compare-deleted	stdout:observed_rc=3
+repo-state-check	exit	3	over 64 MiB are not evaluated and produce exit 3 before launch or exit 10 afterwards.	docs/commands.md	state-compare-deleted	stdout:observed_rc=3
+repo-state-check	exit	3	"snapshot exits: 0 ok, 3 failure or not evaluated (<file> then reads ""unreadable""), 64 usage"	help/repo-state-check.txt	state-compare-deleted	stdout:observed_rc=3
+repo-state-check	exit	3	snapshots and output is redacted. Treat compare exit 2 as review rc 10; exits 3/64 mean	docs/commands.md	state-compare-deleted	stdout:observed_rc=3
+repo-state-check	exit	3	temp directory and remove them after inspection. Snapshot exits 0 on success or 3 for an	docs/commands.md	state-compare-deleted	stdout:observed_rc=3
+repo-state-check	exit	3	the `unreadable` pre-mark cannot be made by rename, snapshot exits 3 without writing to the	docs/commands.md	state-compare-deleted	stdout:observed_rc=3
+repo-state-check	exit	3	| `3` | Snapshot failure, broken install, unreadable before-snapshot, internal temp failure, a failed compare helper, or not evaluated |	docs/commands.md	state-compare-deleted	stdout:observed_rc=3
+review-clone.sh	exit	0	clean checkout and matching refs. Exit 0 means success; 3 refuses an unsuitable path or source;	docs/commands.md	state-clone-isolation	stdout:observed_rc=0
+review-clone.sh	exit	0	literal exit 0	bin/review-clone.sh	state-clone-isolation	stdout:observed_rc=0
+review-clone.sh	exit	3	clean checkout and matching refs. Exit 0 means success; 3 refuses an unsuitable path or source;	docs/commands.md	state-clone-unsafe	stdout:observed_rc=3
+review-clone.sh	exit	4	4 means a faithful checkout is unavailable (including filters, LFS, partial clones or invalid	docs/commands.md	state-clone-filter	stdout:observed_rc=4
+review-clone.sh	flag	--remove	review-clone.sh --remove <abs parent> <that path>	docs/commands.md	state-clone-isolation	stdout:clone removed; source retained
+review-clone.sh	flag	--remove	usage: review-clone.sh <source-worktree> <dest> [<sha>] | --remove <parent> <path>	help/review-clone.sh.txt	state-clone-isolation	stdout:clone removed; source retained
+review-pin.sh	env	DISPATCH_REVIEW_PIN_TTL_SECS	Pins expire: `DISPATCH_REVIEW_PIN_TTL_SECS` (default 14400 = 4h). A stale pin is removed on the	docs/commands.md	state-pin-stale	stdout:stale marker removed
+review-pin.sh	env	DISPATCH_REVIEW_PIN_TTL_SECS	| `DISPATCH_REVIEW_PIN_TTL_SECS` | `review-pin.sh` | `14400` — after this a pin is stale and auto-removed |	docs/commands.md	state-pin-stale	stdout:stale marker removed
+review-pin.sh	exit	0	next `status`/`pin`, so a SIGKILLed review does not wedge the repo forever. Exit codes: `0` ok,	docs/commands.md	state-pin-duplicate	stdout:observed_rc=0
+review-pin.sh	exit	1	`1` no pin (or a stale one, now removed), `2` usage/error, `3` bounded setup could not	docs/commands.md	state-pin-stale	stdout:observed_rc=1
+review-pin.sh	exit	2	`1` no pin (or a stale one, now removed), `2` usage/error, `3` bounded setup could not	docs/commands.md	state-pin-duplicate	stdout:observed_rc=2
+review-pin.sh	exit	2	literal exit 2	bin/review-pin.sh	state-pin-duplicate	stdout:observed_rc=2
+review-pin.sh	exit	9	`<git-dir>/review-pinned`. `coding-dispatch.sh` and `coding-build-phase.sh` refuse with exit `9`	docs/commands.md	state-pin-block	stdout:observed_rc=9
+review-pin.sh	exit	9	complete. Edit dispatch refuses with exit `9` when status returns `3`.	docs/commands.md	state-pin-block	stdout:observed_rc=9
+review-pin.sh	flag	--label	review-pin.sh pin --marker <path> --sha <sha> [--label <text>]	docs/commands.md	state-pin-duplicate	stdout:label=fixture
+review-pin.sh	flag	--label	review-pin.sh pin <workdir> [--label <text>] | release <workdir> | status <workdir>	docs/commands.md	state-pin-duplicate	stdout:label=fixture
+run-long-gate.sh	exit	0	Exit codes: launch `0` (or `2` launch failure, `4` a gate is already running for that workdir);	docs/commands.md	state-long-pass	stdout:observed_rc=0
+run-long-gate.sh	exit	0	literal exit 0	bin/run-long-gate.sh	state-long-pass	stdout:observed_rc=0
+run-long-gate.sh	exit	2	Exit codes: launch `0` (or `2` launch failure, `4` a gate is already running for that workdir);	docs/commands.md	state-long-missing	stdout:observed_rc=2
+run-long-gate.sh	exit	2	literal exit 2	bin/run-long-gate.sh	state-long-missing	stdout:observed_rc=2
+run-long-gate.sh	exit	2	the gate's own exit code, `124` on timeout, `2` without `--log`.	docs/commands.md	state-long-missing	stdout:observed_rc=2
+run-long-gate.sh	flag	--cmd	run-long-gate.sh --cmd <shell-command> [--log <path>] [--workdir <dir>] [--label <name>] [--allow-concurrent]	docs/commands.md	state-long-pass	stdout:short gate
+run-long-gate.sh	flag	--label	run-long-gate.sh --cmd <shell-command> [--log <path>] [--workdir <dir>] [--label <name>] [--allow-concurrent]	docs/commands.md	state-long-pass	stdout:short gate
+run-long-gate.sh	flag	--log	With no `--log`, the log is created with `mktemp` under `${TMPDIR:-/tmp}`, mode 0600, unique per	docs/commands.md	state-long-pass	stdout:LOG_PATH=
+run-long-gate.sh	flag	--log	launch. A `--log` you supply is appended to — unless it is a **symlink**, which is refused (exit	docs/commands.md	state-long-pass	stdout:LOG_PATH=
+run-long-gate.sh	flag	--log	run-long-gate.sh --cmd <shell-command> [--log <path>] [--workdir <dir>] [--label <name>] [--allow-concurrent]	docs/commands.md	state-long-pass	stdout:LOG_PATH=
+run-long-gate.sh	flag	--log	run-long-gate.sh --status --log <path>	docs/commands.md	state-long-pass	stdout:LOG_PATH=
+run-long-gate.sh	flag	--log	run-long-gate.sh --wait   --log <path> [--timeout-secs N] [--poll-secs N]	docs/commands.md	state-long-pass	stdout:LOG_PATH=
+run-long-gate.sh	flag	--log	the gate's own exit code, `124` on timeout, `2` without `--log`.	docs/commands.md	state-long-pass	stdout:LOG_PATH=
+run-long-gate.sh	flag	--poll-secs	run-long-gate.sh --wait   --log <path> [--timeout-secs N] [--poll-secs N]	docs/commands.md	state-long-pass	stdout:observed_rc=0
+run-long-gate.sh	flag	--status	`--status` `0` finished (prints `GATE_EXIT=<n>`), `2` no/missing log, `3` still running; `--wait`	docs/commands.md	state-long-fail	stdout:GATE_EXIT=7
+run-long-gate.sh	flag	--status	run-long-gate.sh --status --log <path>	docs/commands.md	state-long-fail	stdout:GATE_EXIT=7
+run-long-gate.sh	flag	--timeout-secs	run-long-gate.sh --wait   --log <path> [--timeout-secs N] [--poll-secs N]	docs/commands.md	state-long-pass	stdout:observed_rc=0
+run-long-gate.sh	flag	--wait	`--status` `0` finished (prints `GATE_EXIT=<n>`), `2` no/missing log, `3` still running; `--wait`	docs/commands.md	state-long-fail	stdout:observed_rc=7
+run-long-gate.sh	flag	--wait	run-long-gate.sh --wait   --log <path> [--timeout-secs N] [--poll-secs N]	docs/commands.md	state-long-fail	stdout:observed_rc=7
+run-long-gate.sh	flag	--workdir	run-long-gate.sh --cmd <shell-command> [--log <path>] [--workdir <dir>] [--label <name>] [--allow-concurrent]	docs/commands.md	state-long-pass	stdout:short gate
+run-long-gate.sh	exit	124	literal exit 124	bin/run-long-gate.sh	state-long-pending	stdout:observed_rc=124
+run-long-gate.sh	exit	124	the gate's own exit code, `124` on timeout, `2` without `--log`.	docs/commands.md	state-long-pending	stdout:observed_rc=124
+run-long-gate.sh	exit	3	literal exit 3	bin/run-long-gate.sh	state-long-pending	stdout:observed_rc=3

@@ -1,0 +1,15 @@
+review-pinned 0
+HEAD <SHA1>
+branches
+* main
+worktrees
+worktree <SCN_TMP>/repo
+HEAD <SHA1>
+branch refs/heads/main
+tree <SCN_TMP>/repo
+status
+
+result 0
+patch <SCN_TMP>/repo/.git/coding-dispatch-last-fail.patch 0 0 -
+fail-patches
+worktree-directories

@@ -1,0 +1,2 @@
+dispatch-worker: launch-time git setup could not complete; no reviewer was launched (DISPATCH_SNAPSHOT_TIMEOUT_SECS)
+DISPATCH_REVIEW_STATE=skipped(not-launched) original_rc=3

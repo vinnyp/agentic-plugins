@@ -1,0 +1,3 @@
+usage limit reached
+dispatch-worker: codex appears to have hit a usage/rate limit (not a build result) — a limit signature appeared and codex produced no substantive output (0B).
+dispatch-worker: do NOT accept this as a completed fix (codex can exit 0 with a zero-edit no-op on a limit). Wait for the reset time shown above, then re-dispatch. Treat as a BLOCKED phase.

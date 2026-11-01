@@ -1,0 +1,3 @@
+agy auth probe healthy
+dispatch-worker: agy model 'gemini-4-argon-high' (review, default) not offered by installed agy — update <IMPL_BIN>/lib/agy-models.sh (or your --model/MODEL override); run 'agy models' for current IDs
+DISPATCH_REVIEW_STATE=skipped(not-launched) original_rc=9
