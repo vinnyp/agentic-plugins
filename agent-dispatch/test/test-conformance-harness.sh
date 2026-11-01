@@ -56,10 +56,13 @@ printf 'id\ttag\tissue\tbudget_s\tretry\nsample\tpreserve\t\t2\t0\n' > "$h/golde
 bash "$h/run.sh" --impl "$work/impl" --out "$work/a"
 bash "$h/run.sh" --impl "$work/impl" --out "$work/b"
 bash "$h/compare.sh" "$work/a" "$work/b" || fail 'two runs with tool paths compare clean'
+for stream in stdout stderr; do
 for side in a b; do
-  printf '/example/bin/lib/repo-state.sh: child setpgid (91436 to 91436): Operation not permitted\n' >> "$work/$side/sample/stderr"
+  cp "$work/$side/sample/$stream" "$work/saved-stream"
+  printf '/example/bin/lib/repo-state.sh: child setpgid (91436 to 91436): Operation not permitted\n' >> "$work/$side/sample/$stream"
   bash "$h/compare.sh" "$work/a" "$work/b" || fail 'setpgid race line ignored'
-  cp "$work/recording/stderr" "$work/$side/sample/stderr"
+  cp "$work/saved-stream" "$work/$side/sample/$stream"
+done
 done
 printf '/example/bin/lib/repo-state.sh: child setpgid (91436 to 91436): Operation not permitted extra\n' >> "$work/b/sample/stderr"
 if bash "$h/compare.sh" "$work/a" "$work/b" > "$work/diff"; then fail 'other setpgid text still compared'; fi
@@ -71,12 +74,13 @@ bash "$h/compare.sh" "$work/a" "$work/symlinked" || fail 'symlinked impl compare
 cp "$work/a/sample/scn_tmp" "$work/b/sample/scn_tmp"
 cp "$work/a/sample/run_dir" "$work/b/sample/run_dir"
 cp "$work/a/sample/stdout" "$work/original"
-for change in rc stderr exit dispatch argv state; do
+for change in call rc stderr exit dispatch argv state; do
   cp "$work/original" "$work/b/sample/stdout"
   cp "$work/a/sample/rc" "$work/b/sample/rc"
   cp "$work/a/sample/stderr" "$work/b/sample/stderr"
   cp "$work/a/sample/argv" "$work/b/sample/argv"
   case "$change" in
+    call) printf 'changed\n' >> "$work/b/sample/call.codex.1"; field=call.codex.1 ;;
     rc) printf '9\n' > "$work/b/sample/rc"; field=rc ;;
     stderr) printf 'different\n' >> "$work/b/sample/stderr"; field=stderr ;;
     exit) printf 'exit=1 sha=0123456789abcdef0123456789abcdef01234567 pid=123\n' >> "$work/a/sample/stdout"; printf 'exit=2 sha=0123456789abcdef0123456789abcdef01234567 pid=123\n' >> "$work/b/sample/stdout"; field=stdout ;;
@@ -87,6 +91,7 @@ for change in rc stderr exit dispatch argv state; do
   if bash "$h/compare.sh" "$work/a" "$work/b" > "$work/diff"; then fail "$change difference detected"; fi
   case "$(cat "$work/diff")" in *"sample/$field"*) ;; *) fail "$change names file" ;; esac
   cp "$work/original" "$work/a/sample/stdout"
+  cp "$work/a/sample/call.codex.1" "$work/b/sample/call.codex.1"
 done
 cp "$work/a/sample/state" "$work/b/sample/state"
 rm "$work/b/sample/state"

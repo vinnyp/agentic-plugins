@@ -94,3 +94,14 @@ for name in ('row-align', 'row-object', 'row-abstain'):
 assert 'DISPATCH_REVIEW_STATE=clean original_rc=0' in read('agy-spoof-valid', 'stderr')
 
 assert read('agy-timeout', 'stdout').count('Minor: tracked.txt:1') == 2
+
+assert 'MISSING promised dep' in read('codex-dep', 'stderr')
+assert 'dep present: example.invalid/required' in read('codex-dep-pass', 'stderr')
+assert read('pin-fail', 'argv') == ''
+for runtime in ('codex', 'agy', 'claude'):
+    call = read(runtime + '-review', 'call.' + runtime + ('.3' if runtime == 'agy' else '.1'))
+    assert 'source-review-pinned 1' in call
+    assert 'review-pinned 0' in read(runtime + '-review', 'state')
+assert 'repository different-clone' in read('agy-review', 'call.agy.3')
+assert 'repository source' in read('codex-review', 'call.codex.1')
+assert read('env', 'state').endswith('worktree-directories\n')

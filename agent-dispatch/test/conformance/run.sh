@@ -62,9 +62,9 @@ for scenario in "$here"/scenarios/*/scenario.sh; do
     [ -n "$SCN_TMP" ] || exit 1
     mkdir -p "$SCN_TMP/home" "$SCN_TMP/tmp" "$SCN_TMP/cache" "$SCN_TMP/config" "$SCN_TMP/data" "$SCN_TMP/state" "$SCN_TMP/runtime"
     printf '%s\n' "$SCN_TMP" > "$out/$id/scn_tmp"
-    : > "$SCN_TMP/home/gitconfig"
+    printf '[conformance]\n\tsentinel = operator-fixture\n[credential]\n\thelper = conformance-helper\n' > "$SCN_TMP/home/gitconfig"
     : > "$SCN_TMP/argv"
-    for input in "$out/$id"/stdin.*; do
+    for input in "$out/$id"/stdin.* "$out/$id"/call.*; do
       [ ! -f "$input" ] || rm "$input"
     done
     rc=0
@@ -92,7 +92,7 @@ for scenario in "$here"/scenarios/*/scenario.sh; do
     fi
     printf '%s\n' "$rc" > "$out/$id/rc"
     cp "$SCN_TMP/argv" "$out/$id/argv"
-    for input in "$SCN_TMP"/stdin.*; do
+    for input in "$SCN_TMP"/stdin.* "$SCN_TMP"/call.*; do
       [ ! -f "$input" ] || cp "$input" "$out/$id/"
     done
     rm -rf "$SCN_TMP"

@@ -1,5 +1,5 @@
 LOG_PATH=<SCN_TMP>/gate.log
-pid=4279
+pid=<PID>
 observed_rc=0
 GATE_EXIT=0
 observed_rc=0

@@ -4,6 +4,7 @@ dispatch-worker	env	DISPATCH_MIN_REVIEW_BYTES	  gates decide whether the review 
 dispatch-worker	env	DISPATCH_MIN_REVIEW_BYTES	| `DISPATCH_MIN_REVIEW_BYTES` | `dispatch-worker` | `1200` byte backstop for `--review` |	docs/commands.md	worker-agy-floor-env	rc=0
 dispatch-worker	env	DISPATCH_REVIEW_REQUIRE_EVIDENCE	| `DISPATCH_REVIEW_REQUIRE_EVIDENCE` | `dispatch-worker` | exactly `0` disables the labelled-severity / `file:line` evidence gate |	docs/commands.md	worker-agy-evidence-off	rc=0
 dispatch-worker	env	DISPATCH_REVIEW_WT_DIR	| `DISPATCH_REVIEW_WT_DIR` | `dispatch-worker` | preferred parent directory for private review clones; stale clones older than six hours may be reaped across sibling repos |	docs/commands.md	worker-env	stdin.agy.3:/reviews/dispatch-review-wt.
+dispatch-worker	env	GIT_CONFIG_GLOBAL	config via `GIT_CONFIG_GLOBAL`. Unsuitable repos (partial clones, filters, LFS or an invalid	docs/commands.md	worker-agy-review	call.agy.3:global-sha256=
 dispatch-worker	env	KILL_AFTER	Group signals, including Ctrl-C, reach the agent on every path within `KILL_AFTER`.	docs/commands.md	worker-codex-timeout	rc=124
 dispatch-worker	env	KILL_AFTER	| `KILL_AFTER` | `dispatch-worker` | `30s` grace before SIGKILL (`timeout -k`) |	docs/commands.md	worker-codex-timeout	rc=124
 dispatch-worker	env	MODEL	`--model`/`MODEL` (dispatch-worker) or `AGY_MODEL` (coding) for a one-off override.	docs/commands.md	worker-env	argv:--model fixture\ model
@@ -17,15 +18,14 @@ dispatch-worker	env	TIMEOUT	| `TIMEOUT` | `dispatch-worker` | `15m`; `0` or `non
 dispatch-worker	env	TMPDIR	`TMPDIR` writable.	docs/commands.md	worker-agy-review	stderr:REVIEW_OUTFILE=
 dispatch-worker	env	TMPDIR	`TMPDIR`; these also share the same-user boundary.	docs/commands.md	worker-agy-review	stderr:REVIEW_OUTFILE=
 dispatch-worker	env	WORKDIR	| `RUNTIME`, `MODEL`, `WORKDIR`, `MODULE_DIR`, `CEREMONY`, `REVIEW` | `dispatch-worker` | env twins of the matching flags |	docs/commands.md	worker-env	stdin.agy.3:Review tracked.txt.
-dispatch-worker	exit	0	  6   codex hit a usage/rate limit (it can EXIT 0 on a zero-edit no-op — wait for	help/dispatch-worker.txt	worker-codex-edit	rc=0
-dispatch-worker	exit	0	an empty or one-line review comes back as the binary's own exit code, usually `0`. **codex is the	docs/commands.md	worker-codex-edit	rc=0
+dispatch-worker	exit	0	  6   codex hit a usage/rate limit (it can EXIT 0 on a zero-edit no-op — wait for	help/dispatch-worker.txt	worker-codex-usage	rc=6
+dispatch-worker	exit	0	an empty or one-line review comes back as the binary's own exit code, usually `0`. **codex is the	docs/commands.md	worker-codex-review	rc=0
 dispatch-worker	exit	0	literal exit 0	bin/dispatch-worker	worker-codex-edit	rc=0
 dispatch-worker	exit	0	| `0` | the runtime returned success |	docs/commands.md	worker-codex-edit	rc=0
-dispatch-worker	exit	0	| `6` | codex hit a usage/rate limit. It can exit 0 on a zero-edit no-op, so this is detected from the limit signature *plus* an absence of substantive output. Treat as blocked. |	docs/commands.md	worker-codex-edit	rc=0
+dispatch-worker	exit	0	| `6` | codex hit a usage/rate limit. It can exit 0 on a zero-edit no-op, so this is detected from the limit signature *plus* an absence of substantive output. Treat as blocked. |	docs/commands.md	worker-codex-usage	rc=6
 dispatch-worker	exit	1	literal exit 1	bin/dispatch-worker	worker-native-ten	rc=1
 dispatch-worker	exit	1	| other | the runtime's own exit code; native 10 is remapped to 1 during review |	docs/commands.md	worker-native-ten	rc=1
 dispatch-worker	exit	10	  10  --review: the source repo's config, hooks, commit identity, an unreadable after-snapshot, or a compare that could not complete triggered a review failure (see DISPATCH_REVIEW_STATE)	help/dispatch-worker.txt	worker-codex-drift	rc=10
-dispatch-worker	exit	10	- a commit exempted by a forged `refs/remotes/*` ref (warning, because concurrent pulls must not exit 10);	docs/commands.md	worker-codex-drift	rc=10
 dispatch-worker	exit	10	After launch, snapshot timeouts are unreadable state and critical (exit 10).	docs/commands.md	worker-codex-drift	rc=10
 dispatch-worker	exit	10	unreadable after-snapshot exit 10, overriding every post-launch result. A compare that	docs/commands.md	worker-codex-drift	rc=10
 dispatch-worker	exit	10	| `10` | source repo changed during the review window or compare could not complete; inspect and restore named changes before committing, discard the body unless every change is known concurrent work, then re-run. Known residual: a review run can still execute a planted `filter.*.clean` during the after-snapshot's `git status`. |	docs/commands.md	worker-codex-drift	rc=10
@@ -37,12 +37,10 @@ dispatch-worker	exit	124	literal exit 124	bin/dispatch-worker	worker-agy-timeout
 dispatch-worker	exit	124	| `124` | blocked (timeout; after one internal retry for agy `--review`) |	docs/commands.md	worker-agy-timeout	rc=124
 dispatch-worker	exit	2	                     uncommitted/untracked path REFUSES (exit 2, path listed) before any	help/dispatch-worker.txt	worker-agy-dirty	rc=2
 dispatch-worker	exit	2	  one of the uncommitted paths, it refuses (exit 2) before launching, because a review of a tree	docs/commands.md	worker-agy-dirty	rc=2
-dispatch-worker	exit	2	`--agent NAME` is agy-only and rejects an unknown or unavailable persona roster with exit 2 before	docs/commands.md	worker-agy-dirty	rc=2
+dispatch-worker	exit	2	`--agent NAME` is agy-only and rejects an unknown or unavailable persona roster with exit 2 before	docs/commands.md	worker-agent-missing	rc=2
 dispatch-worker	exit	2	literal exit 2	bin/dispatch-worker	worker-agy-dirty	rc=2
 dispatch-worker	exit	2	| `2` | usage error, unreadable brief, unknown runtime, or the dirty-tree review refusal |	docs/commands.md	worker-agy-dirty	rc=2
-dispatch-worker	exit	3	Launch-time setup, including the before snapshot, fails closed with exit 3 on timeout	docs/commands.md	worker-a2a-endpoint-edit	rc=3
 dispatch-worker	exit	3	literal exit 3	bin/dispatch-worker	worker-a2a-endpoint-edit	rc=3
-dispatch-worker	exit	3	passing `--dangerously-skip-permissions`. Allocation refusal remains exit 3.	docs/commands.md	worker-a2a-endpoint-edit	rc=3
 dispatch-worker	exit	3	| `3` | runtime binary unavailable, isolated workspace allocation failed, or launch-time git setup timed out/could not complete (including a bound’s `mktemp` failure); no reviewer launched for setup failures. Fix the environment; do not fall back on the same repo. |	docs/commands.md	worker-a2a-endpoint-edit	rc=3
 dispatch-worker	exit	4	                     alternative FAILS this gate (exit 4) instead of being narrated	help/dispatch-worker.txt	worker-codex-dep	rc=4
 dispatch-worker	exit	4	  4   --require-dep gate failed (a promised dep is missing from go.mod).	help/dispatch-worker.txt	worker-codex-dep	rc=4
@@ -75,13 +73,13 @@ dispatch-worker	flag	--brief	dispatch-worker --brief <path> [--runtime codex|agy
 dispatch-worker	flag	--ceremony	                     --ceremony auto-approves tools (--dangerously-skip-permissions) for an	help/dispatch-worker.txt	worker-codex-edit	argv:--sandbox danger-full-access
 dispatch-worker	flag	--ceremony	                [--review] [--ceremony] [--model M] [--agent NAME] [--workdir D] [--timeout T]	docs/commands.md	worker-codex-edit	argv:--sandbox danger-full-access
 dispatch-worker	flag	--ceremony	  --ceremony         Allow the worker network + out-of-cwd writes (codex: --sandbox	help/dispatch-worker.txt	worker-codex-edit	argv:--sandbox danger-full-access
-dispatch-worker	flag	--ceremony	* **claude** — `--permission-mode plan` is forced (`--ceremony` ignored). Same story: the review's	docs/commands.md	worker-codex-edit	argv:--sandbox danger-full-access
-dispatch-worker	flag	--ceremony	* **codex** — `--sandbox read-only` is forced (an explicit `--ceremony` is overridden, and it says	docs/commands.md	worker-codex-edit	argv:--sandbox danger-full-access
-dispatch-worker	flag	--ceremony	| `claude` | `claude -p [--model M] < brief` | brief on stdin. `--ceremony` → `--dangerously-skip-permissions`; `--review` → `--permission-mode plan` (read-only, and it ignores `--ceremony`). |	docs/commands.md	worker-codex-edit	argv:--sandbox danger-full-access
+dispatch-worker	flag	--ceremony	* **claude** — `--permission-mode plan` is forced (`--ceremony` ignored). Same story: the review's	docs/commands.md	worker-claude-review	argv:--permission-mode plan
+dispatch-worker	flag	--ceremony	* **codex** — `--sandbox read-only` is forced (an explicit `--ceremony` is overridden, and it says	docs/commands.md	worker-codex-review	argv:--sandbox read-only
+dispatch-worker	flag	--ceremony	| `claude` | `claude -p [--model M] < brief` | brief on stdin. `--ceremony` → `--dangerously-skip-permissions`; `--review` → `--permission-mode plan` (read-only, and it ignores `--ceremony`). |	docs/commands.md	worker-claude-edit	argv:--dangerously-skip-permissions
 dispatch-worker	flag	--ceremony	| `codex` (default) | `codex exec [-m M] [-C D] --sandbox <mode> -` , brief on stdin | `--sandbox read-only` (no network, no writes). `--workdir` is passed as `-C` when it names an existing directory. `--ceremony` → `--sandbox danger-full-access` + `--skip-git-repo-check`. |	docs/commands.md	worker-codex-edit	argv:--sandbox danger-full-access
 dispatch-worker	flag	--dangerously-skip-permissions	                     --ceremony auto-approves tools (--dangerously-skip-permissions) for an	help/dispatch-worker.txt	worker-agy-review	argv:--dangerously-skip-permissions
 dispatch-worker	flag	--dangerously-skip-permissions	passing `--dangerously-skip-permissions`. Allocation refusal remains exit 3.	docs/commands.md	worker-agy-review	argv:--dangerously-skip-permissions
-dispatch-worker	flag	--dangerously-skip-permissions	| `claude` | `claude -p [--model M] < brief` | brief on stdin. `--ceremony` → `--dangerously-skip-permissions`; `--review` → `--permission-mode plan` (read-only, and it ignores `--ceremony`). |	docs/commands.md	worker-agy-review	argv:--dangerously-skip-permissions
+dispatch-worker	flag	--dangerously-skip-permissions	| `claude` | `claude -p [--model M] < brief` | brief on stdin. `--ceremony` → `--dangerously-skip-permissions`; `--review` → `--permission-mode plan` (read-only, and it ignores `--ceremony`). |	docs/commands.md	worker-claude-edit	argv:--dangerously-skip-permissions
 dispatch-worker	flag	--help	  --help             Show this.	help/dispatch-worker.txt	worker-help	stdout:dispatch-worker —
 dispatch-worker	flag	--help	isn't the in-repo edit cycle `coding-dispatch.sh` owns. Run `dispatch-worker --help` for the	docs/commands.md	worker-help	stdout:dispatch-worker —
 dispatch-worker	flag	--model	                     An explicit --model always overrides the default. For codex, threaded	help/dispatch-worker.txt	worker-agy-review	argv:--model fixture\ model
@@ -90,9 +88,8 @@ dispatch-worker	flag	--model	                [--review] [--ceremony] [--model M]
 dispatch-worker	flag	--model	      or pass --model (MODEL). No dispatch was started.	help/dispatch-worker.txt	worker-agy-review	argv:--model fixture\ model
 dispatch-worker	flag	--model	  --model M          Model to pass to agy (--model M). Multi-word names with spaces/parens	help/dispatch-worker.txt	worker-agy-review	argv:--model fixture\ model
 dispatch-worker	flag	--model	`--model`/`MODEL` (dispatch-worker) or `AGY_MODEL` (coding) for a one-off override.	docs/commands.md	worker-agy-review	argv:--model fixture\ model
-dispatch-worker	flag	--model	its `CODING_INVOKE` includes the effective `--model`. Matching ignores case; tierless	docs/commands.md	worker-agy-review	argv:--model fixture\ model
 dispatch-worker	flag	--model	"| `agy` | `agy [--model M] [--agent=NAME] < brief` (bare stdin — never `agy exec -`, `agy -`, or `agy --print ""…""`) | auth-preflighted; `--agent NAME` is checked against `agy agent` before dispatch; an autonomous-execution preamble for edits, a read-only preamble for `--review` |"	docs/commands.md	worker-agy-review	argv:--model fixture\ model
-dispatch-worker	flag	--model	| `claude` | `claude -p [--model M] < brief` | brief on stdin. `--ceremony` → `--dangerously-skip-permissions`; `--review` → `--permission-mode plan` (read-only, and it ignores `--ceremony`). |	docs/commands.md	worker-agy-review	argv:--model fixture\ model
+dispatch-worker	flag	--model	| `claude` | `claude -p [--model M] < brief` | brief on stdin. `--ceremony` → `--dangerously-skip-permissions`; `--review` → `--permission-mode plan` (read-only, and it ignores `--ceremony`). |	docs/commands.md	worker-claude-review	argv:--model fixture\ model
 dispatch-worker	flag	--module-dir	                [--require-dep M]... [--module-dir D] [--allow-dirty] [--shape S]	docs/commands.md	worker-codex-dep	rc=4
 dispatch-worker	flag	--module-dir	  --module-dir D     Directory containing the go.mod to verify with --require-dep	help/dispatch-worker.txt	worker-codex-dep	rc=4
 dispatch-worker	flag	--network	Legacy alias for the documented --ceremony flag.	undocumented.tsv	worker-recall	argv:--sandbox danger-full-access
@@ -112,7 +109,7 @@ dispatch-worker	flag	--review	  10  --review: the source repo's config, hooks, c
 dispatch-worker	flag	--review	  124 blocked (timeout; after one internal retry for agy --review).	help/dispatch-worker.txt	worker-agy-review	stderr:DISPATCH_REVIEW_STATE=clean
 dispatch-worker	flag	--review	  DISPATCH_REVIEW_STATE=clean|warn(<n>)|critical(<n>)|skipped(<reason>) original_rc=<n> is emitted on stderr for every --review run.	help/dispatch-worker.txt	worker-agy-review	stderr:DISPATCH_REVIEW_STATE=clean
 dispatch-worker	flag	--review	**`--review`** is read-only peer review: the brief is a reviewer persona and the review is the	docs/commands.md	worker-agy-review	stderr:DISPATCH_REVIEW_STATE=clean
-dispatch-worker	flag	--review	A review pin is taken on the workdir for every `--review` regardless of runtime, and released on	docs/commands.md	worker-agy-review	stderr:DISPATCH_REVIEW_STATE=clean
+dispatch-worker	flag	--review	A review pin is taken on the workdir for every `--review` regardless of runtime, and released on	docs/commands.md	worker-codex-review	call.codex.1:source-review-pinned 1
 dispatch-worker	flag	--review	Artifacts (agy `--review` only): the review is also tee'd to a file whose path is printed on	docs/commands.md	worker-agy-review	stderr:DISPATCH_REVIEW_STATE=clean
 dispatch-worker	flag	--review	Default agy models are defined by role in `bin/lib/agy-models.sh`: review under `--review`, coding for	docs/commands.md	worker-agy-review	stderr:DISPATCH_REVIEW_STATE=clean
 dispatch-worker	flag	--review	Every runtime's `--review`, including fallback, snapshots source state before and after.	docs/commands.md	worker-agy-review	stderr:DISPATCH_REVIEW_STATE=clean
@@ -241,6 +238,7 @@ dispatch-worker	line	text	  so) and the post-dispatch dep gate is skipped. There
 dispatch-worker	line	text	* **claude** — `--permission-mode plan` is forced (`--ceremony` ignored). Same story: the review's	docs/commands.md	worker-claude-review	argv:--permission-mode plan
 dispatch-worker	line	text	* **codex** — `--sandbox read-only` is forced (an explicit `--ceremony` is overridden, and it says	docs/commands.md	worker-codex-review	argv:--sandbox read-only
 dispatch-worker	line	text	**`--review`** is read-only peer review: the brief is a reviewer persona and the review is the	docs/commands.md	worker-agy-review	argv:--agent=fixture-reviewer
+dispatch-worker	line	text	A review pin is taken on the workdir for every `--review` regardless of runtime, and released on	docs/commands.md	worker-codex-review	call.codex.1:source-review-pinned 1
 dispatch-worker	line	text	Bash may back here-strings with short-lived, randomly named temp files under	docs/commands.md	worker-agy-floor	rc=8
 dispatch-worker	line	text	Dedicated exit codes (so the orchestrator can tell an environment/account block	help/dispatch-worker.txt	worker-help	stdout:Dedicated exit codes (so the orchestrator can tell an environment/account block
 dispatch-worker	line	text	Dispatch priority (the calling agent's contract):	help/dispatch-worker.txt	worker-help	stdout:Dispatch priority (the calling agent's contract):
@@ -255,6 +253,7 @@ dispatch-worker	line	text	dispatch-worker --brief <path> [--runtime codex|agy|cl
 dispatch-worker	line	text	dispatch-worker — dispatch a worker brief to a runtime.	help/dispatch-worker.txt	worker-help	stdout:dispatch-worker — dispatch a worker brief to a runtime.
 dispatch-worker	line	text	from a real build failure and NOT retry it as a build):	help/dispatch-worker.txt	worker-help	stdout:from a real build failure and NOT retry it as a build):
 dispatch-worker	line	text	is a convenience path for a human.) On **this** runtime — agy — an empty, short, or evidence-free	docs/commands.md	worker-agy-floor	rc=8
+dispatch-worker	line	text	refs and branches are private, and the reviewer gets a mode-0600 flattened copy of global Git	docs/commands.md	worker-agy-review	call.agy.3:global-sha256=
 dispatch-worker	line	text	result before state classification; a runtime's native 10 is remapped to 1.	docs/commands.md	worker-native-ten	rc=1
 dispatch-worker	line	text	review fails closed with exit 8 rather than passing as a clean bill of health. That gating is	docs/commands.md	worker-agy-floor	rc=8
 dispatch-worker	line	text	role model (exit 9 if missing); the doctor fails if either pinned default is missing.	docs/commands.md	worker-agy-missing-model	rc=9

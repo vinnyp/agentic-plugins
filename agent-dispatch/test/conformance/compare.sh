@@ -61,7 +61,7 @@ while IFS= read -r id; do
     case "$side" in 1) tree=$1 ;; 2) tree=$2 ;; esac
     {
       printf '%s\n' stdout stderr rc argv state
-      for input in "$tree/$id"/stdin.*; do
+      for input in "$tree/$id"/stdin.* "$tree/$id"/call.*; do
         [ ! -f "$input" ] || printf '%s\n' "${input##*/}"
       done
     } > "$work/files.$side"

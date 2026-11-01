@@ -16,3 +16,6 @@ s@(^|[^[:alnum:]_.-])dispatch-review-wt\.(XXXXXX\.)?[[:alnum:]]{6,}([^[:alnum:]_
 
 s@^(repo_?)_[[:xdigit:]]{8}(/|$)@\1_<HASH>\2@
 t again
+
+# Private flattened Git config lives in a per-review state directory.
+s@(dispatch-review-state\.)(XXXXXX\.)?[[:alnum:]]{6,}(/global\.gitconfig)@\1<TMP>\3@g

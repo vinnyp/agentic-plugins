@@ -1,11 +1,11 @@
 DISPATCH_BASE base_ref=HEAD base_sha=22d655d
 DISPATCH_BASE_TRACKING base_ref=HEAD branch=main status=no-upstream
-Preparing worktree (new branch 'cd-20261101031614-2230')
+Preparing worktree (new branch 'cd-<TS>-<PID>')
 HEAD is now at 22d655d fixture
 ▶ brief fingerprint: 3a2c9bfff601 (18B); first line: Edit tracked.txt.
-▶ dispatching to codex in <SCN_TMP>/.worktrees/repo__e5d7f548/cd-20261101031614-2230 (timeout 5s, base 22d655def6c9)…
+▶ dispatching to codex in <SCN_TMP>/.worktrees/repo__<HASH>/cd-<TS>-<PID> (timeout 5s, base 22d655def6c9)…
 ⚠ worker self-committed 1 commit(s) without leaving working-tree changes and an independently valid marker — stray commit — unwinding via git reset --soft 22d655def6c9
 ↩ stray commit(s) unwound; 1 commit(s) collapsed to uncommitted changes for caller review
 gate-env: python=<SCN_TMP>/bin/python3 Python fixture ruff=absent
-GATE_TREE_PRE pwd=<SCN_TMP>/.worktrees/repo__e5d7f548/cd-20261101031614-2230 top=<SCN_TMP>/.worktrees/repo__e5d7f548/cd-20261101031614-2230 head=22d655def6c92ac5944765a9910bf86566ea8d86
-GATE_TREE_POST pwd=<SCN_TMP>/.worktrees/repo__e5d7f548/cd-20261101031614-2230 top=<SCN_TMP>/.worktrees/repo__e5d7f548/cd-20261101031614-2230 head=22d655def6c92ac5944765a9910bf86566ea8d86 code=1
+GATE_TREE_PRE pwd=<SCN_TMP>/.worktrees/repo__<HASH>/cd-<TS>-<PID> top=<SCN_TMP>/.worktrees/repo__<HASH>/cd-<TS>-<PID> head=22d655def6c92ac5944765a9910bf86566ea8d86
+GATE_TREE_POST pwd=<SCN_TMP>/.worktrees/repo__<HASH>/cd-<TS>-<PID> top=<SCN_TMP>/.worktrees/repo__<HASH>/cd-<TS>-<PID> head=22d655def6c92ac5944765a9910bf86566ea8d86 code=1

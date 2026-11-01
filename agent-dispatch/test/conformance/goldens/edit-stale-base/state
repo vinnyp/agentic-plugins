@@ -1,3 +1,4 @@
+review-pinned 0
 HEAD 772978b727b48f5c39870d4732c5d0b64f2122f4
 branches
   old
@@ -13,4 +14,4 @@ result 0
 patch <SCN_TMP>/repo/.git/coding-dispatch-last-fail.patch 0 0 -
 fail-patches
 worktree-directories
-repo__f2cef38c
+repo__<HASH>

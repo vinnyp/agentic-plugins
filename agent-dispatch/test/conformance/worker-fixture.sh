@@ -5,6 +5,12 @@ here=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 mkdir -p "$SCN_REPO" "$SCN_TMP/bin"
 git -C "$SCN_REPO" init -q -b main
 printf 'base\n' > "$SCN_REPO/tracked.txt"
+case "$id" in
+  worker-codex-dep|worker-codex-dep-pass)
+    printf 'module example.invalid/fixture\n\ngo 1.22\n' > "$SCN_REPO/go.mod"
+    [ "$id" != worker-codex-dep-pass ] || printf '\nrequire example.invalid/required v1.0.0\n' >> "$SCN_REPO/go.mod"
+    ;;
+esac
 git -C "$SCN_REPO" add .
 git -C "$SCN_REPO" -c user.name=Conformance -c user.email=conformance@example.invalid commit -qm fixture
 printf 'Review tracked.txt.\n' > "$SCN_TMP/brief"
@@ -43,7 +49,7 @@ case "$id" in
   *-allow-dirty) flags+=(--allow-dirty) ;;
   *-allow-env) export DISPATCH_ALLOW_DIRTY=1 ;;
   *-timeout) flags+=(--timeout 1s) ;;
-  *-dep) flags+=(--require-dep example.invalid/required --module-dir "$SCN_REPO") ;;
+  *-dep|*-dep-pass) flags+=(--require-dep example.invalid/required --module-dir "$SCN_REPO") ;;
   *-review|*-edit) flags+=(--model 'fixture model' --ceremony) ;;
   *-evidence-off) export DISPATCH_REVIEW_REQUIRE_EVIDENCE=0 ;;
   *-floor-env) export DISPATCH_MIN_REVIEW_BYTES=10 ;;
@@ -51,11 +57,18 @@ case "$id" in
   *-env)
     export RUNTIME="$runtime" MODEL='fixture model' WORKDIR="$SCN_REPO" TIMEOUT=5s REVIEW=1 CEREMONY=1
     export DISPATCH_REVIEW_WT_DIR="$SCN_TMP/reviews" REVIEW_OUTFILE="$SCN_TMP/review.md"
+    printf '%s\n' "$DISPATCH_REVIEW_WT_DIR" > "$SCN_TMP/review-state-dir"
     flags=(--brief "$SCN_TMP/brief")
     ;;
   *-recall) flags+=(--recall-project synthetic --no-recall --network) ;;
   *-help) flags=(--help) ;;
 esac
 [ "$runtime" != agy ] || flags+=(--agent fixture-reviewer)
+if [ "$id" = worker-pin-fail ]; then
+  mkdir -p "$SCN_TMP/impl"
+  cp -R "$IMPL_BIN/." "$SCN_TMP/impl/"
+  printf '#!/usr/bin/env bash\nexit 3\n' > "$SCN_TMP/impl/review-pin.sh"
+  IMPL_BIN=$SCN_TMP/impl
+fi
 cd "$SCN_REPO"
 "$IMPL_BIN/dispatch-worker" "${flags[@]}"

@@ -1,6 +1,7 @@
+review-pinned 0
 HEAD 22d655def6c92ac5944765a9910bf86566ea8d86
 branches
-  cd-20261101031644-16444
+  cd-<TS>-<PID>
 * main
 worktrees
 worktree <SCN_TMP>/repo
@@ -12,6 +13,6 @@ status
 result 0
 patch <SCN_TMP>/repo/.git/coding-dispatch-last-fail.patch 0 0 -
 fail-patches
-coding-dispatch-fail-patches/cd-20261101031644-16444.patch 7 sha256=f28d6722c6ecbc6ba29205e1b252928522ccfe2420ca4069116ecf92b9153dd9
+coding-dispatch-fail-patches/cd-<TS>-<PID>.patch 7 sha256=f28d6722c6ecbc6ba29205e1b252928522ccfe2420ca4069116ecf92b9153dd9
 worktree-directories
-repo__83b29937
+repo__<HASH>

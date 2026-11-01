@@ -19,6 +19,8 @@ def patch_summary(path):
 if not (repo / '.git').exists():
     print('repository absent')
 else:
+    common = Path(git(repo, 'rev-parse', '--path-format=absolute', '--git-common-dir'))
+    print('review-pinned', int((common / 'review-pinned').exists()))
     print('HEAD', git(repo, 'rev-parse', 'HEAD'))
     print('branches\n' + '\n'.join(sorted(git(repo, 'branch', '--list').splitlines())))
     porcelain = git(repo, 'worktree', 'list', '--porcelain')
@@ -38,7 +40,8 @@ else:
                 if item.is_file():
                     print(item.relative_to(directory), patch_summary(item))
     print('worktree-directories')
-    directory = repo.parent / '.worktrees'
+    state_dir = Path(os.environ.get('SCN_TMP', str(repo.parent))) / 'review-state-dir'
+    directory = Path(state_dir.read_text().strip()) if state_dir.exists() else repo.parent / '.worktrees'
     if directory.exists():
         for item in sorted(directory.rglob('*')):
             print(item.relative_to(directory))

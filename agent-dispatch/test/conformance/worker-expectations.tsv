@@ -43,3 +43,5 @@ worker-agy-row-object	0
 worker-agy-row-abstain	0
 worker-agy-row-prose	8
 worker-agy-spoof-valid	0
+worker-codex-dep-pass	0
+worker-pin-fail	3

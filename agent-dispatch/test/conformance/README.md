@@ -117,7 +117,7 @@ and inferred Go gates, marker exemptions, and phase failures have separate cases
 The edit budgets total under 420 seconds, including the signal retry allowance.
 
 The worker slice runs with `bash agent-dispatch/test/test-conformance-worker.sh`
-(`IMPL_BIN` optionally selects another implementation). Its 45 scenarios use
+(`IMPL_BIN` optionally selects another implementation). Its 47 scenarios use
 synthetic, numbered runtime recordings, including agy's models probe, persona
 roster, dispatch and retry. Short codex and Claude reviews preserve their ungated
 behavior; agy independently exercises the byte floor, evidence, each requirements
@@ -138,10 +138,15 @@ environment inventory rows. `worker-exemptions.tsv` gives a reason for each
 remaining row: documentation context, historical rejected runtime flags,
 coding-only census attribution, and state/clone/signal/environment details
 reserved for later slices. Both lists are closed: adding an inventory row of
-any of the four kinds fails the suite. The worker scenario budgets sum to 384
+any of the four kinds fails the suite. The worker scenario budgets sum to 394
 seconds, with no harness retries.
 
 ### Worker known defects
+
+- `worker-pin-fail` stubs `review-pin.sh` to return 3. Both baseline and current
+  dispatchers call `review_launch_failure 125`, which unconditionally exits 3;
+  the requested exit 125 cannot be captured without changing production code.
+  The golden preserves exit 3 and verifies that no reviewer launches.
 
 - `worker-codex-child-env` preserves `CODING_DISPATCH_CHILD_ENV` reaching the
   runtime. The synthetic child prints the received value to make leakage visible.
@@ -152,13 +157,13 @@ seconds, with no harness retries.
 These local references identify frozen observations, not fixes. No production
 entry point is modified by the worker capture task.
 
-The scripts retain Bash 3.2 syntax. On macOS, both the system Bash 3.2 and
-an already installed Bash 5.3 emitted intermittent `child setpgid: Operation not
-permitted` diagnostics from the existing bounded state probes during repeated
-verification. These diagnostics are neither discarded nor normalised, and can
-fail exact stderr comparison despite the independent scenario assertions passing.
-Two clean repeated local runs remain unverified; changing the production probe
-is outside this task's test-only scope.
+The scripts retain Bash 3.2 syntax. The exact Bash job-control race diagnostic
+`child setpgid (... to ...): Operation not permitted` is normalised on both
+stdout and stderr; other diagnostics remain significant.
+
+Call records compare physical working directories, source/clone placement,
+global Git config paths and SHA-256 digests, visible sentinels, and source pin
+presence. State capture also checks pin release and the configured review directory.
 
 The state slice runs with `bash agent-dispatch/test/test-conformance-state.sh`
 (`IMPL_BIN` optionally selects another implementation). Its 25 scenarios call
