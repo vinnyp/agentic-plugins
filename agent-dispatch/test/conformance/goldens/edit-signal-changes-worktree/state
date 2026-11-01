@@ -1,0 +1,30 @@
+HEAD 22d655def6c92ac5944765a9910bf86566ea8d86
+branches
+* main
++ cd-20261101024622-86067
+worktrees
+worktree <SCN_TMP>/repo
+HEAD 22d655def6c92ac5944765a9910bf86566ea8d86
+branch refs/heads/main
+
+worktree <SCN_TMP>/.worktrees/repo__57307998/cd-20261101024622-86067
+HEAD 22d655def6c92ac5944765a9910bf86566ea8d86
+branch refs/heads/cd-20261101024622-86067
+tree <SCN_TMP>/repo
+status
+
+result 0
+patch <SCN_TMP>/repo/.git/coding-dispatch-last-fail.patch 0 0
+fail-patches
+tree <SCN_TMP>/.worktrees/repo__57307998/cd-20261101024622-86067
+status
+ M tracked.txt
+result 0
+patch <SCN_TMP>/repo/.git/worktrees/cd-20261101024622-86067/coding-dispatch-last-fail.patch 1 7
+fail-patches
+worktree-directories
+repo__57307998
+repo__57307998/cd-20261101024622-86067
+repo__57307998/cd-20261101024622-86067/.git
+repo__57307998/cd-20261101024622-86067/.gitignore
+repo__57307998/cd-20261101024622-86067/tracked.txt

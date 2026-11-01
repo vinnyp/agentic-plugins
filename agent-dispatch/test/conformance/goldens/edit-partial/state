@@ -1,0 +1,14 @@
+HEAD 676fb2837717598abf32b47817bbe564a4709885
+branches
+* main
+worktrees
+worktree <SCN_TMP>/repo
+HEAD 676fb2837717598abf32b47817bbe564a4709885
+branch refs/heads/main
+tree <SCN_TMP>/repo
+status
+
+result 0
+patch <SCN_TMP>/repo/.git/coding-dispatch-last-fail.patch 0 0
+fail-patches
+worktree-directories

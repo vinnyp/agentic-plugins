@@ -13,7 +13,7 @@ def rows(name):
 inventory = {tuple(row) for row in rows('contract/inventory.tsv')
              if len(row) == 5 and row[0] in
              ('coding-dispatch.sh', 'coding-build-phase.sh')
-             and row[1] in ('exit', 'line')}
+             and row[1] in ('exit', 'line', 'flag', 'env')}
 covered = rows('edit-coverage.tsv')
 exempt = rows('edit-line-exemptions.tsv')
 seen = set()
@@ -22,7 +22,7 @@ for row in covered + exempt:
     assert key in inventory and key not in seen, f'stale/duplicate coverage: {row}'
     seen.add(key)
 for row in exempt:
-    assert len(row) == 6 and row[1] == 'line' and row[5].strip(), row
+    assert len(row) == 6 and row[1] in ('line', 'flag', 'env') and row[5].strip(), row
 for row in covered:
     assert len(row) == 7 and row[5].startswith('edit-'), row
     assert (root / 'scenarios' / row[5] / 'scenario.sh').is_file(), row
@@ -41,6 +41,26 @@ if actual:
     # Independently pin scenario intent, rather than blessing a misconfigured
     # fixture merely because both implementations produced identical bytes.
     expectations = {
+        'empty-worktree': (1, 'empty diff'),
+        'unavailable-worktree': (6, 'agent unavailable'),
+        'signal-changes-worktree': (143, 'interrupted (signal)'),
+        'timeout': (1, 'rc=124'),
+        'exit124': (1, 'rc=124'),
+        'committed-fail-worktree': (1, 'diff SALVAGED'),
+        'committed-fail': (1, 'build/vet failed'),
+        'keep-fail': (1, 'build/vet failed'),
+        'rm-fail-worktree': (1, 'build/vet failed'),
+        'base': (0, 'base_ref=main'),
+        'stale-base': (2, 'is behind'),
+        'allow-stale-base': (0, 'DISPATCH_BASE_STALE'),
+        'mut-exempt': (0, 'override in effect: tracked.txt'),
+        'agy': (0, 'agy model: fixture-model'),
+        'noop-no-gate': (0, 'no build gate ran'),
+        'noop-go': (0, 'go gate: build ./...'),
+        'phase-build-fail': (1, 'PHASE=stopped-at:1'),
+        'phase-task2-fail': (1, 'PHASE=stopped-at:2'),
+        'phase-three': (0, '✓ Task 3 committed ('),
+        'phase-dispatch-refused': (9, 'PHASE=refused:'),
         'ok': (0, 'DISPATCH=ok:'),
         'ok-worktree': (0, 'DISPATCH=ok worktree_ns='),
         'noop': (0, 'DISPATCH=ok-noop:'),
@@ -75,9 +95,25 @@ if actual:
         text = (directory / 'stdout').read_text() + (directory / 'stderr').read_text()
         assert (directory / 'rc').read_text().strip() == str(rc), scenario
         assert fragment in text, (scenario, fragment)
-        if name in ('scope', 'marker', 'fm4', 'noop-missing'):
+        if name in ('scope', 'marker', 'fm4', 'noop-missing', 'newdir'):
             assert text.count('DISPATCH=fail:') == 2, scenario
-            assert tags[scenario][1:3] == ['known-defect', 'cutover-change-12'], scenario
+            stdout_count = 1 if name == 'marker' else 0
+            assert (directory / 'stdout').read_text().count('DISPATCH=fail:') == stdout_count, scenario
+            assert (directory / 'stderr').read_text().count('DISPATCH=fail:') == 2 - stdout_count, scenario
+            assert tags[scenario][1] == 'known-defect', scenario
     assert tags['edit-newdir'][1:3] == ['known-defect', 'vinnyp/foundry#275']
     assert sum(int(row[3]) * (1 + int(row[4])) for row in tags.values()
-               if row[0].startswith('edit-')) < 420
+               if row[0].startswith('edit-')) < 400
+
+    # Failed in-place dispatches restore both HEAD and the index/worktree.
+    for name in ('build-fail', 'committed-fail', 'scope', 'newdir', 'fm4',
+                 'marker', 'noop-missing', 'noop-build', 'empty', 'timeout', 'exit124'):
+        state = (actual / ('edit-' + name) / 'state').read_text()
+        assert 'status\n\nresult 0' in state, (name, state)
+        import re
+        heads = re.findall(r'^HEAD ([0-9a-f]{40})$', state, re.M)
+        assert len(set(heads)) == 1, (name, heads)
+        if name == 'committed-fail':
+            # The fixture's deterministic initial commit, shared with edit-empty.
+            base = (actual / 'edit-empty' / 'state').read_text().splitlines()[0]
+            assert state.splitlines()[0] == base, name

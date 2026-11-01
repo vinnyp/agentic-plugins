@@ -1,0 +1,1 @@
+codex --model fixture-model --dangerously-skip-permissions --add-dir <SCN_TMP>/repo

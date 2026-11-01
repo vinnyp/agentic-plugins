@@ -5,10 +5,10 @@ coding-build-phase.sh	exit	2	literal exit 2	bin/coding-build-phase.sh	edit-phase
 coding-build-phase.sh	exit	6	literal exit 6	bin/coding-build-phase.sh	edit-phase-blocked	rc=6
 coding-build-phase.sh	exit	9	literal exit 9	bin/coding-build-phase.sh	edit-phase-refused	rc=9
 coding-build-phase.sh	line	text	PHASE=ok worktree=… branch=phase-myrepo-20260830131500-4821 tasks=[1 2 3] — land with: git -C '…' merge --ff-only 'phase-…' && git -C '…' worktree remove '…'	docs/commands.md	edit-phase-worktree	PHASE=ok worktree=
-coding-build-phase.sh	line	text	════════ dispatching Task 1 → codex ════════	docs/commands.md	edit-phase-ok	════════ dispatching Task 1
-coding-build-phase.sh	line	text	════════ dispatching Task 2 → codex ════════	docs/commands.md	edit-phase-ok	════════ dispatching Task 1
-coding-build-phase.sh	line	text	✓ Task 1 committed (4c9ab12)	docs/commands.md	edit-phase-ok	✓ Task 1 committed (
-coding-build-phase.sh	line	text	✓ Task 2 committed (8ee01f7)	docs/commands.md	edit-phase-ok	✓ Task 1 committed (
+coding-build-phase.sh	line	text	════════ dispatching Task 1 → codex ════════	docs/commands.md	edit-phase-three	════════ dispatching Task 2
+coding-build-phase.sh	line	text	════════ dispatching Task 2 → codex ════════	docs/commands.md	edit-phase-three	════════ dispatching Task 2
+coding-build-phase.sh	line	text	✓ Task 1 committed (4c9ab12)	docs/commands.md	edit-phase-three	✓ Task 2 committed (
+coding-build-phase.sh	line	text	✓ Task 2 committed (8ee01f7)	docs/commands.md	edit-phase-three	✓ Task 2 committed (
 coding-dispatch.sh	exit	0	literal exit 0	bin/coding-dispatch.sh	edit-ok	rc=0
 coding-dispatch.sh	exit	0	| `0` | success. `DISPATCH=ok …` — changes left in the tree (or worktree) for you to review and commit. `DISPATCH=ok-noop` means a resume dispatch found the work already done, after the build gate passes (when configured or inferred from `go.mod`) and every `--require-file` path is verified as a tracked blob in `HEAD`. If no build gate runs, stderr reports `no build gate ran`. |	docs/commands.md	edit-ok	rc=0
 coding-dispatch.sh	exit	1	literal exit 1	bin/coding-dispatch.sh	edit-empty	rc=1
@@ -29,3 +29,32 @@ coding-dispatch.sh	line	text	DISPATCH=ok worktree_ns=… worktree=… branch=cd-
 coding-dispatch.sh	line	text	DISPATCH_BASE base_ref=HEAD base_sha=1a0d56f2c1b8	docs/commands.md	edit-ok-worktree	DISPATCH_BASE base_ref=HEAD
 coding-dispatch.sh	line	text	▶ brief fingerprint: 9f1c4b2ae0d1 (243B); first line: Add a --json flag to cmd/report…	docs/commands.md	edit-ok	▶ brief fingerprint:
 coding-dispatch.sh	line	text	▶ dispatching to codex in ~/code/.worktrees/myrepo_3f2a91cc/cd-20260830… (timeout 15m, base 1a0d56f2c1b8)…	docs/commands.md	edit-ok-worktree	▶ dispatching to codex
+coding-dispatch.sh	line	text	| `0` | success. `DISPATCH=ok …` — changes left in the tree (or worktree) for you to review and commit. `DISPATCH=ok-noop` means a resume dispatch found the work already done, after the build gate passes (when configured or inferred from `go.mod`) and every `--require-file` path is verified as a tracked blob in `HEAD`. If no build gate runs, stderr reports `no build gate ran`. |	docs/commands.md	edit-noop-no-gate	no build gate ran
+coding-build-phase.sh	flag	--build-cmd	"  --worktree --build-cmd ""make lint && make test"""	docs/commands.md	edit-phase-build-fail	rc=1
+coding-build-phase.sh	flag	--build-cmd	(the dispatch has already reverted or salvaged). `--build-cmd` is required — set `CODING_BUILD_CMD`	docs/commands.md	edit-phase-build-fail	rc=1
+coding-build-phase.sh	flag	--build-cmd	Set `--build-cmd` to the repo's **full** ship gate (lint *and* tests), not just tests. A	docs/commands.md	edit-phase-build-fail	rc=1
+coding-build-phase.sh	flag	--build-cmd	"coding-build-phase.sh <codex|agy> <plan.md> <repo-dir> <task-id...> [--worktree] --build-cmd ""<gate>"""	docs/commands.md	edit-phase-build-fail	rc=1
+coding-build-phase.sh	flag	--worktree	"  --worktree --build-cmd ""make lint && make test"""	docs/commands.md	edit-ok-worktree	rc=0
+coding-build-phase.sh	flag	--worktree	**Flags go after the positionals.** `coding-build-phase.sh --worktree codex …` fails with a	docs/commands.md	edit-ok-worktree	rc=0
+coding-build-phase.sh	flag	--worktree	"coding-build-phase.sh <codex|agy> <plan.md> <repo-dir> <task-id...> [--worktree] --build-cmd ""<gate>"""	docs/commands.md	edit-ok-worktree	rc=0
+coding-dispatch.sh	env	AGY_MODEL	| `AGY_MODEL` | `coding-dispatch.sh` | agy model for edit dispatches (default: coding pin in `bin/lib/agy-models.sh`) |	docs/commands.md	edit-agy	rc=0
+coding-dispatch.sh	env	CODING_DISPATCH_MUT_EXEMPT	| `CODING_DISPATCH_MUT_EXEMPT` | `coding-dispatch.sh` | whitespace-separated basename globs (default `test-mutants*`), split without pathname expansion. Only dedicated mutation-suite files are exempt by default; directories never confer exemption. Each exempt file containing added marker lines prints its path, matching glob, and marker-line count (all marker lines for untracked files). Setting the variable prints an override-in-effect line including its value; an empty value scans every file. Globs matching any probe basename (`zz9-probe.x`, `main.go`, or `README`), including `*`, `**`, and `?*`, are refused with a stderr warning and do not exempt files. Globs containing `/` are also warned about and ignored because globs match basenames only. Leftover mutants must be removed; refusals name the tracked or untracked file. |	docs/commands.md	edit-mut-exempt	rc=0
+coding-dispatch.sh	env	CODING_DISPATCH_RM_ON_FAIL	| `CODING_DISPATCH_RM_ON_FAIL` | `coding-dispatch.sh` | `1` = remove the worktree on failure instead of salvaging it; the patch still survives under the parent repo's git dir |	docs/commands.md	edit-rm-fail-worktree	rc=1
+coding-dispatch.sh	env	CODING_DISPATCH_TIMEOUT	| `CODING_DISPATCH_TIMEOUT` | `coding-dispatch.sh` | `15m` (codex) / `25m` (agy) — the external bound on the agent |	docs/commands.md	edit-timeout	rc=1
+coding-dispatch.sh	flag	--allow-path	                   [--no-venv] [--allow-path <glob>]... [--require-file <path>]...	docs/commands.md	edit-scope	rc=1
+coding-dispatch.sh	flag	--allow-path	| `--allow-path <glob>` | repeatable scope allowlist. The globs are injected into the brief AND enforced afterwards: any changed path outside them fails the dispatch. |	docs/commands.md	edit-scope	rc=1
+coding-dispatch.sh	flag	--allow-stale-base	coding-dispatch.sh [--worktree] [--base <ref>] [--allow-stale-base] [--keep-on-fail]	docs/commands.md	edit-allow-stale-base	rc=0
+coding-dispatch.sh	flag	--allow-stale-base	| `--allow-stale-base` | permit that stale base, still printing the staleness |	docs/commands.md	edit-allow-stale-base	rc=0
+coding-dispatch.sh	flag	--base	coding-dispatch.sh [--worktree] [--base <ref>] [--allow-stale-base] [--keep-on-fail]	docs/commands.md	edit-base	rc=0
+coding-dispatch.sh	flag	--base	| `--base <ref>` | (worktree mode) branch from `<ref>` instead of `HEAD`; refuses a base behind its local tracking ref |	docs/commands.md	edit-base	rc=0
+coding-dispatch.sh	flag	--keep-on-fail	coding-dispatch.sh [--worktree] [--base <ref>] [--allow-stale-base] [--keep-on-fail]	docs/commands.md	edit-keep-fail	rc=1
+coding-dispatch.sh	flag	--keep-on-fail	| `--keep-on-fail` | (non-worktree) skip the hard revert; leave the tree exactly as the agent left it |	docs/commands.md	edit-keep-fail	rc=1
+coding-dispatch.sh	flag	--keep-on-fail	| `1` | failure. Non-worktree: tree hard-reset to the pre-dispatch commit (unless `--keep-on-fail`). Worktree: diff salvaged in the worktree, or the worktree removed with `CODING_DISPATCH_RM_ON_FAIL=1` (the patch still survives). |	docs/commands.md	edit-keep-fail	rc=1
+coding-dispatch.sh	flag	--only	`&&`, `||`, `;`, or `|`) must invoke that runner and contain a whole `--only`	docs/commands.md	edit-partial	rc=2
+coding-dispatch.sh	flag	--only	or `--changed` token (including `--only=…`). Nested paths such as	docs/commands.md	edit-partial	rc=2
+coding-dispatch.sh	flag	--require-file	                   [--no-venv] [--allow-path <glob>]... [--require-file <path>]...	docs/commands.md	edit-noop-present	rc=0
+coding-dispatch.sh	flag	--require-file	| `--require-file <path>` | repeatable. Fail if the named file was not delivered. |	docs/commands.md	edit-noop-present	rc=0
+coding-dispatch.sh	flag	--require-file	| `0` | success. `DISPATCH=ok …` — changes left in the tree (or worktree) for you to review and commit. `DISPATCH=ok-noop` means a resume dispatch found the work already done, after the build gate passes (when configured or inferred from `go.mod`) and every `--require-file` path is verified as a tracked blob in `HEAD`. If no build gate runs, stderr reports `no build gate ran`. |	docs/commands.md	edit-noop-present	rc=0
+coding-dispatch.sh	flag	--worktree	"coding-dispatch.sh --worktree codex ~/code/myrepo /tmp/task.md ""go test ./..."""	docs/commands.md	edit-ok-worktree	rc=0
+coding-dispatch.sh	flag	--worktree	coding-dispatch.sh [--worktree] [--base <ref>] [--allow-stale-base] [--keep-on-fail]	docs/commands.md	edit-ok-worktree	rc=0
+coding-dispatch.sh	flag	--worktree	| `--worktree` | run the cycle in an isolated worktree at `<repo>/../.worktrees/<repo>_<hash>/<slug>`, outside the parent checkout. The parent need not be clean. On success the worktree and branch are left for you to land. |	docs/commands.md	edit-ok-worktree	rc=0

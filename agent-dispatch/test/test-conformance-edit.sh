@@ -4,6 +4,7 @@ here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 c=$here/conformance
 work=$(mktemp -d "${TMPDIR:-/tmp}/conformance-edit.XXXXXX")
 [ -n "$work" ] || exit 1
+export DISPATCH_CONFORMANCE_ROOT="$work/root"
 trap 'rm -rf "$work"' EXIT
 [ -d "$c/goldens/edit-ok" ] || { echo 'FAIL: edit goldens absent'; exit 1; }
 python3 "$c/edit-coverage.py" "$c"
@@ -11,7 +12,7 @@ python3 "$c/edit-coverage.py" "$c"
 mkdir -p "$work/coverage/contract"
 cp "$c/edit-coverage.tsv" "$c/edit-line-exemptions.tsv" "$work/coverage/"
 ln -s "$c/scenarios" "$work/coverage/scenarios"
-for kind in exit line; do
+for kind in exit line flag env; do
   cp "$c/contract/inventory.tsv" "$work/coverage/contract/inventory.tsv"
   printf 'coding-dispatch.sh\t%s\tnew-contract\tnew output\ttest\n' "$kind" >> "$work/coverage/contract/inventory.tsv"
   if python3 "$c/edit-coverage.py" "$work/coverage" > "$work/coverage-error" 2>&1; then

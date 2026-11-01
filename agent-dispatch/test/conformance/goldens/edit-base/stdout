@@ -1,0 +1,1 @@
+DISPATCH=ok worktree_ns=<SCN_TMP>/.worktrees/repo__8fe88a47/cd-20261101024559-78148 worktree=<SCN_TMP>/.worktrees/repo__8fe88a47/cd-20261101024559-78148 branch=cd-20261101024559-78148 base_sha=22d655d head=22d655def6c92ac5944765a9910bf86566ea8d86 files=tracked.txt

@@ -1,0 +1,4 @@
+════════ dispatching Task 1 → codex ════════
+DISPATCH=fail: build/vet failed (false) — tree reverted to 22d655def6c9; patch: <SCN_TMP>/repo/.git/coding-dispatch-last-fail.patch
+✗ Task 1 FAILED (dispatch reverted the tree). Stopping phase — Opus takes this task.
+PHASE=stopped-at:1

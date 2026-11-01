@@ -22,12 +22,20 @@ while [ "$#" -gt 0 ]; do
   if [ "$1" = -C ]; then wd=$2; shift 2; else shift; fi
 done
 case "$EDIT_MODE" in
+  task2) if [ ! -f "$SCN_TMP/task1" ]; then printf 'edited\n' >> "$wd/tracked.txt"; fi ;;
   noop*) printf '{"status":"complete","files_written":[]}' > "$wd/_coding-result.json" ;;
-  empty|unavailable) ;;
+  empty|unavailable|exit124|timeout) ;;
   newdir) mkdir "$wd/new"; printf 'new\n' > "$wd/new/file.txt" ;;
   marker) printf '# MUT leftover\n' >> "$wd/tracked.txt" ;;
+  signal-changes) printf 'partial\n' >> "$wd/tracked.txt"; : > "$SCN_TMP/ready"; sleep 2 ;;
   signal) : > "$SCN_TMP/ready"; sleep 2 ;;
   *) printf 'edited\n' >> "$wd/tracked.txt" ;;
+esac
+case "$EDIT_MODE" in
+  timeout) sleep 3 ;;
+  exit124) exit 124 ;;
+  committed) git -C "$wd" add tracked.txt; git -C "$wd" -c user.name=Conformance -c user.email=conformance@example.invalid commit -qm worker ;;
+  task2) if [ -f "$SCN_TMP/task1" ]; then exit 124; else : > "$SCN_TMP/task1"; fi ;;
 esac
 exec bash "$EDIT_REPLAY" "${args[@]}"
 STUB

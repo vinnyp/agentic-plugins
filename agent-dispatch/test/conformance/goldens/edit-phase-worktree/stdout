@@ -1,4 +1,4 @@
 ════════ dispatching Task 1 → codex ════════
-DISPATCH=ok worktree_ns=<SCN_TMP>/.worktrees/repo__e7376fa7/phase-repo-20261101023156-17808 worktree=<SCN_TMP>/.worktrees/repo__e7376fa7/phase-repo-20261101023156-17808 branch=phase-repo-20261101023156-17808 base_sha=22d655d head=22d655def6c92ac5944765a9910bf86566ea8d86 files=tracked.txt
+DISPATCH=ok worktree_ns=<SCN_TMP>/.worktrees/repo__aedea414/phase-repo-20261101024649-90231 worktree=<SCN_TMP>/.worktrees/repo__aedea414/phase-repo-20261101024649-90231 branch=phase-repo-20261101024649-90231 base_sha=22d655d head=22d655def6c92ac5944765a9910bf86566ea8d86 files=tracked.txt
 ✓ Task 1 committed (17835a2)
-PHASE=ok worktree=<SCN_TMP>/.worktrees/repo__e7376fa7/phase-repo-20261101023156-17808 branch=phase-repo-20261101023156-17808 tasks=[1] — land with: git -C '<SCN_TMP>/repo' merge --ff-only 'phase-repo-20261101023156-17808' && git -C '<SCN_TMP>/repo' worktree remove '<SCN_TMP>/.worktrees/repo__e7376fa7/phase-repo-20261101023156-17808'
+PHASE=ok worktree=<SCN_TMP>/.worktrees/repo__aedea414/phase-repo-20261101024649-90231 branch=phase-repo-20261101024649-90231 tasks=[1] — land with: git -C '<SCN_TMP>/repo' merge --ff-only 'phase-repo-20261101024649-90231' && git -C '<SCN_TMP>/repo' worktree remove '<SCN_TMP>/.worktrees/repo__aedea414/phase-repo-20261101024649-90231'

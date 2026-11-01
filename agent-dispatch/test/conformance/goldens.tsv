@@ -1,27 +1,47 @@
 id	tag	issue	budget_s	retry
-edit-ok	preserve		12	0
-edit-ok-worktree	preserve		12	0
-edit-noop	preserve		12	0
-edit-noop-worktree	preserve		12	0
-edit-noop-present	preserve		12	0
-edit-noop-missing	known-defect	cutover-change-12	12	0
-edit-noop-build	preserve		12	0
-edit-empty	preserve		12	0
-edit-build-fail	preserve		12	0
-edit-build-fail-worktree	preserve		12	0
-edit-scope	known-defect	cutover-change-12	12	0
-edit-newdir	known-defect	vinnyp/foundry#275	12	0
-edit-fm4	known-defect	cutover-change-12	12	0
-edit-marker	known-defect	cutover-change-12	12	0
-edit-usage	preserve		12	0
-edit-partial	preserve		12	0
-edit-broken-install	preserve		12	0
-edit-unavailable	preserve		12	0
-edit-refused	preserve		12	0
-edit-signal	preserve		12	1
-edit-phase-ok	preserve		12	0
-edit-phase-worktree	preserve		12	0
-edit-phase-stopped	preserve		12	0
-edit-phase-blocked	preserve		12	0
-edit-phase-refused	preserve		12	0
-edit-phase-usage	preserve		12	0
+edit-ok	preserve		8	0
+edit-ok-worktree	preserve		8	0
+edit-noop	preserve		8	0
+edit-noop-worktree	preserve		8	0
+edit-noop-present	preserve		8	0
+edit-noop-missing	known-defect	cutover-change-12	8	0
+edit-noop-build	preserve		8	0
+edit-empty	preserve		8	0
+edit-build-fail	preserve		8	0
+edit-build-fail-worktree	preserve		8	0
+edit-scope	known-defect	cutover-change-12	8	0
+edit-newdir	known-defect	vinnyp/foundry#275	8	0
+edit-fm4	known-defect	cutover-change-12	8	0
+edit-marker	known-defect	cutover-change-12	8	0
+edit-usage	preserve		8	0
+edit-partial	preserve		8	0
+edit-broken-install	preserve		8	0
+edit-unavailable	preserve		8	0
+edit-refused	preserve		8	0
+edit-signal	preserve		8	1
+edit-phase-ok	preserve		8	0
+edit-phase-worktree	preserve		8	0
+edit-phase-stopped	preserve		8	0
+edit-phase-blocked	preserve		8	0
+edit-phase-refused	preserve		8	0
+edit-phase-usage	preserve		8	0
+edit-empty-worktree	preserve		8	0
+edit-unavailable-worktree	preserve		8	0
+edit-signal-changes-worktree	preserve		8	0
+edit-timeout	preserve		8	0
+edit-exit124	preserve		8	0
+edit-committed-fail	preserve		8	0
+edit-keep-fail	preserve		8	0
+edit-rm-fail-worktree	preserve		8	0
+edit-base	preserve		8	0
+edit-stale-base	preserve		8	0
+edit-allow-stale-base	preserve		8	0
+edit-mut-exempt	preserve		8	0
+edit-agy	preserve		8	0
+edit-noop-no-gate	preserve		8	0
+edit-noop-go	preserve		8	0
+edit-phase-build-fail	preserve		8	0
+edit-phase-task2-fail	preserve		8	0
+edit-phase-three	preserve		8	0
+edit-phase-dispatch-refused	preserve		8	0
+edit-committed-fail-worktree	preserve		8	0

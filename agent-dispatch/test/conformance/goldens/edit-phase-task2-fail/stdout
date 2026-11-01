@@ -1,0 +1,7 @@
+════════ dispatching Task 1 → codex ════════
+DISPATCH=ok: codex completed; files: tracked.txt; changes left for caller to review + commit
+✓ Task 1 committed (17835a2)
+════════ dispatching Task 2 → codex ════════
+DISPATCH=fail: TIMEOUT — agent exceeded the 5s cap (CODING_DISPATCH_TIMEOUT), rc=124, no changes produced — nothing to revert
+✗ Task 2 FAILED (dispatch reverted the tree). Stopping phase — Opus takes this task.
+PHASE=stopped-at:2

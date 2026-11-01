@@ -1,0 +1,3 @@
+codex exec --dangerously-bypass-approvals-and-sandbox -C <SCN_TMP>/repo -
+codex exec --dangerously-bypass-approvals-and-sandbox -C <SCN_TMP>/repo -
+codex exec --dangerously-bypass-approvals-and-sandbox -C <SCN_TMP>/repo -

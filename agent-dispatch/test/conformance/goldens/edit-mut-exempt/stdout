@@ -1,0 +1,3 @@
+mutation-marker guard: override in effect: tracked.txt
+mutation-marker guard: exempted tracked.txt (glob tracked.txt) — 1 marker line(s) not scanned
+DISPATCH=ok: codex completed; files: tracked.txt; changes left for caller to review + commit

@@ -11,8 +11,7 @@ Each `scenarios/<id>/scenario.sh` receives an absolute `IMPL_BIN`, a fresh
 replay stubs, a per-run symlink farm for bash/git/jq/perl/python3, then
 `/usr/bin:/bin`. Invoke implementation entry points
 through `IMPL_BIN`. Scratch directories are removed after each attempt; use them only for disposable
-scenario work. This scaffold includes no capture
-scenarios; the unit test creates its sample in an isolated copy.
+scenario work. The harness unit test replaces the real scenarios and goldens with a private sample.
 
 Every scenario must have exactly one row in `goldens.tsv`, with tab-separated
 columns `id`, `tag`, `issue`, `budget_s`, and `retry`. Tags are `preserve` or
@@ -26,7 +25,7 @@ portable fallback when neither GNU timer is available. Each attempt has the
 listed budget and a one-second kill grace. A budget timeout (124 or 137 from the timer) fails the harness;
 Timer failure (125 without scenario completion) also fails the harness; application exit codes are observations for comparison.
 
-Each result directory contains `stdout`, `stderr`, `rc`, and `argv`, plus
+Each result directory contains `stdout`, `stderr`, `rc`, `argv`, and required `state`, plus
 `scn_tmp`, which records the exact scratch path for literal normalisation.
 Stubs for `codex`, `agy`, and `claude` append shell-escaped command names and
 arguments to `$SCN_TMP/argv`. Set `STUB_RECORDING` to a directory containing
@@ -91,7 +90,7 @@ Each probe ignores global and system Git configuration. Silent replies fail.
 
 The edit slice runs with `bash agent-dispatch/test/test-conformance-edit.sh`;
 `IMPL_BIN` can select another implementation. Its fixtures use only synthetic
-Codex recordings plus a small edit wrapper, never a real runtime. Golden files
+Codex and agy recordings plus a small edit wrapper, never a real runtime. Golden files
 come from BASELINE 1.9.5; literal scratch and implementation paths are replaced
 with `<SCN_TMP>`, `<RUN>`, and `<IMPL_BIN>` before committing. Metadata uses those
 same placeholders so the ordinary comparator still applies. A fixture Python
@@ -99,10 +98,20 @@ version reply and a fixed clock for review pins keep host versions and pin ages
 out of the observations. All other implementation output remains significant.
 
 `edit-coverage.tsv` maps exact inventory rows to a scenario and an observed exit
-or output fragment. `edit-line-exemptions.tsv` enumerates only documentation
-prose/input rows with reasons; new inventory rows fail closed. Exit 4 is a census
+or output fragment. `edit-line-exemptions.tsv` enumerates documentation
+prose/input rows and out-of-slice flag/environment contracts with individual reasons; new inventory rows fail closed. Exit 4 is a census
 artifact from the partial-runner signature, so `edit-partial` proves the actual
-exit-2 refusal. Parameterized documentation examples for Task 2 use the same
-Task 1 output template. `edit-newdir` preserves vinnyp/foundry#275; duplicate
-failure verdicts in the scope, marker, and FM4 captures preserve cutover change
+exit-2 refusal. Task 2 output rows are exercised by a real three-task phase. `edit-newdir` preserves vinnyp/foundry#275; duplicate
+failure verdicts in the scope, newdir, marker, and FM4 captures preserve cutover change
 12. These are observations of the frozen contract, not desired behavior.
+
+Before cleanup, `capture-state.py` runs inside the scenario's hermetic environment.
+It records HEAD, sorted branches, worktree porcelain, each tree's full status and
+result-marker presence, failure patches and line counts, and the sorted sibling
+`.worktrees` listing. A non-repository scenario records `repository absent`.
+The comparator requires state on both sides and shares SHA numbering with all
+other observations. Failed in-place captures must restore the fixture base and
+leave a clean tree. Empty/unavailable worktrees, interrupted partial edits,
+committed worker salvage, removal overrides, stale bases, timeout/124, no-gate
+and inferred Go gates, marker exemptions, and phase failures have separate cases.
+The edit budgets total under 400 seconds, including the signal retry allowance.

@@ -6,4 +6,4 @@ mode=empty
 source "$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)/edit-fixture.sh"
 mkdir "$SCN_TMP/broken"
 cp "$IMPL_BIN/coding-dispatch.sh" "$SCN_TMP/broken/"
-bash "$SCN_TMP/broken/coding-dispatch.sh"
+"$SCN_TMP/broken/coding-dispatch.sh"

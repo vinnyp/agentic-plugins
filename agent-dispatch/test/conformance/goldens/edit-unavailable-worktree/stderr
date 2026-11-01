@@ -1,0 +1,6 @@
+DISPATCH_BASE base_ref=HEAD base_sha=22d655d
+DISPATCH_BASE_TRACKING base_ref=HEAD branch=main status=no-upstream
+Preparing worktree (new branch 'cd-20261101024627-86945')
+HEAD is now at 22d655d fixture
+▶ brief fingerprint: 3a2c9bfff601 (18B); first line: Edit tracked.txt.
+▶ dispatching to codex in <SCN_TMP>/.worktrees/repo__46e166d7/cd-20261101024627-86945 (timeout 5s, base 22d655def6c9)…

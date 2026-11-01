@@ -1,0 +1,3 @@
+Unstaged changes after reset:
+M	tracked.txt
+DISPATCH=fail: build/vet failed (false) — tree reverted to 22d655def6c9; patch: <SCN_TMP>/repo/.git/coding-dispatch-last-fail.patch

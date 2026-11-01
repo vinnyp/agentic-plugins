@@ -1,7 +1,7 @@
 DISPATCH_BASE base_ref=HEAD base_sha=22d655d
 DISPATCH_BASE_TRACKING base_ref=HEAD branch=main status=no-upstream
-Preparing worktree (new branch 'cd-20261101023158-18609')
+Preparing worktree (new branch 'cd-20261101024624-86279')
 HEAD is now at 22d655d fixture
 ▶ brief fingerprint: 3a2c9bfff601 (18B); first line: Edit tracked.txt.
-▶ dispatching to codex in <SCN_TMP>/.worktrees/repo__5dbf0d77/cd-20261101023158-18609 (timeout 5s, base 22d655def6c9)…
-DISPATCH=fail: interrupted (signal) — removed empty worktree <SCN_TMP>/.worktrees/repo__5dbf0d77/cd-20261101023158-18609
+▶ dispatching to codex in <SCN_TMP>/.worktrees/repo__5a4573e2/cd-20261101024624-86279 (timeout 5s, base 22d655def6c9)…
+DISPATCH=fail: interrupted (signal) — removed empty worktree <SCN_TMP>/.worktrees/repo__5a4573e2/cd-20261101024624-86279

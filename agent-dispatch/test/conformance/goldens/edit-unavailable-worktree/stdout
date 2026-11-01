@@ -1,0 +1,2 @@
+Selected model is at capacity
+DISPATCH=fail: agent unavailable (capacity/rate limit) — rc=1, no work attempted: Selected model is at capacity — worktree cleaned

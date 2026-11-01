@@ -1,0 +1,9 @@
+DISPATCH_BASE base_ref=old base_sha=22d655d
+fatal: 'origin' does not appear to be a git repository
+fatal: Could not read from remote repository.
+
+Please make sure you have the correct access rights
+and the repository exists.
+DISPATCH_BASE_FETCH base_ref=old tracking_ref=origin/old status=failed rc=128; continuing with last-fetched tracking ref
+DISPATCH_BASE_STALE base_ref=old base_sha=22d655d tracking_ref=origin/old tracking_sha=772978b behind=1 comparison=last-fetched
+DISPATCH=error: worktree base old (22d655d) is behind last fetched origin/old by 1 commit(s) (comparison=last-fetched); fetch+rebase, pass --base, or pass --allow-stale-base

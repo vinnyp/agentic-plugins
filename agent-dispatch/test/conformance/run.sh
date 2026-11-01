@@ -79,9 +79,10 @@ for scenario in "$here"/scenarios/*/scenario.sh; do
       "$timer" -k 1 "$budget" "$bash_bin" -c '
         "$1" "$2"
         status=$?
+        python3 "$3" > "$4"
         printf "%s\n" "$status" > "$SCN_TMP/scenario-rc"
         exit "$status"
-      ' conformance "$bash_bin" "$scenario" </dev/null > "$out/$id/stdout" 2> "$out/$id/stderr" || rc=$?
+      ' conformance "$bash_bin" "$scenario" "$here/capture-state.py" "$out/$id/state" </dev/null > "$out/$id/stdout" 2> "$out/$id/stderr" || rc=$?
     timed_out=0
     if [ ! -f "$SCN_TMP/scenario-rc" ]; then
       case "$rc" in

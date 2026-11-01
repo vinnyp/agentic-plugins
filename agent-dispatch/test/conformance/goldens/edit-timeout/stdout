@@ -1,0 +1,1 @@
+DISPATCH=fail: TIMEOUT — agent exceeded the 1s cap (CODING_DISPATCH_TIMEOUT), rc=124, no changes produced — nothing to revert

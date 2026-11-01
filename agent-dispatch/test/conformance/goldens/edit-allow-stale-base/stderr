@@ -1,0 +1,16 @@
+DISPATCH_BASE base_ref=old base_sha=22d655d
+fatal: 'origin' does not appear to be a git repository
+fatal: Could not read from remote repository.
+
+Please make sure you have the correct access rights
+and the repository exists.
+DISPATCH_BASE_FETCH base_ref=old tracking_ref=origin/old status=failed rc=128; continuing with last-fetched tracking ref
+DISPATCH_BASE_STALE base_ref=old base_sha=22d655d tracking_ref=origin/old tracking_sha=772978b behind=1 comparison=last-fetched
+Preparing worktree (new branch 'cd-20261101024558-77902')
+HEAD is now at 22d655d fixture
+▶ brief fingerprint: 3a2c9bfff601 (18B); first line: Edit tracked.txt.
+▶ dispatching to codex in <SCN_TMP>/.worktrees/repo__1b948d74/cd-20261101024558-77902 (timeout 5s, base 22d655def6c9)…
+gate-env: python=<SCN_TMP>/bin/python3 Python fixture ruff=absent
+GATE_TREE_PRE pwd=<SCN_TMP>/.worktrees/repo__1b948d74/cd-20261101024558-77902 top=<SCN_TMP>/.worktrees/repo__1b948d74/cd-20261101024558-77902 head=22d655def6c92ac5944765a9910bf86566ea8d86
+GATE_TREE_POST pwd=<SCN_TMP>/.worktrees/repo__1b948d74/cd-20261101024558-77902 top=<SCN_TMP>/.worktrees/repo__1b948d74/cd-20261101024558-77902 head=22d655def6c92ac5944765a9910bf86566ea8d86 code=0
+ℹ no/incomplete marker, but diff + build passed — marker synthesized from the diff
