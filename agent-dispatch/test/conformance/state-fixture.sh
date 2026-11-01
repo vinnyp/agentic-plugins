@@ -37,6 +37,10 @@ observe() {
 snapshot() { "$IMPL_BIN/repo-state-check" snapshot "$SCN_REPO" "$1"; }
 case "$id" in
   state-compare-*)
+    if [ "$id" = state-compare-grafts ]; then
+      # Git versions emit different deprecation hints; suppress at the source.
+      git -C "$SCN_REPO" config advice.graftFileDeprecated false
+    fi
     snapshot "$SCN_TMP/before"
     case "$id" in
       *config) printf '\n[fixture]\n changed = true\n' >> .git/config ;;
