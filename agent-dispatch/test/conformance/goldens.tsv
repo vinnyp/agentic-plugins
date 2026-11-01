@@ -91,3 +91,28 @@ worker-agy-row-object	preserve		10	0
 worker-agy-row-abstain	preserve		10	0
 worker-agy-row-prose	preserve		10	0
 worker-agy-spoof-valid	preserve		10	0
+state-compare-clean	preserve	-	12	0
+state-compare-config	preserve	-	12	0
+state-compare-hook	preserve	-	12	0
+state-compare-ref	preserve	-	12	0
+state-compare-harmless	preserve	-	12	0
+state-compare-deleted	known-defect	README.md#state-known-defects	12	0
+state-compare-truncated	known-defect	README.md#state-known-defects	12	0
+state-compare-filter	known-defect	README.md#state-known-defects	12	0
+state-compare-socket	known-defect	README.md#state-known-defects	12	0
+state-pin-block	preserve	-	12	0
+state-pin-stale	preserve	-	12	0
+state-pin-duplicate	preserve	-	12	0
+state-clone-isolation	preserve	-	12	0
+state-clone-filter	preserve	-	12	0
+state-clone-unsafe	preserve	-	12	0
+state-gate-pass	preserve	-	12	0
+state-gate-fail	preserve	-	12	0
+state-gate-moved	preserve	-	12	0
+state-gate-venv	preserve	-	12	0
+state-long-pass	preserve	-	12	0
+state-long-fail	preserve	-	12	0
+state-long-symlink	preserve	-	12	0
+state-long-missing	preserve	-	12	0
+state-long-pending	preserve	-	12	0
+state-pin-invalid	preserve	-	12	0

@@ -1,0 +1,3 @@
+nonregular <SCN_TMP>/repo/.git/fsmonitor--daemon.ipc: critical
+tree <SCN_TMP>/repo: unreadable
+observed_rc=2

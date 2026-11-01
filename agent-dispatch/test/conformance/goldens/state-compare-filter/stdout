@@ -1,0 +1,4 @@
+config filter.fixture.clean (local:file:.git/config): (absent) -> <changed>
+tree <SCN_TMP>/repo: 1 new dirty paths: .gitattributes
+observed_rc=2
+filter executed before comparison

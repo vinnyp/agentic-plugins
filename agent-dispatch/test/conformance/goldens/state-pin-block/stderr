@@ -1,0 +1,2 @@
+DISPATCH=refused: review pin active on <SCN_TMP>/repo (sha=66390dafc65009e5d5a99ef60615e2b1b9dd06d3 label=fixture age=0s)
+Clear it with: <IMPL_BIN>/review-pin.sh release <SCN_TMP>/repo

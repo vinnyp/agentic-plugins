@@ -1,0 +1,6 @@
+<SCN_TMP>/dispatch-review-wt.fixture 66390dafc65009e5d5a99ef60615e2b1b9dd06d3
+observed_rc=0
+source content config refs isolated; no alternates
+observed_rc=3
+observed_rc=0
+clone removed; source retained
