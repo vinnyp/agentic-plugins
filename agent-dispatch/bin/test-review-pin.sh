@@ -145,6 +145,40 @@ rc=$?
 [ "$rc" -eq 0 ] || { cat "$TMP/out9_status"; fail "status should see pin created from different cwd, got $rc"; }
 echo "test pin from different cwd writes into workdir git-dir PASS"
 
+# ---------------------------------------------------------------------------
+# Test 10: bare invocation through an absolute symlink can find its helpers.
+# ---------------------------------------------------------------------------
+REPO10="$TMP/repo10"; new_repo "$REPO10"
+mkdir "$TMP/bin10"
+ln -s "$RP" "$TMP/bin10/review-pin.sh"
+bash "$RP" pin "$REPO10" >"$TMP/out10_pin" 2>&1 || { cat "$TMP/out10_pin"; fail "setup pin for symlink failed"; }
+PATH="$TMP/bin10:$PATH" review-pin.sh status "$REPO10" >"$TMP/out10_status" 2>&1
+rc=$?
+[ "$rc" -eq 0 ] || { cat "$TMP/out10_status"; fail "bare via symlink should exit 0, got $rc"; }
+echo "test bare via symlink PASS"
+
+# ---------------------------------------------------------------------------
+# Test 11: the second link in a symlink chain resolves relative to its directory.
+# ---------------------------------------------------------------------------
+mkdir "$TMP/bin11" "$TMP/links11"
+ln -s "$SELF_DIR" "$TMP/links11/source"
+ln -s "source/review-pin.sh" "$TMP/links11/review-pin.sh"
+ln -s "$TMP/links11/review-pin.sh" "$TMP/bin11/review-pin.sh"
+PATH="$TMP/bin11:$PATH" review-pin.sh status "$REPO10" >"$TMP/out11_status" 2>&1
+rc=$?
+[ "$rc" -eq 0 ] || { cat "$TMP/out11_status"; fail "relative symlink chain should exit 0, got $rc"; }
+echo "test relative symlink chain PASS"
+
+# ---------------------------------------------------------------------------
+# Test 12: release through the link removes the pinned marker.
+# ---------------------------------------------------------------------------
+marker10="$(marker_for "$REPO10")"
+PATH="$TMP/bin10:$PATH" review-pin.sh release "$REPO10" >"$TMP/out12_release" 2>&1
+rc=$?
+[ "$rc" -eq 0 ] || { cat "$TMP/out12_release"; fail "release via symlink should exit 0, got $rc"; }
+[ ! -e "$marker10" ] || fail "release via symlink did not remove marker"
+echo "test release via symlink PASS"
+
 # Resolved-marker mode does not consult git and records the invoking process.
 mkdir "$TMP/no-git"
 cat > "$TMP/no-git/git" <<'STUB'
