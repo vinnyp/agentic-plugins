@@ -1,0 +1,4 @@
+PASS: doctor healthy
+PASS: doctor missing
+PASS: doctor unparseable
+PASS: doctor dead

@@ -595,7 +595,7 @@ for tool in awk python3 bash git mkdir mktemp rm cat grep date mv dirname basena
   ln -s "$location" "$LIVE_BIN/$tool"
 done
 live_run() {
-  DISPATCH_LIVE_TIMEOUT=1 HOME="$TMP" TMPDIR="$TMP/live-temp" XDG_STATE_HOME="$TMP/state" PATH="$LIVE_BIN" "$DOCTOR_BIN" --live
+  DISPATCH_LIVE_TIMEOUT="${LIVE_RUN_TIMEOUT:-15}" HOME="$TMP" TMPDIR="$TMP/live-temp" XDG_STATE_HOME="$TMP/state" PATH="$LIVE_BIN" "$DOCTOR_BIN" --live
 }
 live_out=$(live_run 2>&1); live_rc=$?
 [ "$live_rc" = 0 ] && [ "$(printf '%s\n' "$live_out" | grep -c '^PASS ')" = 7 ] || fail "live all-pass: $live_out"
@@ -605,7 +605,11 @@ good=$(cat "$last_good" 2>/dev/null)
 printf '%s\n' "$good" | grep -q '"checks":7' || fail 'INFO counted in last-good checks'
 printf '%s\n' "$live_out" | grep -q '^INFO agy-tmpdir: no output (denial trap active) (rc=0)$' || fail 'empty TMPDIR observation missing'
 for outcome in output failure timeout; do
-  live_out=$(LIVE_TMPDIR="$outcome" live_run 2>&1); live_rc=$?
+  if [ "$outcome" = timeout ]; then
+    live_out=$(LIVE_RUN_TIMEOUT=1 LIVE_TMPDIR="$outcome" live_run 2>&1); live_rc=$?
+  else
+    live_out=$(LIVE_TMPDIR="$outcome" live_run 2>&1); live_rc=$?
+  fi
   [ "$live_rc" = 0 ] && [ "$(printf '%s\n' "$live_out" | grep -c '^PASS ')" = 7 ] || fail "TMPDIR $outcome turned result red: $live_out"
   case "$outcome" in
     output) expected='output present (rc=0)' ;;
@@ -645,7 +649,11 @@ for reply in silent stderr claim; do
 done
 for negative in silent signin claim stderr sleep; do
   started=$SECONDS
-  live_out=$(LIVE_NEGATIVE="$negative" live_run 2>&1); live_rc=$?
+  if [ "$negative" = sleep ]; then
+    live_out=$(LIVE_RUN_TIMEOUT=1 LIVE_NEGATIVE="$negative" live_run 2>&1); live_rc=$?
+  else
+    live_out=$(LIVE_NEGATIVE="$negative" live_run 2>&1); live_rc=$?
+  fi
   [ "$live_rc" != 0 ] && printf '%s\n' "$live_out" | grep -q '^FAIL.*agy' || fail "$negative reply accepted: $live_out"
   [ "$((SECONDS - started))" -lt 12 ] || fail "$negative timeout was not prompt"
 done

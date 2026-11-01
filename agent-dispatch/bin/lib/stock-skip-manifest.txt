@@ -1,4 +1,5 @@
 # Stock environment skips and required coverage.
+# Public conformance commands replace the removed timeout/watchdog function modes.
 bin/test-drive-cold-session.sh	skip	^SKIP: tmux not installed$
 bin/test-run-tests.sh	skip	^SKIP shellcheck failure$
 bin/test-dispatch-worker-signals.sh	skip	^SKIP: GNU timer not installed$
@@ -12,23 +13,12 @@ bin/test-portable-stat.sh	skip	^(gnu leg SKIP \(no GNU stat\)|bsd leg SKIP \(no 
 bin/test-mutation-verify.sh	skip	^test copy failure SKIP \(root\)$
 bin/test-review-pin.sh	skip	^SKIP: real git does not block on alternates for pin$
 bin/test-review-launch.sh	skip	^SKIP: real git does not block on objects/info/alternates \((codex|agy|claude)\)$
-bin/test-repo-state-cli.sh	skip	^SKIP (case_watchdog_repeated|case_1_snapshot_alternates_fifo): this git does not block on alternates FIFO \(probe rc [0-9]+\)$
-bin/test-repo-state-cli.sh	skip	^SKIP case_7_linked_worktree: this git does not block on linked-alternates FIFO \(probe rc [0-9]+\)$
-bin/test-repo-state-cli.sh	skip	^(case_watchdog_repeated|case_1_snapshot_alternates_fifo|case_7_linked_worktree) \(timeout\) SKIPPED$
-bin/test-repo-state-cli.sh	skip	^SKIP read-only TMPDIR: directory remains writable$
-bin/test-repo-state-cli-watchdog.sh	skip	^SKIP (case_watchdog_repeated|case_1_snapshot_alternates_fifo): this git does not block on alternates FIFO \(probe rc [0-9]+\)$
-bin/test-repo-state-cli-watchdog.sh	skip	^SKIP case_7_linked_worktree: this git does not block on linked-alternates FIFO \(probe rc [0-9]+\)$
-bin/test-repo-state-cli-watchdog.sh	skip	^(case_watchdog_repeated|case_1_snapshot_alternates_fifo|case_7_linked_worktree) \(watchdog\) SKIPPED$
-bin/test-repo-state-cli-watchdog.sh	skip	^SKIP read-only TMPDIR: directory remains writable$
 bin/test-dispatch-worker.sh	require	test 13m (codex external timeout rc124) PASS
-bin/test-repo-state.sh	require	snapshot performance: timeout under 45 seconds (default limit 120) PASS
-bin/test-repo-state.sh	require	snapshot performance: no-timeout under 45 seconds (default limit 120) PASS
-bin/test-repo-state.sh	require	compare bound PASS
-bin/test-repo-state.sh	require	hostile snapshot fallback PASS
-bin/test-repo-state-cli.sh	require	case_2_snapshot_slow_git (timeout) PASS
-bin/test-repo-state-cli.sh	require	case_4_compare_slow_git (timeout) PASS
-bin/test-repo-state-cli-watchdog.sh	require	case_2_snapshot_slow_git (watchdog) PASS
-bin/test-repo-state-cli-watchdog.sh	require	case_4_compare_slow_git (watchdog) PASS
+test/test-conformance-repo-state.sh	require	PASS: case_5_clean_repo
+test/test-conformance-repo-state.sh	require	PASS: repo-state-worker-compare-bound
+test/test-conformance-repo-state.sh	require	PASS: case_slow_alternates_fifo
+test/test-conformance-repo-state.sh	require	PASS: case_2_snapshot_slow_git
+test/test-conformance-repo-state.sh	require	PASS: case_4_compare_slow_git
 bin/test-run-tests-signals.sh	require	timeout shim defaults and launch sentinel PASS
 bin/test-coding-dispatch.sh	require	test (d2) SIGKILL orphan self-heals via reuse PASS
 bin/test-review-launch.sh	require	review launch FIFO matrix and allocation/before-snapshot failures PASS
@@ -36,7 +26,7 @@ bin/test-portable-timeout.sh	require	kill-stage (helper) PASS
 bin/test-portable-timeout.sh	require	group-leadership (helper) PASS
 bin/test-dispatch-worker-signals.sh	require	helper codex:INT:group:0 PASS
 bin/test-dispatch-worker-signals.sh	require	helper agy:INT:group:1 PASS
-bin/test-repo-state.sh	require	hostile metadata types PASS
+test/test-conformance-repo-state.sh	require	hostile metadata types PASS
 bin/test-portable-timeout.sh	require	descendant-kill (helper) PASS
 bin/test-portable-timeout.sh	require	descendant-TERM (helper) PASS
 bin/test-portable-timeout.sh	require	descendant-INT (helper) PASS

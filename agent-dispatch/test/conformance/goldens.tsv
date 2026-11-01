@@ -132,3 +132,44 @@ capture-shared-config	known-defect	vinnyp/foundry#239	15	0
 capture-limit-file	known-defect	vinnyp/foundry#263	15	0
 capture-review-collision	preserve	-	15	0
 capture-no-setsid	preserve	-	15	0
+repo-state-cli-slow-alternates-fifo	preserve		180	0
+repo-state-cli-fifo-over-temp	preserve		180	0
+repo-state-cli-cli-signals	preserve		180	0
+repo-state-cli-4-compare-slow-git	preserve		180	0
+repo-state-cli-slow-linked-worktree	preserve		180	0
+repo-state-cli-failed-sweep	preserve		180	0
+repo-state-security	preserve		180	0
+repo-state-cli-stale-bound-env	preserve		180	0
+repo-state-config	preserve		180	0
+repo-state-cli-9-healthy-special-file	preserve		180	0
+repo-state-hooks-history	preserve		180	0
+repo-state-cli-symlinked-gitdir	preserve		180	0
+repo-state-redaction	preserve		180	0
+repo-state-cli-5-clean-repo	preserve		180	0
+repo-state-cli-11-cli-invalid-limit	preserve		180	0
+repo-state-cli-8-external-kill	preserve		180	0
+repo-state-cli-premark-rename-failure	preserve		180	0
+repo-state-cli	preserve		180	0
+repo-state-cli-symlink-path	preserve		180	0
+repo-state-cli-2-snapshot-slow-git	preserve		180	0
+repo-state-cli-compare-helper-failure	preserve		180	0
+repo-state-cli-13-hostile-output-path	preserve		180	0
+repo-state-inputs	preserve		60	0
+repo-state-parallel-pin	preserve		60	0
+repo-state-limits	preserve		60	0
+repo-state-worker-snapshot-bound	preserve		45	0
+repo-state-worker-compare-bound	preserve		45	0
+repo-state-worker-limits	preserve		120	0
+repo-state-hash-failure	preserve		30	0
+probe-agy-auth-preflight	preserve		120	0
+probe-agy-print-form-probe	preserve		120	0
+probe-codex-cancellation	preserve		60	0
+probe-codex-exec-probe	preserve		120	0
+probe-codex-pid-signal	known-defect	vinnyp/foundry#277	45	0
+probe-agy-doctor	preserve		120	0
+probe-unavailable	preserve		15	0
+clone-contract	preserve		60	0
+freshness-contract	preserve		60	0
+repo-state-query-redaction	preserve		30	0
+repo-state-cli-timer-claims-success	preserve		30	0
+clone-never-converges	preserve		30	0

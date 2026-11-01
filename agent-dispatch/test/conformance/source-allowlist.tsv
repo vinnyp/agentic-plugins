@@ -1,0 +1,4 @@
+source_test	reason
+test/test-conformance-feeds.sh	Internal verdict-feed write failures cannot be induced independently through a published command; this small fault-injection suite retains producer failure coverage.
+bin/test-review-launch.sh	Calls published dispatch-worker; timeout-bin.sh selects a portable outer test deadline and test-env-reset.sh isolates caller settings. Retains real-Git FIFO matrix without adding a timer tool.
+bin/test-portable-stat.sh	Direct stat dialect, uid, mtime and special-bit helper results have no published CLI; tree-identity integration invokes mutation tools and retains installed BSD/GNU coverage. Small helper exception; execution requires mutation-tool authorization.

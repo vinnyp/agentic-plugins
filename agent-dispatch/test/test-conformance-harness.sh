@@ -1,6 +1,48 @@
 #!/usr/bin/env bash
 set -eu
 here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+# Migrated suites and scenarios must not regain implementation sourcing.
+python3 - "$here" <<'SOURCE_GUARD'
+import csv
+from pathlib import Path
+import re
+import sys
+root = Path(sys.argv[1]).parent
+conformance = root / 'test/conformance'
+with (conformance / 'source-allowlist.tsv').open() as stream:
+    allowed = {row['source_test']: row['reason']
+               for row in csv.DictReader(stream, delimiter='\t')}
+with (conformance / 'rewrite-map.tsv').open() as stream:
+    migrated = {row['source_test'] for row in csv.DictReader(stream, delimiter='\t')}
+paths = set((conformance / 'scenarios').glob('*/scenario.sh'))
+paths.update(root / name for name in migrated if (root / name).exists())
+pattern = re.compile(r'^[ \t]*(?:source|\.)[ \t]+(.+)$', re.M)
+def scenario_source_allowed(operand):
+    match = re.fullmatch(
+        r'"\$\((?:CDPATH=\'\' )?cd (?:-- )?"\$\(dirname (?:-- )?"\$0"\)/\.\./\.\." && pwd\)/([a-zA-Z0-9_/.-]+\.sh)"',
+        operand)
+    if not match:
+        return False
+    target = (conformance / match[1]).resolve()
+    return conformance.resolve() in target.parents and target.is_file()
+
+
+assert scenario_source_allowed('"$(cd "$(dirname "$0")/../.." && pwd)/repo-state-fixture.sh"')
+for operand in [
+    '"$(cd "$(dirname "$0")/../.." && pwd)/../../bin/lib/repo-state.sh"',
+    '"$IMPL_BIN/lib/repo-state.sh"',
+    '"$IMPL_BIN/codex-exec-probe.sh"',
+]:
+    assert not scenario_source_allowed(operand), operand
+
+for path in sorted(paths):
+    name = str(path.relative_to(root))
+    for operand in pattern.findall(path.read_text()):
+        if path.parent.parent == conformance / 'scenarios':
+            assert scenario_source_allowed(operand), (name, operand)
+        else:
+            assert allowed.get(name), f'{name}: sourcing without allowlist reason'
+SOURCE_GUARD
 work=$(mktemp -d "${TMPDIR:-/tmp}/conformance-test.XXXXXX")
 [ -n "$work" ] || exit 1
 export DISPATCH_CONFORMANCE_ROOT="$work/root"
@@ -19,6 +61,14 @@ normalised_is() {
   actual=$(printf '%s\n' "$2" | sed -E -f "$h/normalise.sed")
   [ "$actual" = "$3" ] || fail "$1: got $actual"
 }
+normalised_is 'terminated job notice dropped' "/tmp/x/scenario.sh: line 23: 86778 Terminated: 15          bash -c 'exec -a \"tagged-sleep-\$RUN_ID\" /bin/sleep 60'" ''
+normalised_is 'hangup job notice dropped' '/tmp/x/scenario.sh: line 23: 86778 Hangup: 1          bash -c x' ''
+normalised_is 'plain terminated job notice dropped' '/tmp/x/scenario.sh: line 23: 86778 Terminated          bash -c x' ''
+normalised_is 'segmentation fault preserved' '/tmp/x/scenario.sh: line 23: 86778 Segmentation fault: 11  bash -c x' '/tmp/x/scenario.sh: line 23: 86778 Segmentation fault: 11  bash -c x'
+normalised_is 'real terminated output preserved' 'worker output: Terminated after cleanup' 'worker output: Terminated after cleanup'
+normalised_is 'config line 11 normalised' 'fatal: bad config line 11 in file .git/config' 'fatal: bad config line <N> in file .git/config'
+normalised_is 'config line 9 normalised' 'fatal: bad config line 9 in file .git/config' 'fatal: bad config line <N> in file .git/config'
+normalised_is 'config value preserved' 'fatal: bad config value in file .git/config' 'fatal: bad config value in file .git/config'
 normalised_is 'epoch pinned_at normalised' 'pinned_at=1793495751' 'pinned_at=<TS>'
 normalised_is 'phase slug normalised' 'branch=phase-my-repo-20261031230803-77539' 'branch=phase-my-repo-<TS>-<PID>'
 normalised_is 'cd slug normalised' 'branch=cd-20261031230803-77539' 'branch=cd-<TS>-<PID>'
@@ -56,6 +106,33 @@ printf 'id\ttag\tissue\tbudget_s\tretry\nsample\tpreserve\t\t2\t0\n' > "$h/golde
 bash "$h/run.sh" --impl "$work/impl" --out "$work/a"
 bash "$h/run.sh" --impl "$work/impl" --out "$work/b"
 bash "$h/compare.sh" "$work/a" "$work/b" || fail 'two runs with tool paths compare clean'
+# A single comparison must report differences across scenarios and files.
+mkdir -p "$work/multi-a" "$work/multi-b"
+for id in first second; do
+  cp -R "$work/a/sample" "$work/multi-a/$id"
+  cp -R "$work/a/sample" "$work/multi-b/$id"
+done
+printf 'changed stdout\n' >> "$work/multi-b/first/stdout"
+printf 'changed stderr\n' >> "$work/multi-b/second/stderr"
+compare_rc=0
+bash "$h/compare.sh" "$work/multi-a" "$work/multi-b" > "$work/multi-diff" || compare_rc=$?
+[ "$compare_rc" = 1 ] || fail 'multiple mismatches exit 1'
+grep -Fxq 'first/stdout differs' "$work/multi-diff" || fail 'first mismatch reported'
+grep -Fxq 'second/stderr differs' "$work/multi-diff" || fail 'second mismatch reported'
+for side in a b; do
+  for stream in stdout stderr; do
+    cp "$work/$side/sample/$stream" "$work/saved-stream"
+    printf '/example/bin/lib/repo-state.sh: line 123: warning: command substitution: ignored null byte in input\n' >> "$work/$side/sample/$stream"
+    bash "$h/compare.sh" "$work/a" "$work/b" || fail 'null byte warning ignored'
+    cp "$work/saved-stream" "$work/$side/sample/$stream"
+    printf '/example/bin/lib/other.sh: line 123: warning: command substitution: ignored null byte in input\n' >> "$work/$side/sample/$stream"
+    if bash "$h/compare.sh" "$work/a" "$work/b" > "$work/diff"; then fail 'other file command substitution warning still compared'; fi
+    cp "$work/saved-stream" "$work/$side/sample/$stream"
+  done
+done
+printf 'different null byte diagnostic\n' >> "$work/b/sample/stderr"
+if bash "$h/compare.sh" "$work/a" "$work/b" > "$work/diff"; then fail 'other null byte text still compared'; fi
+sed -i.bak '$d' "$work/b/sample/stderr"
 for stream in stdout stderr; do
 for side in a b; do
   cp "$work/$side/sample/$stream" "$work/saved-stream"
@@ -67,6 +144,10 @@ done
 printf '/example/bin/lib/repo-state.sh: child setpgid (91436 to 91436): Operation not permitted extra\n' >> "$work/b/sample/stderr"
 if bash "$h/compare.sh" "$work/a" "$work/b" > "$work/diff"; then fail 'other setpgid text still compared'; fi
 case "$(cat "$work/diff")" in *'sample/stderr differs'*) ;; *) fail 'other setpgid text names stderr';; esac
+# case: comparison-failure-diagnostics
+grep -qx -- '--- expected' "$work/diff" || fail 'diff labels expected observation'
+grep -qx -- '+++ actual' "$work/diff" || fail 'diff labels actual observation'
+grep -Fqx -- '+/example/bin/lib/repo-state.sh: child setpgid (91436 to 91436): Operation not permitted extra' "$work/diff" || fail 'diff shows unexpected stderr bytes'
 cp "$work/recording/stderr" "$work/b/sample/stderr"
 ln -s "$work/impl" "$work/impl-link"
 bash "$h/run.sh" --impl "$work/impl-link" --out "$work/symlinked"

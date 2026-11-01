@@ -36,8 +36,8 @@ Perl SHA numbering shared across each scenario’s files (`<SHA1>`, `<SHA2>`,
 with unambiguous `base_sha` prefixes sharing their full SHA token), then
 `normalise.sed` for
 `cd-<timestamp>-<pid>` and `phase-<name>-<timestamp>-<pid>` slugs, and whitespace-delimited
-`pid=`, epoch `pinned_at=`, and `elapsed=<seconds>s` fields. No lines are
-dropped. Generated `REVIEW_OUTFILE` paths named `dispatch-review.<random>`
+`pid=`, epoch `pinned_at=`, and `elapsed=<seconds>s` fields. Only the exact Bash setpgid race and
+repo-state null-byte command-substitution warning lines are dropped. Generated `REVIEW_OUTFILE` paths named `dispatch-review.<random>`
 and eight-digit namespace hashes under `/.worktrees/` also normalise; the
 latter depend on the fresh scratch repo's absolute path. Brief fingerprints
 remain significant because they are derived from the input brief's contents.
@@ -160,6 +160,7 @@ entry point is modified by the worker capture task.
 The scripts retain Bash 3.2 syntax. The exact Bash job-control race diagnostic
 `child setpgid (... to ...): Operation not permitted` is normalised on both
 stdout and stderr; other diagnostics remain significant.
+Shell child-reaping job notices are dropped because they race with wait, and Git bad-config line numbers are normalised because git init writes different keys across platforms.
 
 Call records compare physical working directories, source/clone placement,
 global Git config paths and SHA-256 digests, visible sentinels, and source pin
@@ -241,3 +242,142 @@ default (or the roster default when unset). It sends no thread or turn request.
 Missing tools, failed metadata requests, and absent pins fail the check.
 The capture suite tests the Codex protocol with a synthetic server, including
 pagination, configured and implicit defaults, and an absent model.
+
+### Repository-state test rewrite
+
+Run `bash agent-dispatch/test/test-conformance-repo-state.sh` for the migrated
+repository-state cases. The `repo-state-*` scenarios invoke only
+`repo-state-check`, `dispatch-worker`, and `review-pin.sh`; their shared files
+contain fixture setup and public-command adapters. Each scenario retains
+independent assertions as well as baseline comparison. Configuration cases
+check credential values, credentialed keys, ambiguous URL userinfo, salted key
+distinction, command argument truncation, and escaped display bytes.
+
+`rewrite-map.tsv` accounts for original cases and assertion locations before
+deleting the three old suites. Parameterized rows retain every input in the
+listed loop. Public deadline, signal, atomic publication, cleanup, malformed
+input, history, hook, worktree and concurrent status cases remain covered.
+The obsolete watchdog-only wrapper was also removed. Bash descriptor channels,
+function serialization, payload framing, completion tokens, caller shell flags,
+and implementation allocation/batching policies are dropped because the spec
+removes that transport. Deterministic slow Git substitutes for Git-version
+dependent FIFO blocking probes. The sourcing check permits scenarios to source
+fixtures under
+`test/conformance/`, never implementation files under `bin/`.
+`source-allowlist.tsv` lists only accepted suite exceptions.
+
+These goldens are recorded through `baseline-tree.sh` at the pinned BASELINE
+SHA. Fixtures use fixed identities and synthetic reviewers; each child is
+waited for and no real agent is invoked. Scenarios 2 (`repo-state-cli-2-snapshot-slow-git`) and 4
+(`repo-state-cli-4-compare-slow-git`) bound snapshot and compare elapsed time
+to five seconds each. The worker bound cases assert exit 10,
+an incomplete drift diagnostic, and pin release.
+
+### Probe test rewrite
+
+Run `bash agent-dispatch/test/test-conformance-probes.sh` for the migrated probe
+cases. Seven `probe-*` scenarios exercise `coding-preflight.sh`,
+`agent-dispatch-doctor`, and the existing public `dispatch-worker` flows with
+synthetic runtimes. No scenario sources an implementation file. Fixtures keep
+independent assertions for model parsing, role defaults and overrides,
+authentication, symlink resolution, bare-stdin sentinel validation, timeout
+bounds, nonce execution, cache isolation and digest-tool selection. The doctor
+case checks both role defaults, missing models, unparseable rosters and failed
+metadata requests without launching a turn.
+
+`rewrite-map.tsv` enumerates the original cases and loop inputs. Public missing
+binary errors replace the private probes' advisory return codes. Empty model
+parser inputs, cached shell variables, and caller traps are explicitly dropped
+with reasons. Public INT, TERM and HUP cancellation is retained in
+`probe-codex-cancellation` by signalling the process group.
+`probe-codex-pid-signal` pins parent-only cancellation as vinnyp/foundry#277. The default form timeout is observed at the timer
+boundary and with a real eleven-second synthetic reply. Codex bounds include
+invalid inputs and all accepted integer units. No real agent or long gate runs.
+
+Goldens are captured through `baseline-tree.sh` at the pinned `BASELINE` SHA.
+Each scenario returns zero only after its public-command assertions pass;
+its output records the completed cases. All seven have finite budgets and no
+retry. Scratch and implementation paths use the standard harness placeholders.
+
+### Review clone test rewrite
+
+Run `bash agent-dispatch/test/test-conformance-clone.sh` for the migrated
+`bin/test-review-clone.sh` cases. `clone-contract` invokes only the published
+`review-clone.sh` interface. Its assertions retain every original case, including
+quoted and tabbed attribute paths, large info attributes, linked sources, remote
+isolation, destination validation, guarded removal, and symlink CLI usage.
+The convergence fixture wraps Git to add a source tag at the first source ref
+listing; it calls no implementation functions. Private result variables are
+observed through CLI stdout and single-line stderr. No cases are dropped and
+no implementation sourcing remains in this group. The baseline golden is
+recorded through `baseline-tree.sh` at the SHA in `BASELINE`.
+
+The freshness rewrite runs with `bash agent-dispatch/test/test-conformance-freshness.sh`.
+`freshness-contract` retains all six cases from `bin/test-dispatch-freshness.sh`
+through `coding-dispatch.sh`: fetched staleness, failed-fetch fallback, current
+base, origin fallback without an upstream, stale-base override, and detached
+HEAD. Goldens were recorded using `baseline-tree.sh` at the SHA in `BASELINE`.
+The scenario locates disposable worktrees with Git's public porcelain output.
+
+`rewrite-map.tsv` also accounts for the retained review-launch FIFO matrix,
+allocation and snapshot failures, and portable-stat helper/integration checks.
+Their `scenario_id` cells name the retained test paths; reasons live in
+`source-allowlist.tsv`. `test-review-launch.sh` sources `timeout-bin.sh` and
+`test-env-reset.sh` as accepted exceptions. `test-portable-stat.sh` has no published CLI for its
+direct helper checks; it directly tests helper return values
+and invokes mutation verification/sweep commands; it is retained as the small
+helper exception and cannot run when mutation tools are prohibited.
+The harness suite checks the anchored implementation-sourcing pattern across
+all scenarios and migrated suites, requiring an explicit allowlist reason.
+
+### Stock repo-state coverage after suite retirement
+
+The stock skip manifest requires the verified case tokens printed by
+`test-conformance-repo-state.sh` after golden comparison succeeds. Clean snapshot
+performance, bounded worker comparison, hostile snapshot fallback, slow snapshot
+and comparison, and hostile metadata remain mandatory. The former timeout and
+watchdog function modes share their public-command replacements; their private
+transport distinction was explicitly dropped in `rewrite-map.tsv`.
+
+`repo-state-inputs` checks the FIFO snapshot warning byte for byte against its
+fixture path in the scenario, keeping scratch paths out of its stderr golden.
+That empty stderr observation was recaptured from the pinned baseline archive;
+the remaining observations are unchanged. A comparison failure now prints a
+normalized unified diff labelled `expected` and `actual`.
+
+### Audit additions
+
+`clone-never-converges` moves a source tag after every mirror fetch and requires
+exit 4, the exact mismatched-refs diagnostic, and removal of the destination.
+`repo-state-query-redaction` checks that a hooksPath query token never appears
+in compare output. Their goldens were captured from the pinned baseline archive.
+
+Together, the value-side hooksPath and key-side URL query cases require query
+redaction without leaking the synthetic secret.
+
+`repo-state-cli-timer-claims-success` places a timer that reports success without
+running its command first on PATH. Snapshot must return 3 with an unreadable
+first line, replacing a stale readable snapshot; compare must return 2 with
+exactly one line in either documented form: `state: compare timed out` or
+`state: compare could not complete (reason)`.
+On an external-timer implementation, this proves refusal without a completion
+record; on an internal-deadline implementation, it reduces to the deadline
+refusal.
+
+`probe-codex-cancellation` sends INT, TERM and HUP to the preflight process group,
+which is how a public caller cancels. It requires exits 130/143/129, child
+disappearance within five seconds, and removal of the exact probe directory
+recorded by the stub within five seconds after child exit. That directory must
+exist before signalling. It proves process-group cancellation runs probe cleanup,
+but does not prove that signalling only the preflight PID reaches the probe's
+cancellation traps. Its launcher restores default INT, TERM and HUP handling.
+
+`probe-codex-pid-signal` pins vinnyp/foundry#277 by signalling only the preflight
+PID. It requires exits 143/129 and the child still alive when wait returns, then
+observes the child disappear within ten seconds under the three-second probe
+timer. Its 30-second stub cannot exit naturally within that window. The launcher
+restores default TERM and HUP handling, including when HUP is ignored on entry,
+without creating a process group. This proves parent-only cancellation leaves the
+child running until the timer; it does not prove probe directory cleanup, which
+varies with how the orphaned subshell dies across Bash versions. Both scenarios
+use the stub's published PID only for liveness checks, never for signalling.
