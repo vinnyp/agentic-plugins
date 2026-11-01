@@ -285,7 +285,16 @@ run_reviewer_case() { # <shell> <case> <extracted snippet>
       esac > "$root/docs/dispatch-preamble.md" ;;
     outside) repo="$work/outside"; mkdir -p "$repo"; expected='git status failed' ;;
     no-brief) rm "$briefs/brief-one.md" "$briefs/brief-two.md"; expected='no brief matched' ;;
-    cat-fails|cat-truncates|mv-fails)
+    line-one-only|stale-block|raw-token)
+      case "$scenario" in
+        line-one-only) printf '%s\n' "$C_CLAUSE1" ;;
+        stale-block) printf '%s\n' "${CLAUSES/\{\{DIRTY_PATHS\}\}/\`not-dirty.md\`}" ;;
+        raw-token) printf '%s\n' "$CLAUSES" ;;
+      esac > "$briefs/brief-one.md"
+      printf 'FIRST BODY\n' >> "$briefs/brief-one.md"
+      cp "$briefs/brief-one.md" "$work/one.before"
+      expected='re-create it' ;;
+    cat-fails|read-fails|tmp-vanishes|late-brief|mv-fails)
       mkdir "$work/bin"; run_path="$work/bin:$PATH"
       if [ "$scenario" = mv-fails ]; then
         cat > "$work/bin/mv" <<STUB
@@ -297,24 +306,45 @@ printf '%s\n' "\$count" > "$work/count"
 [ "\$count" -ne 2 ] || exit 1
 exec "$REAL_MV" "\$@"
 STUB
-        chmod +x "$work/bin/mv"; expected='re-run'
-      else
-        rc=1; [ "$scenario" != cat-truncates ] || rc=0
+        chmod +x "$work/bin/mv"; expected='could not replace'
+      elif [ "$scenario" = tmp-vanishes ]; then
+        cat > "$work/bin/mv" <<'STUB'
+#!/usr/bin/env bash
+rm -f "$1"
+STUB
+        chmod +x "$work/bin/mv"; expected='does not carry the block'
+      elif [ "$scenario" = late-brief ]; then
         cat > "$work/bin/cat" <<STUB
 #!/usr/bin/env bash
-for arg in "\$@"; do
-  case "\$arg" in *brief-two.md) exit $rc ;; esac
-done
+[ -e "$work/late-created" ] || {
+  printf 'LATE BODY\n' > "$briefs/brief-three.md"
+  : > "$work/late-created"
+}
+exec "$REAL_CAT" "\$@"
+STUB
+        chmod +x "$work/bin/cat"; expected='does not carry the block'
+      else
+        cat > "$work/bin/cat" <<STUB
+#!/usr/bin/env bash
+if [ "\$1" = "$briefs/brief-two.md" ]; then
+  count=0
+  [ ! -f "$work/count" ] || read -r count < "$work/count"
+  count=\$((count + 1))
+  printf '%s\n' "\$count" > "$work/count"
+  if [ "$scenario" = read-fails ] || [ "\$count" -eq 2 ]; then exit 1; fi
+fi
 exec "$REAL_CAT" "\$@"
 STUB
         chmod +x "$work/bin/cat"
-        [ "$scenario" != cat-fails ] || expected='could not write'
+        expected='could not write'
+        [ "$scenario" != read-fails ] || expected='could not read'
       fi ;;
     pipe) printf 'dirty\n' > "$repo/a|b.md" ;;
     amp) printf 'dirty\n' > "$repo/a&b.md" ;;
     one) printf 'dirty\n' > "$repo/one.md" ;;
     two) printf 'dirty\n' > "$repo/one.md"; printf 'dirty\n' > "$repo/two.md" ;;
-    zero|second-run) ;;
+    glob-chars) printf 'dirty\n' > "$repo/a*b.md" ;;
+    zero|second-run|dirty-changed) ;;
     *) return 1 ;;
   esac
   sed "s#$RB/brief-#$briefs/brief-#g" "$source" > "$work/snippet.sh"
@@ -334,6 +364,9 @@ STUB
       ! grep -qF 'no brief was changed' "$work/output" || return 1
       grep -qxF -- "$C_CLAUSE1" "$briefs/brief-one.md" || return 1
       cmp -s "$work/two.before" "$briefs/brief-two.md" || return 1
+    elif [ "$scenario" = tmp-vanishes ] || [ "$scenario" = late-brief ]; then
+      ! grep -qF 'no brief was changed' "$work/output" || return 1
+      return 0
     elif [ "$scenario" = no-brief ]; then
       [ ! -e "$briefs/brief-*.md" ] || return 1
     else
@@ -345,21 +378,50 @@ STUB
   else
     [ "$rc" -eq 0 ] || return 1
   fi
-  if [ "$scenario" = second-run ] || [ "$scenario" = mv-fails ]; then
+  if [ "$scenario" = glob-chars ]; then
+    line="${C_CLAUSE2%%'{{DIRTY_PATHS}}'*}\`a*b.md\`${C_CLAUSE2#*'{{DIRTY_PATHS}}'}"
+    grep -qxF -- "$line" "$briefs/brief-one.md" || return 1
+    grep -qxF -- "$line" "$briefs/brief-two.md" || return 1
+  fi
+  if [ "$scenario" = second-run ] || [ "$scenario" = mv-fails ] || [ "$scenario" = glob-chars ] || [ "$scenario" = dirty-changed ]; then
     cp "$briefs/brief-one.md" "$work/one.after"
     cp "$briefs/brief-two.md" "$work/two.after"
+    [ "$scenario" != dirty-changed ] || printf 'dirty\n' > "$repo/new.md"
     (cd "$repo" && GIT_CEILING_DIRECTORIES="$work" CLAUDE_PLUGIN_ROOT="$root" \
       "$shell" "$work/snippet.sh") > "$work/output2" 2>&1
     rc=$?
     check_temps "$briefs" || return 1
+    if [ "$scenario" = dirty-changed ]; then
+      [ "$rc" -ne 0 ] || return 1
+      grep -qF 're-create it' "$work/output2" || return 1
+      cmp -s "$work/one.after" "$briefs/brief-one.md" || return 1
+      cmp -s "$work/two.after" "$briefs/brief-two.md" || return 1
+      return 0
+    fi
     [ "$rc" -eq 0 ] || return 1
-    if [ "$scenario" = second-run ]; then
+    if [ "$scenario" = second-run ] || [ "$scenario" = glob-chars ]; then
       cmp -s "$work/one.after" "$briefs/brief-one.md" || return 1
       cmp -s "$work/two.after" "$briefs/brief-two.md" || return 1
     fi
   fi
+  if [ "$scenario" = glob-chars ]; then
+    # A wildcard-equivalent stale path must not pass the literal skip check.
+    sed 's/a\*b.md/axb.md/g' "$briefs/brief-one.md" > "$work/stale"
+    cp "$work/stale" "$briefs/brief-one.md"
+    cp "$briefs/brief-two.md" "$work/two.after"
+    (cd "$repo" && GIT_CEILING_DIRECTORIES="$work" CLAUDE_PLUGIN_ROOT="$root" \
+      "$shell" "$work/snippet.sh") > "$work/output3" 2>&1
+    rc=$?
+    [ "$rc" -ne 0 ] || return 1
+    grep -qF 're-create it' "$work/output3" || return 1
+    cmp -s "$work/stale" "$briefs/brief-one.md" || return 1
+    cmp -s "$work/two.after" "$briefs/brief-two.md" || return 1
+    check_temps "$briefs" || return 1
+    return 0
+  fi
   case "$scenario" in
     one) expected='`one.md`' ;; two) expected='`one.md` `two.md`' ;;
+    glob-chars) expected='`a*b.md`' ;;
     pipe) expected='`a|b.md`' ;; amp) expected='`a&b.md`' ;; *) expected=none ;;
   esac
   line="${C_CLAUSE2%%'{{DIRTY_PATHS}}'*}$expected${C_CLAUSE2#*'{{DIRTY_PATHS}}'}"
@@ -369,16 +431,15 @@ STUB
     grep -qF '{{DIRTY_PATHS}}' "$expected" && return 1
   done
   grep -qxF 'FIRST BODY' "$briefs/brief-one.md" || return 1
-  if [ "$scenario" = cat-truncates ]; then
-    ! grep -qF 'SECOND BODY' "$briefs/brief-two.md" || return 1
-  else
-    grep -qxF 'SECOND BODY' "$briefs/brief-two.md" || return 1
-  fi
+  grep -qxF 'SECOND BODY' "$briefs/brief-two.md" || return 1
   return 0
 }
 
 # Fail if either interpreter cannot run. Compare versions, not symlink paths.
 shells=("$(command -v bash)")
+if [ -x /opt/homebrew/bin/bash ] && [ "$(/opt/homebrew/bin/bash -c 'printf "%s" "$BASH_VERSION"')" != "$(bash -c 'printf "%s" "$BASH_VERSION"')" ]; then
+  shells+=(/opt/homebrew/bin/bash)
+fi
 if [ -e /bin/bash ]; then
   path_version="$(bash -c 'printf "%s" "$BASH_VERSION"')"
   system_version="$(/bin/bash -c 'printf "%s" "$BASH_VERSION"')"
@@ -394,7 +455,10 @@ import pathlib, sys
 s = pathlib.Path(sys.argv[1]).read_text()
 mutations = {
     'no-mv-die': (' || die "could not replace $b"', ''),
-    'no-skip': ('  [ "$(sed -n 1p "$b")" != "$FIRST" ] || continue\n', ''),
+    'no-skip': ('  case "$CURRENT" in "$RENDERED"*) continue ;; esac\n', ''),
+    'no-stale-guard': ('  [ "$(sed -n 1p "$b")" != "$FIRST" ] || die "$b has a partial or stale preamble; re-create it"\n', ''),
+    'no-final-check': ('  case "$(cat "$b")" in "$RENDERED"*) ;; *) die "$b does not carry the block" ;; esac\n', ''),
+    'glob-skip': ('case "$CURRENT" in "$RENDERED"*)', 'case "$CURRENT" in $RENDERED*)'),
     'no-note': ("NOTE='some briefs may already carry it; fix this and re-run, which skips those'", ''),
     'no-file-guard': ('  [ -f "$b" ] || die "no brief matched"\n', ''),
     'no-block-guard': ('[ -n "$BLOCK" ] || die "no preamble block in $PRE"\n', ''),
@@ -409,23 +473,23 @@ PYMUT
 [ "$?" -eq 0 ] || { bad "could not create mutations"; exit 1; }
 for shell in "${shells[@]}"; do
   if ! "$shell" -c 'exit 0'; then bad "interpreter cannot run: $shell"; continue; fi
-  for scenario in missing markers token outside no-brief two-tokens cat-fails mv-fails cat-truncates second-run pipe amp zero one two; do
+  for scenario in missing markers token outside no-brief two-tokens cat-fails read-fails mv-fails line-one-only stale-block raw-token dirty-changed glob-chars tmp-vanishes late-brief second-run pipe amp zero one two; do
     if run_reviewer_case "$shell" "$scenario" "$TMP/reviewer-snippet.sh"; then
       ok "$shell reviewer snippet: $scenario"
     else bad "$shell reviewer snippet: $scenario"; fi
   done
-  for scenario in missing markers token outside no-brief two-tokens cat-fails mv-fails; do
+  for scenario in missing markers token outside no-brief two-tokens cat-fails read-fails mv-fails line-one-only stale-block raw-token tmp-vanishes late-brief; do
     if run_reviewer_case "$shell" "$scenario" "$TMP/false-success.sh"; then
       bad "$shell refusal mutation survived: $scenario"
     else ok "$shell refusal mutation rejected: $scenario"; fi
   done
-  for pair in no-mv-die:mv-fails no-skip:second-run no-note:mv-fails no-file-guard:no-brief no-block-guard:markers no-token-recheck:two-tokens; do
+  for pair in no-stale-guard:line-one-only no-final-check:tmp-vanishes glob-skip:glob-chars no-mv-die:mv-fails no-skip:second-run no-note:mv-fails no-file-guard:no-brief no-block-guard:markers no-token-recheck:two-tokens; do
     mutant="${pair%%:*}"; scenario="${pair#*:}"
     if run_reviewer_case "$shell" "$scenario" "$TMP/$mutant.sh"; then
       bad "$shell mutation survived: $mutant"
     else ok "$shell mutation rejected: $mutant"; fi
   done
-  if run_reviewer_case "$shell" cat-truncates "$TMP/partial-write.sh"; then
+  if run_reviewer_case "$shell" zero "$TMP/partial-write.sh"; then
     bad "$shell partial-write mutation survived"
   elif grep -qF 'does not carry the block' "$TMP/case-$case_number/output"; then
     ok "$shell partial-write mutation rejected with block refusal"

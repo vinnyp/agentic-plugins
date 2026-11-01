@@ -138,20 +138,22 @@ case "$RENDERED" in *"$TOK"*) die "the preamble still carries the dirty-paths to
 FIRST="$(printf '%s\n' "$RENDERED" | sed -n 1p)"
 for b in /tmp/brief-*.md; do
   [ -f "$b" ] || die "no brief matched"
-  [ "$(sed -n 1p "$b")" != "$FIRST" ] || continue
+  CURRENT="$(cat "$b")" || die "could not read $b"
+  case "$CURRENT" in "$RENDERED"*) continue ;; esac
+  [ "$(sed -n 1p "$b")" != "$FIRST" ] || die "$b has a partial or stale preamble; re-create it"
   { printf '%s\n\n' "$RENDERED"; cat "$b"; } > "$b$SUF" || die "could not write $b$SUF"
   case "$(cat "$b$SUF")" in "$RENDERED"*) ;; *) die "$b$SUF does not carry the block" ;; esac
 done
 NOTE='some briefs may already carry it; fix this and re-run, which skips those'
 for b in /tmp/brief-*.md; do
-  [ -e "$b$SUF" ] || continue
-  mv "$b$SUF" "$b" || die "could not replace $b"
+  [ ! -e "$b$SUF" ] || mv "$b$SUF" "$b" || die "could not replace $b"
+  case "$(cat "$b")" in "$RENDERED"*) ;; *) die "$b does not carry the block" ;; esac
 done
 ```
 
 Run it against the tree the reviewers will read — a worktree's dirty paths, not your cwd's.
 The snippet refuses to ship a brief without the block; a nonzero exit means stop and do not dispatch.
-A re-run skips briefs that already carry the block; the snippet ends with `exit`, so run it through the Bash tool or as a script, not pasted into an interactive shell.
+A re-run skips a brief only when it already starts with exactly this block; a partial or stale block is refused, and that brief must be re-created. A refusal runs `exit`, so run the snippet through the Bash tool or as a script, not pasted into an interactive shell.
 The four clauses are:
 
 - **Never touch a file you did not create.** `rm`, `git checkout`, `git restore`, `git reset`, `git clean` and `git stash` are forbidden against any path outside your task's declared files. Treat unknown files as foreign and leave them. This binds every dispatched agent — a coding worker, a reviewer, a research or archival subagent, any runtime — not only a `coding-dispatch.sh` run. If your task is to change files, the files it declares are yours to edit, even if they already exist, unless the next clause lists them.
