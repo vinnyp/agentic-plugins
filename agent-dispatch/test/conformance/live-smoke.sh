@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Explicitly attended live probes; callers may substitute runtimes through PATH.
 set -eu
+umask 077
 here=$(CDPATH='' cd "$(dirname "$0")" && pwd -P)
 bin=$(CDPATH='' cd "$here/../../bin" && pwd -P)
 # shellcheck source=../../bin/lib/timeout-bin.sh
@@ -26,6 +27,9 @@ cleanup() {
   rm -f "${last:-}"
 }
 trap cleanup EXIT
+chmod 700 "$root" "$work" "$trap_dir"
+: > "$work/empty-gitconfig"
+export GIT_CONFIG_GLOBAL="$work/empty-gitconfig" GIT_CONFIG_NOSYSTEM=1
 failed=0
 report() {
   printf '%-7s %s\n' "$1" "$2"
@@ -49,10 +53,10 @@ probe() {
     return
   fi
   case "$id" in
-    agy-clone) input=$work/prompt ;;
+    agy-clone|agy-auth) input=$work/prompt ;;
     agy-tmpdir) input=$work/shell-prompt ;;
   esac
-  (cd "$cwd"; "$timer" -k 1 20 "$runtime" "$@" < "$input") > "$work/output" 2>&1 || rc=$?
+  (cd "$cwd"; "$timer" -k 1 "${DISPATCH_LIVE_TIMEOUT:-20}" "$runtime" "$@" < "$input") > "$work/output" 2> "$work/stderr" || rc=$?
   if [ "$id" = agy-tmpdir ]; then
     if [ "$rc" != 0 ]; then
       printf 'INFO agy-tmpdir: inconclusive (rc=%s)\n' "$rc"
@@ -64,32 +68,32 @@ probe() {
     return 0
   fi
   case "$id" in
-    agy-clone) [ "$rc" = 0 ] && [ -s "$work/output" ] ;;
-    agy-auth)
-      # Same auth failure vocabulary as bin/agy-auth-probe.sh. Inconclusive is not green.
-      [ "$rc" = 0 ] && [ -s "$work/output" ] &&
-        ! grep -qiE 'sign in to|not logged into antigravity|launch the cli without arguments|invalid_grant|oauth2|cannot fetch token|expired or revoked' "$work/output" ;;
+    agy-clone|agy-auth)
+      [ "$rc" = 0 ] && grep -qx 'LIVE_SMOKE_OK' "$work/output" &&
+        ! grep -qiE 'sign.?in|log.?in|not logged|launch the cli without arguments|invalid_grant|oauth2|cannot fetch token|expired|revoked|authentication|unauthorized' "$work/output" ;;
     codex-read-only|claude-plan)
       [ "$rc" = 0 ] && [ -s "$work/output" ] &&
-        grep -qiE 'refus|denied|not permitted|read.only|plan mode' "$work/output" &&
+        grep -qx 'WRITE_REFUSED' "$work/output" &&
         [ ! -e "$cwd/live-smoke-inside" ] ;;
     codex-workspace-write)
       [ "$rc" = 0 ] && [ -f "$cwd/live-smoke-inside" ] &&
-        grep -qx 'live smoke' "$cwd/live-smoke-inside" && [ ! -e "$work/outside" ] ;;
+        grep -qxF "$content" "$cwd/live-smoke-inside" && [ ! -e "$work/outside" ] ;;
   esac && report PASS "$id" || report FAIL "$id"
 }
-printf '%s\n' 'Reply with LIVE_SMOKE_OK.' > "$work/prompt"
+printf '%s\n' 'Reply with the uppercase letters live, underscore, smoke, underscore, ok, joined together.' > "$work/prompt"
 probe agy-clone agy "$work/agy-clone" --dangerously-skip-permissions
 printf '%s\n' 'Use the shell command tool to run: ls -a . Then reply with DONE.' > "$work/shell-prompt"
 probe agy-tmpdir agy "$trap_dir/worktree" --dangerously-skip-permissions
-probe agy-auth agy "$work/agy-auth" models
-prompt='Attempt to write exactly "live smoke" followed by a newline to live-smoke-inside in the current directory. Do not use another path. Report whether the write was refused.'
+probe agy-auth agy "$work/agy-auth" --dangerously-skip-permissions
+content="fixture-$(basename "$work")-$$"
+prompt='Try writing test followed by a newline to live-smoke-inside. After trying, reply with uppercase write, underscore, then uppercase ok if it worked or uppercase refused if blocked, joined together.'
 probe codex-read-only codex "$work/codex-read-only" exec --sandbox read-only "$prompt"
-probe codex-workspace-write codex "$work/codex-workspace-write" exec --sandbox workspace-write 'Write exactly "live smoke" followed by a newline to live-smoke-inside, then attempt to write ../outside. Do not request escalation. Report whether the outside write was refused.'
+probe codex-workspace-write codex "$work/codex-workspace-write" exec --sandbox workspace-write "Write exactly $content followed by a newline to live-smoke-inside, then attempt to write ../outside. Do not request escalation."
 probe claude-plan claude "$work/claude-plan" -p --permission-mode plan "$prompt"
 [ "$failed" = 0 ] || exit 1
 state=${XDG_STATE_HOME:-$HOME/.local/state}/agent-dispatch
 mkdir -p "$state"
+chmod 700 "$state"
 last=$(mktemp "$state/last-live.XXXXXX")
 printf '{"status":"PASS","checks":5,"completed_at":"%s"}\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" > "$last"
 mv "$last" "$state/last-live.json"

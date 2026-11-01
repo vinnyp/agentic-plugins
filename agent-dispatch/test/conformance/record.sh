@@ -3,7 +3,12 @@
 # agy-under-TMPDIR recording is the smoke check's job, not record.sh's.
 # All agent work happens in a disposable fixture under the conformance root.
 set -eu
+umask 077
 here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+bin=$(CDPATH='' cd "$here/../../bin" && pwd -P)
+# shellcheck source=../../bin/lib/timeout-bin.sh
+. "$bin/lib/timeout-bin.sh"
+timer=$(dispatch_timeout_bin) || exit 1
 [ "$#" -eq 2 ] || { echo 'usage: record.sh <codex|agy|claude> <name>' >&2; exit 1; }
 runtime=$1
 name=$2
@@ -29,9 +34,9 @@ rc=0
 (
   cd "$work/repo"
   case "$runtime" in
-    codex) codex exec -C "$work/repo" - <<< "$prompt" ;;
-    agy) agy --dangerously-skip-permissions --add-dir "$work/repo" <<< "$prompt" ;;
-    claude) claude --print "$prompt" ;;
+    codex) "$timer" -k 1 "${DISPATCH_CONFORMANCE_TIMEOUT:-20}" codex exec --sandbox read-only -C "$work/repo" - <<< "$prompt" ;;
+    agy) "$timer" -k 1 "${DISPATCH_CONFORMANCE_TIMEOUT:-20}" agy --dangerously-skip-permissions --add-dir "$work/repo" <<< "$prompt" ;;
+    claude) "$timer" -k 1 "${DISPATCH_CONFORMANCE_TIMEOUT:-20}" claude --permission-mode plan --print "$prompt" ;;
   esac
 ) > "$work/staging/stdout" 2> "$work/staging/stderr" || rc=$?
 printf '%s\n' "$rc" > "$work/staging/rc"

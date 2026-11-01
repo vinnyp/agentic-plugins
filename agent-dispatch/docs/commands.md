@@ -1361,3 +1361,11 @@ that cannot complete as critical and returns rc 10.
 | `2` | Compare found critical drift (including an unreadable after-snapshot), or not evaluated |
 | `3` | Snapshot failure, broken install, unreadable before-snapshot, internal temp failure, a failed compare helper, or not evaluated |
 | `64` | Usage error; unlike the usual house exit 2, which here means critical drift |
+
+Conformance capture (`test/conformance/record.sh`) bounds each runtime to 20
+seconds, uses Codex read-only and Claude plan mode, and refuses unsanitized
+transcripts. Its default root under `$HOME` makes real Codex recordings refused
+by design; set `DISPATCH_CONFORMANCE_ROOT` to a neutral path outside HOME and
+TMPDIR. `DISPATCH_CONFORMANCE_TIMEOUT` and `DISPATCH_LIVE_TIMEOUT` can shorten
+capture and live-probe bounds for stub tests. Live probes inspect stdout only,
+require explicit reply markers, and ignore global/system Git configuration.
