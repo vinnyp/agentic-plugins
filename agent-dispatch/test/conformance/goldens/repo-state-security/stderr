@@ -1,0 +1,4 @@
+repo-state-check: baseline contains special files: <SCN_TMP>/repo.19/.git/info/exclude
+repo-state-check: baseline contains special files: <SCN_TMP>/repo.39/.git/info/exclude
+repo-state-check: baseline contains special files: <SCN_TMP>/repo.39/.git/info/exclude
+repo-state-check: baseline contains special files: <SCN_TMP>/repo.44/.git/fifo\x0ainjected

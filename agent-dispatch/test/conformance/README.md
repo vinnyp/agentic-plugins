@@ -241,3 +241,29 @@ default (or the roster default when unset). It sends no thread or turn request.
 Missing tools, failed metadata requests, and absent pins fail the check.
 The capture suite tests the Codex protocol with a synthetic server, including
 pagination, configured and implicit defaults, and an absent model.
+
+### Repository-state test rewrite
+
+Run `bash agent-dispatch/test/test-conformance-repo-state.sh` for the migrated
+repository-state cases. The `repo-state-*` scenarios invoke only
+`repo-state-check`, `dispatch-worker`, and `review-pin.sh`; their shared files
+contain fixture setup and public-command adapters. Each scenario retains
+independent assertions as well as baseline comparison. Configuration cases
+check credential values, credentialed keys, ambiguous URL userinfo, salted key
+distinction, command argument truncation, and escaped display bytes.
+
+`rewrite-map.tsv` accounts for original cases and assertion locations before
+deleting the three old suites. Parameterized rows retain every input in the
+listed loop. Public deadline, signal, atomic publication, cleanup, malformed
+input, history, hook, worktree and concurrent status cases remain covered.
+The obsolete watchdog-only wrapper was also removed. Bash descriptor channels,
+function serialization, payload framing, completion tokens, caller shell flags,
+and implementation allocation/batching policies are dropped because the spec
+removes that transport. Deterministic slow Git substitutes for Git-version
+dependent FIFO blocking probes. `source-allowlist.tsv` explains test-helper
+sourcing and the small existing producer fault-injection suite.
+
+These goldens are recorded through `baseline-tree.sh` at the pinned BASELINE
+SHA. Fixtures use fixed identities and synthetic reviewers; each child is
+waited for and no real agent is invoked. The worker bound cases assert exit 10,
+an incomplete drift diagnostic, and pin release.

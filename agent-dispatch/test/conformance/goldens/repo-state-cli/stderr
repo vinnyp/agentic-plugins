@@ -1,0 +1,2 @@
+fatal: bad config line 11 in file .git/config
+repo-state-check: snapshot could not complete (status 3)

@@ -42,18 +42,18 @@ D139	test	bin/test-mutation-verify.sh#test baseline exit 141 emits SIGPIPE / gre
 D140	test	bin/test-mutation-verify.sh#test --expect-fail-output: unrelated RED -> exit 3 PASS	A failure missing the expected hazard text must remain unverified
 D141	test	bin/test-run-tests-signals.sh#inherited	Inherited ignored signals must be reset so the runner handles interruption
 D142	test	bin/test-coding-dispatch.sh#test #234k PASS	Launch failure before a FIFO writer arrives must finish and reap readers
-D144	test	bin/test-repo-state.sh#userinfo shape leaked	Sensitive URL key components must be absent from snapshots and diagnostics
+D144	scenario	repo-state-security	Sensitive URL key components must be absent from snapshots and diagnostics
 D145	scenario	state-compare-exclude	Exclude metadata changes must appear in the drift verdict
 D145	scenario	state-compare-grafts	Graft changes must be classified as critical
 D145	scenario	state-compare-ref	Replacement refs must be classified as critical
 D145	scenario	state-compare-shallow	Shallow metadata changes must be classified as critical
-D145	test	bin/test-repo-state.sh#hostile metadata types PASS	Special metadata files must finish bounded and report drift
-D146	test	bin/test-repo-state-cli.sh#stale or partial snapshot left readable	Blocked metadata must produce an unreadable snapshot within the bound
+D145	scenario	repo-state-security	Special metadata files must finish bounded and report drift
+D146	scenario	repo-state-cli-slow-alternates-fifo	Blocked metadata must produce an unreadable snapshot within the bound
 D147	test	bin/test-drive-cold-session.sh#larger agent pane history limit was lowered	Inherited history capacity must remain above the driver minimum
-D148	test	bin/test-repo-state-cli.sh#cleanup killed the bystander	Survivor cleanup must reap owned processes while preserving a bystander
+D148	scenario	repo-state-cli-cli-signals	Survivor cleanup must reap owned processes while preserving a bystander
 D149	test	bin/test-review-launch.sh#review launch FIFO matrix and allocation/before-snapshot failures PASS	Blocked launch metadata reads must time out without launching a reviewer
 D150	test	test/test-conformance-feeds.sh#verdict-feed-failure	Failure to produce any of the config, commit-history, or records verdict feeds must return unreadable
-D151	test	bin/test-repo-state-memory.sh#concurrent bounded status failed	Parallel descriptor verification must avoid transient status failures
+D151	scenario	repo-state-parallel-pin	Concurrent public pin status calls must avoid transient failures
 D152	test	bin/test-review-launch-safety.sh#empty agy review must truncate stale caller output and exit 8	Empty reviewer output must erase previous file content
 D154	test	bin/test-portable-timeout.sh#dispatch_timeout_bin precedence, fallback, probe and source path PASS	With both external timers absent the bundled timer must be selected
 D155	test	bin/test-dispatch-worker-signals.sh#agent survived	Caller signals must terminate the launched runtime
