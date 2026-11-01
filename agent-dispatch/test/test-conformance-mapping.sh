@@ -12,8 +12,8 @@ check=$work/test/conformance/check-mapping.sh
 printf '# case: named check\n' > "$work/test/sample.sh"
 printf 'probe sample-check stub\n' > "$work/test/conformance/live-smoke.sh"
 printf 'id,scope,encodes_environmental_knowledge,text\r\nA,in,Y,"synthetic, quoted"\r\nB,out,Y,ignored\r\nC,in,N,ignored\r\n' > "$work/census.csv"
-header() { printf 'census_id\tkind\tref\n' > "$work/test/conformance/targets.tsv"; }
-row() { printf '%s\t%s\t%s\n' "$1" "$2" "$3" >> "$work/test/conformance/targets.tsv"; }
+header() { printf 'census_id\tkind\tref\thow\n' > "$work/test/conformance/targets.tsv"; }
+row() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "${4-observed result changes}" >> "$work/test/conformance/targets.tsv"; }
 run() {
   expected=$1; count=$2; shift 2
   rc=0
@@ -35,6 +35,9 @@ header; row A test test/sample.sh; run 1 0
 header; row A smoke absent-check; run 1 0
 header; row A scenario ../sample; run 1 0
 header; row A scenario sample; row B prose ignored; run 1 0
+# Missing and whitespace-only explanations must be rejected.
+header; row A scenario sample ''; run 1 1
+header; row A scenario sample '   '; run 1 1
 # Input failures still report a count without echoing external census contents.
 printf 'wrong,header\nsynthetic,only\n' > "$work/census.csv"
 run 1 0

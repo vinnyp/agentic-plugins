@@ -75,10 +75,11 @@ try:
     mapped = set()
     with (here / 'targets.tsv').open(newline='', encoding='utf-8') as stream:
         reader = csv.DictReader(stream, delimiter='\t')
-        if reader.fieldnames != ['census_id', 'kind', 'ref']:
+        if reader.fieldnames != ['census_id', 'kind', 'ref', 'how']:
             raise ValueError('invalid targets header')
         for number, row in enumerate(reader, 2):
-            if not row['census_id'] or None in row or any(v is None for v in row.values()):
+            if (not row['census_id'] or None in row or
+                    any(v is None for v in row.values()) or not row['how'].strip()):
                 errors.append('invalid target row {}'.format(number))
                 continue
             mapped.add(row['census_id'])
