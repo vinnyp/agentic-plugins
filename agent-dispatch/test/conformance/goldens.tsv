@@ -163,7 +163,9 @@ repo-state-worker-limits	preserve		120	0
 repo-state-hash-failure	preserve		30	0
 probe-agy-auth-preflight	preserve		120	0
 probe-agy-print-form-probe	preserve		120	0
+probe-codex-cancellation	preserve		45	0
 probe-codex-exec-probe	preserve		120	0
+probe-codex-pid-signal	known-defect	vinnyp/foundry#277	45	0
 probe-agy-doctor	preserve		120	0
 probe-unavailable	preserve		15	0
 clone-contract	preserve		60	0
@@ -171,4 +173,3 @@ freshness-contract	preserve		60	0
 repo-state-query-redaction	preserve		30	0
 repo-state-cli-no-timer	preserve		30	0
 clone-never-converges	preserve		30	0
-probe-codex-cancellation	known-defect	CANCEL-001	45	0

@@ -286,13 +286,14 @@ metadata requests without launching a turn.
 binary errors replace the private probes' advisory return codes. Empty model
 parser inputs, cached shell variables, and caller traps are explicitly dropped
 with reasons. Public TERM and HUP cancellation is retained in
-`probe-codex-cancellation`. The default form timeout is observed at the timer
+`probe-codex-cancellation` by signalling the process group.
+`probe-codex-pid-signal` pins parent-only cancellation as vinnyp/foundry#277. The default form timeout is observed at the timer
 boundary and with a real eleven-second synthetic reply. Codex bounds include
 invalid inputs and all accepted integer units. No real agent or long gate runs.
 
 Goldens are captured through `baseline-tree.sh` at the pinned `BASELINE` SHA.
 Each scenario returns zero only after its public-command assertions pass;
-its output records the completed cases. All six have finite budgets and no
+its output records the completed cases. All seven have finite budgets and no
 retry. Scratch and implementation paths use the standard harness placeholders.
 
 ### Review clone test rewrite
@@ -354,11 +355,16 @@ the no-op prevents the operation from starting: snapshot returns unreadable
 and compare reports missing completion. This checks the bound and refusal,
 but cannot prove slow Git was interrupted by a deadline.
 
-`probe-codex-cancellation` signals only the public preflight PID it started.
-The sleeping stub publishes its own PID for liveness checks; no ancestry lookup
-or signal to that PID occurs. It requires exits 143/129, child disappearance
-within five seconds, and removal of probe directories. CANCEL-001: the pinned
-baseline fails the child-disappearance assertion for public cancellation.
-Failure cleanup waits for the finite stub to exit before returning. Its baseline
-golden records the failure; the probe suite deliberately still requires success.
-A production cancellation fix is outside this test-only change.
+`probe-codex-cancellation` sends TERM and HUP to the preflight process group,
+which is how a public caller cancels. It requires exits 143/129, child disappearance
+within five seconds, and probe directory removal within five seconds after child
+exit. It proves process-group cancellation runs probe cleanup, but does not prove
+that signalling only the preflight PID reaches the probe's cancellation traps.
+
+`probe-codex-pid-signal` pins vinnyp/foundry#277 by signalling only the preflight
+PID. It requires exits 143/129 and the child still alive when wait returns, then
+observes the child disappear within fifteen seconds under the three-second probe
+timer. It proves parent-only cancellation leaves the child running until the timer;
+it does not prove probe directory cleanup, which varies with how the orphaned
+subshell dies across Bash versions. Both scenarios use a twelve-second stub and
+use its published PID only for liveness checks, never for signalling.

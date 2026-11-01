@@ -1,0 +1,1 @@
+PASS: TERM and HUP to the preflight PID leave codex running until the probe timer (vinnyp/foundry#277)
