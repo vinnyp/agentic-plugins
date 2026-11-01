@@ -492,7 +492,16 @@ LIVE_BIN="$TMP/live-bin"
 mkdir -p "$LIVE_BIN" "$TMP/live-temp"
 cat > "$LIVE_BIN/agy" <<'EOF'
 #!/usr/bin/env bash
-case "$PWD" in "$TMPDIR"/*) exit 0 ;; esac
+case "$PWD" in "$TMPDIR"/*)
+  [ -f .git ] && git rev-parse --git-common-dir | grep -q /seed/.git || exit 8
+  grep -qx 'Use the shell command tool to run: ls -a . Then reply with DONE.' || exit 9
+  case "${LIVE_TMPDIR:-empty}" in
+    output) printf 'DONE\n' ;;
+    failure) exit 3 ;;
+    timeout) exit 124 ;;
+  esac
+  exit 0 ;;
+esac
 [ "${LIVE_FAIL:-}" != agy ] || exit 3
 if [ "${1:-}" = models ] && [ "${LIVE_AUTH_FAIL:-0}" = 1 ]; then
   echo 'invalid_grant'; exit 0
@@ -534,9 +543,25 @@ live_run() {
   HOME="$TMP" TMPDIR="$TMP/live-temp" XDG_STATE_HOME="$TMP/state" PATH="$LIVE_BIN" "$DOCTOR_BIN" --live
 }
 live_out=$(live_run 2>&1); live_rc=$?
-[ "$live_rc" = 0 ] && [ "$(printf '%s\n' "$live_out" | grep -c '^PASS ')" = 6 ] || fail "live all-pass: $live_out"
+[ "$live_rc" = 0 ] && [ "$(printf '%s\n' "$live_out" | grep -c '^PASS ')" = 5 ] || fail "live all-pass: $live_out"
 last_good="$TMP/state/agent-dispatch/last-live.json"
 [ -s "$last_good" ] || fail 'live success did not record last-good JSON'
+good=$(cat "$last_good" 2>/dev/null)
+printf '%s\n' "$good" | grep -q '"checks":5' || fail 'INFO counted in last-good checks'
+printf '%s\n' "$live_out" | grep -q '^INFO agy-tmpdir: no output (denial trap active) (rc=0)$' || fail 'empty TMPDIR observation missing'
+for outcome in output failure timeout; do
+  live_out=$(LIVE_TMPDIR="$outcome" live_run 2>&1); live_rc=$?
+  [ "$live_rc" = 0 ] && [ "$(printf '%s\n' "$live_out" | grep -c '^PASS ')" = 5 ] || fail "TMPDIR $outcome turned result red: $live_out"
+  case "$outcome" in
+    output) expected='output present (rc=0)' ;;
+    failure) expected='inconclusive (rc=3)' ;;
+    timeout) expected='inconclusive (rc=124)' ;;
+  esac
+  printf '%s\n' "$live_out" | grep -qxF "INFO agy-tmpdir: $expected" || fail "TMPDIR $outcome observation missing: $live_out"
+done
+for fixture in "$TMP/live-temp"/dispatch-live.* "$TMP/.cache/agent-dispatch-live"/smoke.*; do
+  [ ! -e "$fixture" ] || fail "live fixture was not cleaned up: $fixture"
+done
 good=$(cat "$last_good" 2>/dev/null)
 LIVE_FAIL=agy live_run > "$TMP/live-fail" 2>&1; live_rc=$?
 [ "$live_rc" != 0 ] && grep -q '^FAIL ' "$TMP/live-fail" || fail 'live agent failure should fail'
