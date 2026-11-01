@@ -63,7 +63,8 @@ cat > "$work/bin/codex" <<'STUB'
 #!/usr/bin/env bash
 set -eu
 [ "$*" = app-server ] || exit 97
-exec python3 "$MODEL_SERVER" fixture-model
+[ "${MISSING_MODEL_COMMAND:-0}" = 0 ] || exit 97
+exec python3 "$MODEL_SERVER" "${CONFIGURED_MODEL:-fixture-model}"
 STUB
 chmod +x "$work/bin/agy" "$work/bin/codex"
 export MODEL_SERVER="$work/server.py"
@@ -74,4 +75,13 @@ if HIDE_REVIEW_MODEL=1 PATH="$work/bin:$PATH" bash "$c/live-smoke.sh" --models-o
   echo 'FAIL missing live agy pin accepted'; exit 1
 fi
 grep -qx 'FAIL agy-models' "$work/models"
+if CONFIGURED_MODEL=missing-model PATH="$work/bin:$PATH" bash "$c/live-smoke.sh" --models-only > "$work/models"; then
+  echo 'FAIL missing live Codex model accepted'; exit 1
+fi
+grep -qx 'FAIL codex-models' "$work/models"
+MISSING_MODEL_COMMAND=1 PATH="$work/bin:$PATH" bash "$c/live-smoke.sh" --models-only > "$work/models"
+grep -qx 'INFO codex-models: model metadata unavailable' "$work/models"
+if grep -q '^PASS codex-models' "$work/models"; then
+  echo 'FAIL unsupported Codex metadata reported PASS'; exit 1
+fi
 printf 'PASS conformance capture and metadata-only model checks\n'

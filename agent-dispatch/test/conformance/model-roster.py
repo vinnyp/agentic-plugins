@@ -5,6 +5,10 @@ import subprocess
 import sys
 
 
+class MetadataUnavailable(Exception):
+    """The runtime does not expose the requested metadata interface."""
+
+
 def check(command):
     process = subprocess.Popen(command + ['app-server'], stdin=subprocess.PIPE,
                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
@@ -17,9 +21,9 @@ def check(command):
                 message = json.loads(line)
                 if message.get('id') == number:
                     if 'error' in message:
-                        raise ValueError('model metadata request failed')
+                        raise MetadataUnavailable('model metadata request failed')
                     return message['result']
-            raise ValueError('model metadata stream ended')
+            raise MetadataUnavailable('model metadata stream ended')
 
         request(1, 'initialize', {'clientInfo': {'name': 'dispatch-smoke', 'version': '1'}})
         process.stdin.write('{"method":"initialized","params":{}}\n')
@@ -39,7 +43,6 @@ def check(command):
         selected = configured or next((m['model'] for m in models if m.get('isDefault')), None)
         if not selected or not any(m['model'] == selected for m in models):
             raise ValueError('configured default model absent from roster')
-        print('PASS codex-models: configured default offered')
     finally:
         # This metadata-only child belongs to this probe.
         process.terminate()
@@ -53,6 +56,9 @@ def check(command):
 if __name__ == '__main__':
     try:
         check(sys.argv[1:] or ['codex'])
-    except (ValueError, KeyError, OSError) as error:
+    except (MetadataUnavailable, OSError) as error:
+        print('Codex model metadata unavailable: ' + str(error), file=sys.stderr)
+        sys.exit(2)
+    except (ValueError, KeyError) as error:
         print('FAIL codex-models: ' + str(error), file=sys.stderr)
         sys.exit(1)

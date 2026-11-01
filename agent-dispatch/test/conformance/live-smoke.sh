@@ -20,15 +20,19 @@ model_probe() {
       "$timer" -k 1 "${DISPATCH_LIVE_TIMEOUT:-20}" python3 "$here/model-roster.py" codex ;;
   esac
 }
+report_model() {
+  local model_rc=0
+  model_probe "$1" || model_rc=$?
+  case "$1:$model_rc" in
+    *:0) printf 'PASS %s\n' "$1" ;;
+    codex-models:2) printf 'INFO codex-models: model metadata unavailable\n'; model_checks=1 ;;
+    *) printf 'FAIL %s\n' "$1"; return 1 ;;
+  esac
+}
 if [ "${1:-}" = --models-only ]; then
   model_failed=0
   for model_id in agy-models codex-models; do
-    if model_probe "$model_id"; then
-      printf 'PASS %s\n' "$model_id"
-    else
-      printf 'FAIL %s\n' "$model_id"
-      model_failed=1
-    fi
+    report_model "$model_id" || model_failed=1
   done
   exit "$model_failed"
 fi
@@ -56,6 +60,7 @@ chmod 700 "$root" "$work" "$trap_dir"
 : > "$work/empty-gitconfig"
 export GIT_CONFIG_GLOBAL="$work/empty-gitconfig" GIT_CONFIG_NOSYSTEM=1
 failed=0
+model_checks=2
 report() {
   printf '%-7s %s\n' "$1" "$2"
   [ "$1" = PASS ] || failed=1
@@ -80,7 +85,7 @@ probe() {
   fi
   case "$id" in
     agy-models|codex-models)
-      if model_probe "$id"; then report PASS "$id"; else report FAIL "$id"; fi
+      report_model "$id" || failed=1
       return ;;
   esac
   case "$id" in
@@ -128,5 +133,5 @@ state=${XDG_STATE_HOME:-$HOME/.local/state}/agent-dispatch
 mkdir -p "$state"
 chmod 700 "$state"
 last=$(mktemp "$state/last-live.XXXXXX")
-printf '{"status":"PASS","checks":7,"completed_at":"%s"}\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" > "$last"
+printf '{"status":"PASS","checks":%s,"completed_at":"%s"}\n' "$((5 + model_checks))" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" > "$last"
 mv "$last" "$state/last-live.json"

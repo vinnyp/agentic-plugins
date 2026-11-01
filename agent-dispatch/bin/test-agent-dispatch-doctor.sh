@@ -495,6 +495,15 @@ LIVE_BIN="$TMP/live-bin"
 mkdir -p "$LIVE_BIN" "$TMP/live-temp"
 cat > "$LIVE_BIN/agy" <<'EOF'
 #!/usr/bin/env bash
+if [ "${1:-}" = models ]; then
+  [ "${LIVE_MODELS_MISSING:-}" != agy ] || exit 9
+  if [ "${LIVE_MODEL_ABSENT:-}" = agy ]; then
+    printf 'other-model\tOther model\n'
+  else
+    printf '%s\tCoding\n%s\tReview\n' "$AGY_TEST_CODING_PIN" "$AGY_TEST_REVIEW_PIN"
+  fi
+  exit 0
+fi
 case "$PWD" in "$TMPDIR"/*)
   [ -f .git ] && git rev-parse --git-common-dir | grep -q /seed/.git || exit 8
   grep -qx 'Use the shell command tool to run: ls -a . Then reply with DONE.' || exit 9
@@ -510,7 +519,6 @@ if [ "${LIVE_AUTH_FAIL:-0}" = 1 ]; then
   echo 'invalid_grant'; exit 0
 fi
 case " $* " in
-  *' models '*) ;;
   ' --dangerously-skip-permissions ') cat >/dev/null ;;
   *) exit 9 ;;
 esac
@@ -525,6 +533,27 @@ printf 'LIVE_SMOKE_OK\n'
 EOF
 cat > "$LIVE_BIN/codex" <<'EOF'
 #!/usr/bin/env bash
+if [ "${1:-}" = app-server ]; then
+  [ "${LIVE_MODELS_MISSING:-}" != codex ] || exit 9
+  exec python3 -c '
+import json, os, sys
+for line in sys.stdin:
+    request = json.loads(line)
+    if "id" not in request:
+        continue
+    method = request["method"]
+    if method == "initialize":
+        result = {}
+    elif method == "config/read":
+        result = {"config": {"model": "fixture-model"}}
+    elif method == "model/list":
+        model = "other-model" if os.environ.get("LIVE_MODEL_ABSENT") == "codex" else "fixture-model"
+        result = {"data": [{"model": model, "isDefault": True}], "nextCursor": None}
+    else:
+        sys.exit(9)
+    print(json.dumps({"id": request["id"], "result": result}), flush=True)
+'
+fi
 case "$PWD/" in "$TMPDIR/"*) exit 9 ;; esac
 [ "${GIT_CONFIG_NOSYSTEM:-}" = 1 ] && [ -f "${GIT_CONFIG_GLOBAL:-}" ] && [ ! -s "$GIT_CONFIG_GLOBAL" ] || exit 9
 case " $* " in
@@ -561,7 +590,7 @@ printf 'WRITE_REFUSED\n'
 EOF
 chmod +x "$LIVE_BIN/agy" "$LIVE_BIN/codex" "$LIVE_BIN/claude"
 # A closed PATH prevents a missing stub from falling through to a real runtime.
-for tool in bash git mkdir mktemp rm cat grep date mv dirname basename chmod sleep perl timeout gtimeout; do
+for tool in awk python3 bash git mkdir mktemp rm cat grep date mv dirname basename chmod sleep perl timeout gtimeout; do
   location=$(command -v "$tool" 2>/dev/null) || continue
   ln -s "$location" "$LIVE_BIN/$tool"
 done
@@ -569,15 +598,15 @@ live_run() {
   DISPATCH_LIVE_TIMEOUT=1 HOME="$TMP" TMPDIR="$TMP/live-temp" XDG_STATE_HOME="$TMP/state" PATH="$LIVE_BIN" "$DOCTOR_BIN" --live
 }
 live_out=$(live_run 2>&1); live_rc=$?
-[ "$live_rc" = 0 ] && [ "$(printf '%s\n' "$live_out" | grep -c '^PASS ')" = 5 ] || fail "live all-pass: $live_out"
+[ "$live_rc" = 0 ] && [ "$(printf '%s\n' "$live_out" | grep -c '^PASS ')" = 7 ] || fail "live all-pass: $live_out"
 last_good="$TMP/state/agent-dispatch/last-live.json"
 [ -s "$last_good" ] || fail 'live success did not record last-good JSON'
 good=$(cat "$last_good" 2>/dev/null)
-printf '%s\n' "$good" | grep -q '"checks":5' || fail 'INFO counted in last-good checks'
+printf '%s\n' "$good" | grep -q '"checks":7' || fail 'INFO counted in last-good checks'
 printf '%s\n' "$live_out" | grep -q '^INFO agy-tmpdir: no output (denial trap active) (rc=0)$' || fail 'empty TMPDIR observation missing'
 for outcome in output failure timeout; do
   live_out=$(LIVE_TMPDIR="$outcome" live_run 2>&1); live_rc=$?
-  [ "$live_rc" = 0 ] && [ "$(printf '%s\n' "$live_out" | grep -c '^PASS ')" = 5 ] || fail "TMPDIR $outcome turned result red: $live_out"
+  [ "$live_rc" = 0 ] && [ "$(printf '%s\n' "$live_out" | grep -c '^PASS ')" = 7 ] || fail "TMPDIR $outcome turned result red: $live_out"
   case "$outcome" in
     output) expected='output present (rc=0)' ;;
     failure) expected='inconclusive (rc=3)' ;;
@@ -588,6 +617,18 @@ done
 for fixture in "$TMP/live-temp"/dispatch-live.* "$TMP/.cache/agent-dispatch-live"/smoke.*; do
   [ ! -e "$fixture" ] || fail "live fixture was not cleaned up: $fixture"
 done
+good=$(cat "$last_good" 2>/dev/null)
+for runtime in agy codex; do
+  live_out=$(LIVE_MODEL_ABSENT="$runtime" live_run 2>&1); live_rc=$?
+  [ "$live_rc" != 0 ] && printf '%s\n' "$live_out" | grep -q "^FAIL.*$runtime-models" || fail "missing $runtime model accepted: $live_out"
+  live_out=$(LIVE_MODELS_MISSING="$runtime" live_run 2>&1); live_rc=$?
+  if [ "$runtime" = codex ]; then
+    [ "$live_rc" = 0 ] && printf '%s\n' "$live_out" | grep -q '^INFO codex-models:' || fail "unsupported Codex metadata must be INFO: $live_out"
+  else
+    [ "$live_rc" != 0 ] && printf '%s\n' "$live_out" | grep -q '^FAIL.*agy-models' || fail "missing agy models command accepted: $live_out"
+  fi
+done
+# INFO may record a successful run; subsequent failures must preserve that record.
 good=$(cat "$last_good" 2>/dev/null)
 LIVE_FAIL=agy live_run > "$TMP/live-fail" 2>&1; live_rc=$?
 [ "$live_rc" != 0 ] && grep -q '^FAIL ' "$TMP/live-fail" || fail 'live agent failure should fail'
