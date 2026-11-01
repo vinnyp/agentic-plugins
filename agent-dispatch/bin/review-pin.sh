@@ -99,7 +99,13 @@ review_pin_operation() {
   esac
 }
 
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+_src="${BASH_SOURCE[0]}"
+while [ -L "$_src" ]; do
+  _dir="$(cd -P "$(dirname "$_src")" && pwd)"
+  _src="$(readlink "$_src")"
+  case "$_src" in /*) ;; *) _src="$_dir/$_src" ;; esac
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 # shellcheck source=lib/repo-state.sh
 . "$SCRIPT_DIR/lib/repo-state.sh"
 trap repo_state_cancel_bound EXIT

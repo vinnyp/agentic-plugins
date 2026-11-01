@@ -91,7 +91,7 @@ synthesized marker rather than a false failure.
 
 | Exit | Meaning |
 |---|---|
-| `0` | success. `DISPATCH=ok …` — changes left in the tree (or worktree) for you to review and commit. `DISPATCH=ok-noop` means a resume dispatch found the work already done. |
+| `0` | success. `DISPATCH=ok …` — changes left in the tree (or worktree) for you to review and commit. `DISPATCH=ok-noop` means a resume dispatch found the work already done, after the build gate passes (when configured or inferred from `go.mod`) and every `--require-file` path is verified as a tracked blob in `HEAD`. If no build gate runs, stderr reports `no build gate ran`. |
 | `1` | failure. Non-worktree: tree hard-reset to the pre-dispatch commit (unless `--keep-on-fail`). Worktree: diff salvaged in the worktree, or the worktree removed with `CODING_DISPATCH_RM_ON_FAIL=1` (the patch still survives). |
 | `2` | usage or environment error; nothing was done |
 | `6` | agent unavailable (capacity/rate limit); no work attempted |
@@ -186,9 +186,9 @@ coding-build-phase.sh codex ~/plans/retry.md ~/code/myrepo 1 2 3 \
 
 ```
 ════════ dispatching Task 1 → codex ════════
-✓ Task 1 committed in worktree (4c9ab12)
+✓ Task 1 committed (4c9ab12)
 ════════ dispatching Task 2 → codex ════════
-✓ Task 2 committed in worktree (8ee01f7)
+✓ Task 2 committed (8ee01f7)
 PHASE=ok worktree=… branch=phase-myrepo-20260830131500-4821 tasks=[1 2 3] — land with: git -C '…' merge --ff-only 'phase-…' && git -C '…' worktree remove '…'
 ```
 

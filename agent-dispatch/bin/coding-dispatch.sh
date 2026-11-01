@@ -678,6 +678,51 @@ report_fail() {
 }
 
 
+run_final_gates() {
+  local mode="$1"
+  # 3. Build/vet gate. An explicit build_cmd is AUTHORITATIVE and always runs.
+  if [ -z "$build_cmd" ] && [ -f go.mod ]; then
+    build_cmd="go build ./... && go vet ./..."
+  fi
+  _gate_run_args=(--expect-root "$target")
+  [ "$NO_VENV" -eq 1 ] && _gate_run_args+=(--no-venv)
+  if [ -n "$build_cmd" ] && ! "$SCRIPT_DIR/gate-run.sh" "${_gate_run_args[@]}" -- "$build_cmd"; then
+    report_fail "build/vet failed ($build_cmd)"
+    exit 1
+  fi
+  if [ "$mode" = noop ] && [ -z "$build_cmd" ]; then
+    note "no build gate ran"
+  fi
+
+  # FM4: a no-op must already contain each required file as a tracked blob.
+  if [ "$mode" = noop ]; then
+    for _req in ${require_files[@]+"${require_files[@]}"}; do
+      if [[ "$(git cat-file -t "HEAD:${_req}" 2>/dev/null || true)" != blob ]]; then
+        printf 'DISPATCH=fail: FM4: required file %q not present as a tracked blob in HEAD\n' "$_req" >&2
+        report_fail "FM4" err
+        exit 1
+      fi
+    done
+    return 0
+  fi
+
+  # FM4: partial-delivery check — verify all required files were delivered
+  if [ ${#require_files[@]} -gt 0 ]; then
+    _fm4_committed=$(git -c diff.relative=false diff --name-only "$BASE"..HEAD 2>/dev/null || true)
+    _fm4_added_intermediate=$(git log --diff-filter=A --format= --name-only "$BASE"..HEAD 2>/dev/null || true)
+    # split on tab first to handle rename records (type 2): "newPath\toldPath" → emit only newPath
+    _fm4_status=$(git status --porcelain=v2 2>/dev/null | awk '/^[12?] / {split($NF,a,"\t"); print a[1]}' || true)
+    _fm4_changed=$(printf '%s\n%s\n%s\n' "$_fm4_committed" "$_fm4_added_intermediate" "$_fm4_status" | sed '/^$/d' | sort -u)
+    for _req in "${require_files[@]}"; do
+      if ! printf '%s\n' "$_fm4_changed" | grep -qxF "$_req"; then
+        printf 'DISPATCH=fail: FM4: required file %q not delivered (not in diff since %s)\n' "$_req" "${BASE:0:12}" >&2
+        report_fail "FM4" err
+        exit 1
+      fi
+    done
+  fi
+}
+
 # Bash runs signal traps promptly while waiting on an asynchronous worker. Keep the
 # EXIT prompt-file cleanup installed, and stop the worker before inspecting its tree.
 child=""
@@ -812,11 +857,13 @@ if [ -z "$(git status --porcelain)" ]; then
     # check is independent of git's view of the tree. Keep it narrow: only rc=0 qualifies, so a
     # timed-out/crashed agent that happens to leave a stale marker never masquerades as ok-noop.
     if [ "$agent_rc" -eq 0 ] && [ -f _coding-result.json ] && [ "$marker_status" = "complete" ]; then
+      run_final_gates noop
       rm -f _coding-result.json
       if [ "$WORKTREE" -eq 1 ]; then
         trap - HUP INT TERM
         if [ "$CREATED_HERE" -eq 1 ]; then
-          cd "$PARENT_ROOT" && git worktree remove --force "$WT_DIR" 2>/dev/null
+          cd "$PARENT_ROOT" && git worktree remove --force "$WT_DIR" 2>/dev/null &&
+            git branch -D "$SLUG" >/dev/null
         fi
         printf 'DISPATCH=ok-noop base_sha=%s: %s found prior work already complete (no changes needed) — worktree cleaned\n' "${WORKTREE_BASE_SHORT:-unknown}" "$agent"
         exit 0
@@ -997,32 +1044,7 @@ if [ -n "$build_cmd" ] && [ -n "$(git status --porcelain)" ]; then
   esac
 fi
 
-# 3. Build/vet gate. An explicit build_cmd is AUTHORITATIVE and always runs.
-if [ -z "$build_cmd" ] && [ -f go.mod ]; then
-  build_cmd="go build ./... && go vet ./..."
-fi
-_gate_run_args=(--expect-root "$target")
-[ "$NO_VENV" -eq 1 ] && _gate_run_args+=(--no-venv)
-if [ -n "$build_cmd" ] && ! "$SCRIPT_DIR/gate-run.sh" "${_gate_run_args[@]}" -- "$build_cmd"; then
-  report_fail "build/vet failed ($build_cmd)"
-  exit 1
-fi
-
-# FM4: partial-delivery check — verify all required files were delivered
-if [ ${#require_files[@]} -gt 0 ]; then
-  _fm4_committed=$(git -c diff.relative=false diff --name-only "$BASE"..HEAD 2>/dev/null || true)
-  _fm4_added_intermediate=$(git log --diff-filter=A --format= --name-only "$BASE"..HEAD 2>/dev/null || true)
-  # split on tab first to handle rename records (type 2): "newPath\toldPath" → emit only newPath
-  _fm4_status=$(git status --porcelain=v2 2>/dev/null | awk '/^[12?] / {split($NF,a,"\t"); print a[1]}' || true)
-  _fm4_changed=$(printf '%s\n%s\n%s\n' "$_fm4_committed" "$_fm4_added_intermediate" "$_fm4_status" | sed '/^$/d' | sort -u)
-  for _req in "${require_files[@]}"; do
-    if ! printf '%s\n' "$_fm4_changed" | grep -qxF "$_req"; then
-      printf 'DISPATCH=fail: FM4: required file %q not delivered (not in diff since %s)\n' "$_req" "${BASE:0:12}" >&2
-      report_fail "FM4" err
-      exit 1
-    fi
-  done
-fi
+run_final_gates diff
 
 # 4. Marker: synthesize it ourselves if the passing build lacks one.
 if [ ! -f _coding-result.json ] || [ "$marker_status" != "complete" ]; then

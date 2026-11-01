@@ -225,6 +225,30 @@ json_string() {
   jq -Rs .
 }
 
+# A successful dispatch can leave changes, commit them itself, or do nothing.
+commit_task_if_changed() {
+  local dir="$1" subject="$2" tid="$3" pre_head="$4" head
+  if [ ! -d "$dir" ]; then
+    echo "✓ Task $tid made no changes"
+    return 0
+  fi
+  if [ -n "$(git -C "$dir" status --porcelain)" ]; then
+    git -C "$dir" add -A && git -C "$dir" commit -q -m "$subject" || {
+      echo "✗ Task $tid commit failed"
+      echo "PHASE=stopped-at:$tid"
+      return 1
+    }
+    echo "✓ Task $tid committed ($(git -C "$dir" rev-parse --short HEAD))"
+  else
+    head="$(git -C "$dir" rev-parse HEAD)"
+    if [ "$head" != "$pre_head" ]; then
+      echo "✓ Task $tid committed by the worker ($(git -C "$dir" rev-parse --short HEAD))"
+    else
+      echo "✓ Task $tid made no changes"
+    fi
+  fi
+}
+
 for tid in ${task_ids[@]+"${task_ids[@]}"}; do
   body="$(extract_task "$tid")"
   if [ -z "$body" ]; then echo "PHASE=error: Task $tid not found in plan"; exit 2; fi
@@ -265,11 +289,11 @@ for tid in ${task_ids[@]+"${task_ids[@]}"}; do
   commit_subject="feat($SCOPE): task $tid via $agent"
   echo "════════ dispatching Task $tid → $agent ════════"
   if [ "$WORKTREE" -eq 1 ]; then
+    pre_head="$(git -C "$repo" rev-parse --verify "refs/heads/$CODING_DISPATCH_WORKTREE" 2>/dev/null || git -C "$repo" rev-parse HEAD)"
     CODING_DISPATCH_TIMEOUT="${CODING_DISPATCH_TIMEOUT:-$_phase_default_timeout}" coding-dispatch.sh --worktree "$agent" "$repo" "$pf" "$BUILD_CMD"
     _dispatch_rc=$?
     if [ "$_dispatch_rc" -eq 0 ]; then
-      ( cd "$WT_DIR" && git add -A && git commit -q -m "$commit_subject" )
-      echo "✓ Task $tid committed in worktree ($(git -C "$WT_DIR" rev-parse --short HEAD))"
+      commit_task_if_changed "$WT_DIR" "$commit_subject" "$tid" "$pre_head" || exit $?
     elif [ "$_dispatch_rc" -eq 6 ]; then
       echo "✗ Task $tid BLOCKED: agent unavailable (capacity/rate limit) — per AGENTS.md, finish this task locally, then resume the phase at the next task."
       echo "PHASE=blocked-unavailable:$tid"
@@ -283,11 +307,11 @@ for tid in ${task_ids[@]+"${task_ids[@]}"}; do
       exit 1
     fi
   else
+    pre_head="$(git -C "$repo" rev-parse HEAD)"
     CODING_DISPATCH_TIMEOUT="${CODING_DISPATCH_TIMEOUT:-$_phase_default_timeout}" coding-dispatch.sh "$agent" "$repo" "$pf" "$BUILD_CMD"
     _dispatch_rc=$?
     if [ "$_dispatch_rc" -eq 0 ]; then
-      ( cd "$repo" && git add -A && git commit -q -m "$commit_subject" )
-      echo "✓ Task $tid committed ($(git -C "$repo" rev-parse --short HEAD))"
+      commit_task_if_changed "$repo" "$commit_subject" "$tid" "$pre_head" || exit $?
     elif [ "$_dispatch_rc" -eq 6 ]; then
       echo "✗ Task $tid BLOCKED: agent unavailable (capacity/rate limit) — per AGENTS.md, finish this task locally, then resume the phase at the next task."
       echo "PHASE=blocked-unavailable:$tid"
@@ -303,7 +327,7 @@ for tid in ${task_ids[@]+"${task_ids[@]}"}; do
   fi
 done
 
-if [ "$WORKTREE" -eq 1 ]; then
+if [ "$WORKTREE" -eq 1 ] && [ -d "$WT_DIR" ]; then
   echo "PHASE=ok worktree=$WT_DIR branch=$CODING_DISPATCH_WORKTREE tasks=[${task_ids[*]}] — land with: git -C '$repo' merge --ff-only '$CODING_DISPATCH_WORKTREE' && git -C '$repo' worktree remove '$WT_DIR'"
 else
   echo "PHASE=ok: tasks [${task_ids[*]}] complete"
