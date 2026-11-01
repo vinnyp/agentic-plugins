@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.5](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.9.4...agent-dispatch-v1.9.5) (2026-11-01)
+
+
+### Bug Fixes
+
+* **agent-dispatch:** stop false success on no-op dispatches ([#88](https://github.com/vinnyp/agentic-plugins/issues/88)) ([f43a0c5](https://github.com/vinnyp/agentic-plugins/commit/f43a0c5705583be048c8a247282f9cb30bf711b8))
+
 ## [1.9.4](https://github.com/vinnyp/agentic-plugins/compare/agent-dispatch-v1.9.3...agent-dispatch-v1.9.4) (2026-11-01)
 
 
