@@ -1,0 +1,2 @@
+usage: wrap-merge-body.sh --subject <subject> --body-file <file|-> [--out <file>]
+                          [--config <commitlint.config.cjs>] [--wrap-only]

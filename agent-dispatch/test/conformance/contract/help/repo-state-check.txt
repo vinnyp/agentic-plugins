@@ -1,0 +1,5 @@
+usage: repo-state-check snapshot <repo> <file> | compare <before> <after>
+compare exits: 0 clean, 1 warn, 2 critical or not evaluated (a "state:" line or "config: <unreadable after review>"), 3 input error (unreadable before file, internal temp failure or a failed helper), 64 usage
+snapshot exits: 0 ok, 3 failure or not evaluated (<file> then reads "unreadable"), 64 usage
+DISPATCH_SNAPSHOT_TIMEOUT_SECS: seconds (1-86400) the git reads may run before they are killed; default 60 here, 120 for dispatch-worker; an invalid value uses the default with a warning
+--help, -h: print usage and exit 0

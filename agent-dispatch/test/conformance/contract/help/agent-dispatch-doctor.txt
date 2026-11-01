@@ -1,0 +1,15 @@
+agent-dispatch-doctor — install + verify the agent-dispatch plugin.
+
+Usage:
+  agent-dispatch-doctor            run health checks (verify mode)
+  agent-dispatch-doctor --install  symlink entrypoints into ~/.local/bin
+  agent-dispatch-doctor -h|--help  show this help
+
+Verify mode checks:
+  1. Each entrypoint is on PATH and executable
+  2. lib/ is NOT on PATH (guard for future lib extraction)
+  3. codex is on PATH (WARN if missing — codex-runtime dispatch unavailable)
+  4. agy is on PATH (WARN if missing — agy-runtime dispatch/review unavailable)
+  5. If agy present: probe 'agy models' works
+
+Exit codes (both modes): 0 = all PASS, 1 = any FAIL, 2 = any WARN (and no FAIL).
